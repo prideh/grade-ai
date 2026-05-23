@@ -33,7 +33,6 @@ import FlashOnIcon from '@mui/icons-material/FlashOn';
 export default function Dashboard() {
   const router = useRouter();
   const [model, setModel] = useState<'gemini-3.5-flash' | 'gemini-3.1-pro'>('gemini-3.5-flash');
-  const [apiKey, setApiKey] = useState<string>('');
 
   // File upload states
   const [studentFile, setStudentFile] = useState<File | null>(null);
@@ -94,7 +93,6 @@ export default function Dashboard() {
 
       const res = await fetch('/api/correct', {
         method: 'POST',
-        headers: apiKey ? { Authorization: `Bearer ${apiKey}` } : {},
         body: formData,
       });
 
@@ -519,24 +517,6 @@ export default function Dashboard() {
                       </Box>
                     </Stack>
                   </RadioGroup>
-                </Stack>
-
-                {/* Optional API Key Input */}
-                <Stack spacing={1}>
-                  <Typography variant="subtitle2" sx={{ fontWeight: 650, color: 'text.primary' }}>
-                    Gemini API-Key (Optionaler Override)
-                  </Typography>
-                  <TextField
-                    type="password"
-                    placeholder="AIzaSy..."
-                    value={apiKey}
-                    onChange={(e) => setApiKey(e.target.value)}
-                    size="small"
-                    fullWidth
-                  />
-                  <Typography variant="caption" sx={{ color: 'text.secondary', fontWeight: 500 }}>
-                    Wird nur verwendet, um den .env.local Key temporär im Browser zu überschreiben.
-                  </Typography>
                 </Stack>
 
                 {/* Start Button */}

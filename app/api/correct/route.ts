@@ -7,15 +7,8 @@ export async function POST(request: Request) {
     const studentExam = formData.get('studentExam') as File | null;
     const rubric = formData.get('rubric') as File | string | null;
     const model = (formData.get('model') as string) || 'gemini-3.5-flash';
-    // Retrieve API key from environment variable or client-side Authorization header
-    let apiKey = process.env.GEMINI_API_KEY;
-    const authHeader = request.headers.get('Authorization');
-    if (authHeader && authHeader.startsWith('Bearer ')) {
-      const clientKey = authHeader.substring(7).trim();
-      if (clientKey) {
-        apiKey = clientKey;
-      }
-    }
+    // Retrieve API key strictly from environment variable (.env.local)
+    const apiKey = process.env.GEMINI_API_KEY;
 
     // Verify we have an API key configured
     if (!apiKey) {
