@@ -4,6 +4,7 @@ import * as React from 'react';
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
+import { slugify } from '../../lib/slugify';
 import {
   Box,
   Container,
@@ -101,12 +102,6 @@ export default function Dashboard() {
 
       const result = await res.json();
       sessionStorage.setItem('gradingResult', JSON.stringify(result));
-
-      const slugify = (text: string) =>
-        text
-          .toLowerCase()
-          .replace(/[^a-z0-9]+/g, '-')
-          .replace(/(^-|-$)/g, '');
 
       const slug = result.schuelerName ? slugify(result.schuelerName) : 'max-mustermann';
       router.push(`/correct/${slug}`);
