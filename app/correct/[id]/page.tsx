@@ -1,0 +1,1260 @@
+'use client';
+
+import * as React from 'react';
+import { useState, useEffect } from 'react';
+import Link from 'next/link';
+import { useParams } from 'next/navigation';
+import {
+  Box,
+  Typography,
+  Button,
+  Card,
+  CardContent,
+  Stack,
+  TextField,
+  Divider,
+  Chip,
+  Snackbar,
+  Alert,
+  Tabs,
+  Tab,
+  useTheme,
+  CircularProgress,
+} from '@mui/material';
+import ArrowBackIcon from '@mui/icons-material/ArrowBack';
+import PrintIcon from '@mui/icons-material/Print';
+import SaveIcon from '@mui/icons-material/Save';
+import CheckCircleIcon from '@mui/icons-material/CheckCircle';
+import WarningIcon from '@mui/icons-material/Warning';
+import ErrorIcon from '@mui/icons-material/Error';
+import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome';
+
+import { ExamCorrectionResult } from '../../../lib/gemini';
+import { MOCK_EXAM_RESULT } from '../../../lib/mockData';
+
+export default function CorrectWorkspace() {
+  const params = useParams();
+  const id = params?.id;
+  const theme = useTheme();
+
+  const [data, setData] = useState<ExamCorrectionResult | null>(null);
+  const [activeTaskIndex, setActiveTaskIndex] = useState<number>(0);
+  const [showSaveToast, setShowSaveToast] = useState<boolean>(false);
+
+  // Initialize data from sessionStorage or fall back to a high-quality default
+  useEffect(() => {
+    const stored = sessionStorage.getItem('gradingResult');
+    let loadedFromStore = false;
+
+    if (stored) {
+      try {
+        const parsed = JSON.parse(stored);
+        // Lenient check: if the stored object is a valid grading result,
+        // we prioritize and load it to prevent data loss or fallback to mock exam.
+        if (parsed && parsed.schuelerName && Array.isArray(parsed.aufgaben)) {
+          setTimeout(() => {
+            setData(parsed);
+          }, 0);
+          loadedFromStore = true;
+        }
+      } catch (e) {
+        console.error('Failed to parse stored grading result', e);
+      }
+    }
+
+    if (!loadedFromStore) {
+      const formattedName = id
+        ? String(id)
+            .split('-')
+            .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+            .join(' ')
+        : 'Max Mustermann';
+
+      const newResult = {
+        ...MOCK_EXAM_RESULT,
+        schuelerName: formattedName,
+      };
+
+      sessionStorage.setItem('gradingResult', JSON.stringify(newResult));
+      setTimeout(() => {
+        setData(newResult);
+      }, 0);
+    }
+  }, [id]);
+
+  if (!data) {
+    return (
+      <Box
+        sx={{
+          minHeight: '100vh',
+          background: '#f8fafc',
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          justifyContent: 'center',
+          gap: '16px',
+        }}
+      >
+        <CircularProgress size={40} thickness={4} sx={{ color: 'primary.main' }} />
+        <Typography variant="body2" sx={{ color: 'text.secondary' }}>
+          Korrektur-Daten werden geladen...
+        </Typography>
+      </Box>
+    );
+  }
+
+  // Handle inline point adjustments by the teacher
+  const handlePointChange = (taskIndex: number, stepIndex: number, newPoints: number) => {
+    if (!data) return;
+
+    const updatedTasks = [...data.aufgaben];
+    const task = { ...updatedTasks[taskIndex] };
+    const steps = [...task.schritte];
+    const step = { ...steps[stepIndex] };
+
+    // Ensure points are clamped between 0 and max
+    const clamped = Math.max(0, Math.min(step.maximalPunkte, newPoints));
+    step.erreichtePunkte = clamped;
+    steps[stepIndex] = step;
+
+    // Recalculate task total
+    task.schritte = steps;
+    task.erzieltePunkte = steps.reduce((sum, s) => sum + s.erreichtePunkte, 0);
+    updatedTasks[taskIndex] = task;
+
+    // Recalculate total score
+    const totalScore = updatedTasks.reduce((sum, t) => sum + t.erzieltePunkte, 0);
+
+    // Recalculate school grade dynamically based on points percentage
+    const maxScore = data.gesamtmaximalPunkte;
+    const pct = (totalScore / maxScore) * 100;
+    let newGrade = '6';
+    if (pct >= 95) newGrade = '1';
+    else if (pct >= 90) newGrade = '1-';
+    else if (pct >= 85) newGrade = '2+';
+    else if (pct >= 80) newGrade = '2';
+    else if (pct >= 75) newGrade = '2-';
+    else if (pct >= 70) newGrade = '3+';
+    else if (pct >= 65) newGrade = '3';
+    else if (pct >= 60) newGrade = '3-';
+    else if (pct >= 50) newGrade = '4';
+    else if (pct >= 40) newGrade = '4-';
+    else if (pct >= 25) newGrade = '5';
+
+    const updatedResult = {
+      ...data,
+      aufgaben: updatedTasks,
+      gesamterzieltePunkte: totalScore,
+      note: newGrade,
+    };
+
+    setData(updatedResult);
+    sessionStorage.setItem('gradingResult', JSON.stringify(updatedResult));
+  };
+
+  // Handle inline comments adjustments by the teacher
+  const handleCommentChange = (taskIndex: number, newComment: string) => {
+    if (!data) return;
+    const updatedTasks = [...data.aufgaben];
+    updatedTasks[taskIndex] = {
+      ...updatedTasks[taskIndex],
+      lehrerKommentar: newComment,
+    };
+
+    const updatedResult = {
+      ...data,
+      aufgaben: updatedTasks,
+    };
+
+    setData(updatedResult);
+    sessionStorage.setItem('gradingResult', JSON.stringify(updatedResult));
+  };
+
+  const activeTask = data.aufgaben[activeTaskIndex];
+
+  return (
+    <Box sx={{ minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
+      {/* 1. Normal Web UI View (Hidden during printing) */}
+      <Box className="no-print" sx={{ display: 'flex', flexDirection: 'column', height: '100vh' }}>
+        {/* Top Navbar */}
+        <Box
+          component="header"
+          sx={{
+            padding: '12px 24px',
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            borderBottom: '1px solid #e2e8f0',
+            background: '#ffffff',
+            height: '64px',
+            zIndex: 10,
+          }}
+        >
+          <Stack direction="row" spacing={2.5} sx={{ alignItems: 'center' }}>
+            <Link href="/dashboard" passHref style={{ textDecoration: 'none' }}>
+              <Button
+                variant="outlined"
+                size="small"
+                startIcon={<ArrowBackIcon />}
+                sx={{ color: 'text.primary', borderColor: '#e2e8f0' }}
+              >
+                Dashboard
+              </Button>
+            </Link>
+            <Divider orientation="vertical" flexItem sx={{ borderColor: '#e2e8f0' }} />
+            <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
+              <Typography variant="body2" sx={{ color: 'text.secondary' }}>
+                Schüler:
+              </Typography>
+              <Typography variant="subtitle2" sx={{ color: '#0f172a', fontWeight: 'bold' }}>
+                {data.schuelerName}
+              </Typography>
+            </Stack>
+            <Stack
+              direction="row"
+              spacing={1}
+              sx={{ display: { xs: 'none', md: 'flex' }, alignItems: 'center' }}
+            >
+              <Typography variant="body2" sx={{ color: 'text.secondary' }}>
+                Fach:
+              </Typography>
+              <Typography variant="body2" sx={{ color: 'text.primary', fontWeight: 500 }}>
+                {data.fach}
+              </Typography>
+            </Stack>
+          </Stack>
+
+          <Stack direction="row" spacing={3} sx={{ alignItems: 'center' }}>
+            <Stack direction="row" spacing={1.5} sx={{ alignItems: 'center' }}>
+              <Typography
+                variant="body2"
+                sx={{ color: 'text.secondary', display: { xs: 'none', sm: 'block' } }}
+              >
+                Gesamtpunkte:
+              </Typography>
+              <Chip
+                label={`${data.gesamterzieltePunkte.toFixed(1)} / ${data.gesamtmaximalPunkte}`}
+                sx={{
+                  fontWeight: 'bold',
+                  borderRadius: '8px',
+                  backgroundColor: '#e6f4ea',
+                  borderColor: '#a3cfbb',
+                  color: '#137333',
+                  border: '1px solid #a3cfbb',
+                }}
+              />
+            </Stack>
+
+            <Stack direction="row" spacing={1.5} sx={{ alignItems: 'center' }}>
+              <Typography
+                variant="body2"
+                sx={{ color: 'text.secondary', display: { xs: 'none', sm: 'block' } }}
+              >
+                Note:
+              </Typography>
+              <Chip
+                label={data.note}
+                sx={{
+                  fontWeight: 'bold',
+                  borderRadius: '8px',
+                  fontSize: '1rem',
+                  padding: '4px 8px',
+                  backgroundColor: '#1b77d1',
+                  color: '#ffffff',
+                }}
+              />
+            </Stack>
+
+            <Button
+              onClick={() => window.print()}
+              className="glow-button"
+              variant="contained"
+              size="small"
+              startIcon={<PrintIcon />}
+              sx={{ borderRadius: '8px', padding: '8px 16px' }}
+            >
+              Feedback drucken
+            </Button>
+          </Stack>
+        </Box>
+
+        {/* Split container layout */}
+        <Box sx={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
+          {/* Left panel: Visual Exam Sheet rendering */}
+          <Box
+            sx={{
+              flex: 1.1,
+              background: '#e2e8f0',
+              borderRight: '1px solid #cbd5e1',
+              padding: '24px',
+              overflowY: 'auto',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '20px',
+            }}
+          >
+            <Stack direction="row" sx={{ justifyContent: 'space-between', alignItems: 'center' }}>
+              <Typography variant="subtitle1" sx={{ color: 'text.primary', fontWeight: 700 }}>
+                Original Schüler-Arbeit (Multimodale Visualisierung)
+              </Typography>
+              <Typography variant="caption" sx={{ color: 'text.secondary' }}>
+                Seite 1 von 1
+              </Typography>
+            </Stack>
+
+            {/* Premium Simulated Scanned Sheet with red grading ink */}
+            <Box
+              sx={{
+                background: '#ffffff',
+                backgroundImage: 'radial-gradient(#cbd5e1 1.5px, transparent 1.5px)',
+                backgroundSize: '24px 24px',
+                color: '#0f172a',
+                borderRadius: '8px',
+                padding: '30px',
+                minHeight: '680px',
+                boxShadow: '0 4px 12px rgba(0, 0, 0, 0.08)',
+                position: 'relative',
+                fontFamily: '"Architects Daughter", "Comic Sans MS", cursive, sans-serif',
+                border: '1px solid #cbd5e1',
+                overflow: 'hidden',
+              }}
+            >
+              {/* Paper line markers */}
+              <Box
+                sx={{
+                  position: 'absolute',
+                  top: 0,
+                  left: '40px',
+                  width: '1px',
+                  height: '100%',
+                  background: 'rgba(239, 68, 68, 0.15)',
+                  pointerEvents: 'none',
+                }}
+              />
+
+              {/* Student Header details */}
+              <Box
+                sx={{
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  borderBottom: '1px solid #94a3b8',
+                  paddingBottom: '10px',
+                  marginBottom: '30px',
+                  fontFamily: 'sans-serif',
+                  fontSize: '0.85rem',
+                  color: '#475569',
+                  fontWeight: 500,
+                }}
+              >
+                <Box>Name: {data.schuelerName}</Box>
+                <Box>Klasse: 9b</Box>
+                <Box>Datum: {data.datum}</Box>
+              </Box>
+
+              {/* Hand written task 1 section */}
+              <Box
+                onClick={() => setActiveTaskIndex(0)}
+                sx={{
+                  position: 'relative',
+                  padding: '16px',
+                  borderRadius: '8px',
+                  marginBottom: '24px',
+                  cursor: 'pointer',
+                  border: activeTaskIndex === 0 ? '1px dashed #1b77d1' : '1px solid transparent',
+                  background: activeTaskIndex === 0 ? 'rgba(27, 119, 209, 0.05)' : 'transparent',
+                  '&:hover': {
+                    background: 'rgba(27, 119, 209, 0.02)',
+                  },
+                }}
+              >
+                <Typography
+                  sx={{
+                    fontFamily: 'sans-serif',
+                    fontSize: '0.95rem',
+                    fontWeight: 'bold',
+                    color: '#1e293b',
+                    marginBottom: '8px',
+                  }}
+                >
+                  Aufgabe 1: Lineare Gleichungen
+                </Typography>
+                <Typography
+                  component="div"
+                  sx={{
+                    fontSize: '1.25rem',
+                    letterSpacing: '0.05em',
+                    lineHeight: 1.8,
+                    color: '#334155',
+                    fontFamily: 'inherit',
+                  }}
+                >
+                  4x - 12 = 8 <br />
+                  4x = 16
+                  {/* Digital Red Ink annotation for step 1 error */}
+                  <Box
+                    component="span"
+                    sx={{
+                      color: 'error.main',
+                      marginLeft: '20px',
+                      fontSize: '0.9rem',
+                      border: `1.5px solid ${theme.palette.error.main}`,
+                      padding: '2px 8px',
+                      borderRadius: '4px',
+                      fontFamily: 'sans-serif',
+                      fontWeight: 'bold',
+                      display: 'inline-block',
+                      transform: 'rotate(-2deg)',
+                      backgroundColor: 'rgba(239, 68, 68, 0.05)',
+                    }}
+                  >
+                    falsches Vorzeichen! (-12 subtrahiert statt addiert) ❌ (0/1 P.)
+                  </Box>
+                  <br />x = 4{/* Digital Red Ink annotation for step 2 Folgenfehler */}
+                  <Box
+                    component="span"
+                    sx={{
+                      color: 'warning.main',
+                      marginLeft: '20px',
+                      fontSize: '0.9rem',
+                      border: `1.5px solid ${theme.palette.warning.main}`,
+                      padding: '2px 8px',
+                      borderRadius: '4px',
+                      fontFamily: 'sans-serif',
+                      fontWeight: 'bold',
+                      display: 'inline-block',
+                      transform: 'rotate(1deg)',
+                      backgroundColor: 'rgba(245, 158, 11, 0.05)',
+                    }}
+                  >
+                    Folgenfehler berücksichtigt! Richtig geteilt. ✔️ (2/2 P.)
+                  </Box>
+                </Typography>
+
+                {/* Red ink point marker */}
+                <Box
+                  sx={{
+                    position: 'absolute',
+                    right: '15px',
+                    top: '15px',
+                    fontSize: '1.4rem',
+                    color: 'error.main',
+                    fontWeight: 'bold',
+                    border: '3px double #ef4444',
+                    width: '56px',
+                    height: '56px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    borderRadius: '50%',
+                    transform: 'rotate(-10deg)',
+                    pointerEvents: 'none',
+                  }}
+                >
+                  {data.aufgaben[0].erzieltePunkte.toFixed(1)}/3
+                </Box>
+              </Box>
+
+              {/* Hand written task 2 section */}
+              <Box
+                onClick={() => setActiveTaskIndex(1)}
+                sx={{
+                  position: 'relative',
+                  padding: '16px',
+                  borderRadius: '8px',
+                  marginBottom: '24px',
+                  cursor: 'pointer',
+                  border: activeTaskIndex === 1 ? '1px dashed #1b77d1' : '1px solid transparent',
+                  background: activeTaskIndex === 1 ? 'rgba(27, 119, 209, 0.05)' : 'transparent',
+                  '&:hover': {
+                    background: 'rgba(27, 119, 209, 0.02)',
+                  },
+                }}
+              >
+                <Typography
+                  sx={{
+                    fontFamily: 'sans-serif',
+                    fontSize: '0.95rem',
+                    fontWeight: 'bold',
+                    color: '#1e293b',
+                    marginBottom: '8px',
+                  }}
+                >
+                  Aufgabe 2: Quadratische Gleichungen
+                </Typography>
+                <Typography
+                  component="div"
+                  sx={{
+                    fontSize: '1.25rem',
+                    letterSpacing: '0.05em',
+                    lineHeight: 1.8,
+                    color: '#334155',
+                    fontFamily: 'inherit',
+                  }}
+                >
+                  x² - 6x + 8 = 0 <br />x = [ 6 ± √(36 - 4 · 1 ·{' '}
+                  <Box component="span" sx={{ textDecoration: 'underline double #ef4444' }}>
+                    7
+                  </Box>
+                  ) ] / 2{/* Digital Red Ink copy error */}
+                  <Box
+                    component="span"
+                    sx={{
+                      color: 'error.main',
+                      marginLeft: '20px',
+                      fontSize: '0.95rem',
+                      fontFamily: 'sans-serif',
+                      fontWeight: 'bold',
+                      display: 'inline-block',
+                      transform: 'rotate(-0.5deg)',
+                    }}
+                  >
+                    ← Abschreibfehler! c = 7 statt 8 ❌ (-0.5 P.)
+                  </Box>
+                  <br />
+                  x = [ 6 ± √8 ] / 2 <br />x ≈ (6 ± 2.83) / 2
+                  <Box
+                    component="span"
+                    sx={{
+                      color: 'warning.main',
+                      marginLeft: '20px',
+                      fontSize: '0.9rem',
+                      border: `1.5px solid ${theme.palette.warning.main}`,
+                      padding: '2px 8px',
+                      borderRadius: '4px',
+                      fontFamily: 'sans-serif',
+                      fontWeight: 'bold',
+                      display: 'inline-block',
+                      transform: 'rotate(1.5deg)',
+                      backgroundColor: 'rgba(245, 158, 11, 0.05)',
+                    }}
+                  >
+                    Folgefehler korrekt weitergerechnet! ✔️ (4/4 P.)
+                  </Box>
+                </Typography>
+
+                {/* Red ink point marker */}
+                <Box
+                  sx={{
+                    position: 'absolute',
+                    right: '15px',
+                    top: '15px',
+                    fontSize: '1.4rem',
+                    color: 'error.main',
+                    fontWeight: 'bold',
+                    border: '3px double #ef4444',
+                    width: '56px',
+                    height: '56px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    borderRadius: '50%',
+                    transform: 'rotate(-5deg)',
+                    pointerEvents: 'none',
+                  }}
+                >
+                  {data.aufgaben[1].erzieltePunkte.toFixed(1)}/5
+                </Box>
+              </Box>
+
+              {/* Hand written task 3 section */}
+              <Box
+                onClick={() => setActiveTaskIndex(2)}
+                sx={{
+                  position: 'relative',
+                  padding: '16px',
+                  borderRadius: '8px',
+                  cursor: 'pointer',
+                  border: activeTaskIndex === 2 ? '1px dashed #1b77d1' : '1px solid transparent',
+                  background: activeTaskIndex === 2 ? 'rgba(27, 119, 209, 0.05)' : 'transparent',
+                  '&:hover': {
+                    background: 'rgba(27, 119, 209, 0.02)',
+                  },
+                }}
+              >
+                <Typography
+                  sx={{
+                    fontFamily: 'sans-serif',
+                    fontSize: '0.95rem',
+                    fontWeight: 'bold',
+                    color: '#1e293b',
+                    marginBottom: '8px',
+                  }}
+                >
+                  Aufgabe 3: Biologie (Photosynthese)
+                </Typography>
+                <Typography
+                  component="div"
+                  sx={{
+                    fontSize: '1.25rem',
+                    letterSpacing: '0.05em',
+                    lineHeight: 1.8,
+                    color: '#334155',
+                    fontFamily: 'inherit',
+                    maxWidth: '85%',
+                  }}
+                >
+                  Pflanzen brauchen Licht, Wasser und{' '}
+                  <Box component="span" sx={{ textDecoration: 'underline wavy #ef4444' }}>
+                    Kolendioxid
+                  </Box>
+                  , um Sauerstoff und Zucker herzustellen. Das machen sie in den Chloroplasten.
+                  {/* Orthography check overlay */}
+                  <Box
+                    component="span"
+                    sx={{
+                      color: 'error.main',
+                      marginLeft: '10px',
+                      fontSize: '0.95rem',
+                      fontFamily: 'sans-serif',
+                      fontWeight: 'bold',
+                      display: 'inline-block',
+                      transform: 'rotate(1deg)',
+                    }}
+                  >
+                    ← R: Kohlendioxid mit h! ❌ (-2 P.)
+                  </Box>
+                </Typography>
+
+                {/* Red ink point marker */}
+                <Box
+                  sx={{
+                    position: 'absolute',
+                    right: '15px',
+                    top: '15px',
+                    fontSize: '1.4rem',
+                    color: 'error.main',
+                    fontWeight: 'bold',
+                    border: '3px double #ef4444',
+                    width: '56px',
+                    height: '56px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    borderRadius: '50%',
+                    transform: 'rotate(5deg)',
+                    pointerEvents: 'none',
+                  }}
+                >
+                  {data.aufgaben[2].erzieltePunkte.toFixed(1)}/8
+                </Box>
+              </Box>
+            </Box>
+          </Box>
+
+          {/* Right panel: AI Grading & Feedback Workspace */}
+          <Box
+            sx={{
+              flex: 1,
+              background: 'background.default',
+              display: 'flex',
+              flexDirection: 'column',
+              overflow: 'hidden',
+            }}
+          >
+            {/* Task selector Tabs */}
+            <Tabs
+              value={activeTaskIndex}
+              onChange={(_, val) => setActiveTaskIndex(val)}
+              variant="fullWidth"
+              sx={{
+                background: '#ffffff',
+                borderBottom: '1px solid #e2e8f0',
+                '& .MuiTabs-indicator': {
+                  backgroundColor: '#1b77d1',
+                  height: '3px',
+                },
+                '& .MuiTab-root': {
+                  color: 'text.secondary',
+                  fontWeight: 600,
+                  fontSize: '0.85rem',
+                  borderRight: '1px solid #e2e8f0',
+                  textTransform: 'none',
+                  minHeight: '52px',
+                  transition: 'all 0.2s ease',
+                  '&.Mui-selected': {
+                    color: '#1b77d1',
+                    backgroundColor: '#f8fafc',
+                    fontWeight: 800,
+                  },
+                  '&:last-of-type': {
+                    borderRight: 'none',
+                  },
+                },
+              }}
+            >
+              {data.aufgaben.map((t, idx) => (
+                <Tab
+                  key={t.aufgabeId}
+                  label={
+                    <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
+                      <Typography variant="body2" sx={{ fontWeight: 'inherit' }}>
+                        Aufg. {t.aufgabeId}
+                      </Typography>
+                      <Chip
+                        label={`${t.erzieltePunkte.toFixed(1)} P.`}
+                        size="small"
+                        sx={{
+                          height: '20px',
+                          fontSize: '0.75rem',
+                          fontWeight: 700,
+                          backgroundColor: activeTaskIndex === idx ? '#e3f2fd' : '#f1f5f9',
+                          color: activeTaskIndex === idx ? '#1b77d1' : 'text.secondary',
+                          border: activeTaskIndex === idx ? '1px solid #1b77d1' : 'none',
+                          transition: 'all 0.2s ease',
+                        }}
+                      />
+                    </Stack>
+                  }
+                />
+              ))}
+            </Tabs>
+
+            {/* Graded steps & Comments content */}
+            <Box
+              sx={{
+                flex: 1,
+                overflowY: 'auto',
+                padding: '24px',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '24px',
+              }}
+            >
+              {/* Task title and points */}
+              <Stack
+                direction="row"
+                sx={{ justifyContent: 'space-between', alignItems: 'flex-start' }}
+              >
+                <Box>
+                  <Typography
+                    variant="caption"
+                    sx={{ color: 'primary.main', fontWeight: 650, letterSpacing: '0.05em' }}
+                  >
+                    AKTIVE AUFGABE
+                  </Typography>
+                  <Typography
+                    variant="h5"
+                    component="h3"
+                    sx={{ fontWeight: 700, marginTop: '4px' }}
+                  >
+                    {activeTask.titel}
+                  </Typography>
+                </Box>
+
+                <Chip
+                  label={
+                    activeTask.status === 'Folgenfehler'
+                      ? 'Folgenfehler erkannt'
+                      : activeTask.status
+                  }
+                  color={
+                    activeTask.status === 'Korrekt'
+                      ? 'success'
+                      : activeTask.status === 'Folgenfehler'
+                        ? 'warning'
+                        : 'error'
+                  }
+                  icon={
+                    activeTask.status === 'Korrekt' ? (
+                      <CheckCircleIcon />
+                    ) : activeTask.status === 'Folgenfehler' ? (
+                      <WarningIcon />
+                    ) : (
+                      <ErrorIcon />
+                    )
+                  }
+                  sx={{ fontWeight: 'bold' }}
+                />
+              </Stack>
+
+              {/* Steps breakdown list */}
+              <Stack spacing={2}>
+                <Typography variant="subtitle2" sx={{ color: 'text.secondary', fontWeight: 600 }}>
+                  Teilschritte & Bepunktung
+                </Typography>
+
+                {activeTask.schritte.map((s, sIdx) => (
+                  <Card
+                    key={s.schrittIndex}
+                    sx={{
+                      borderRadius: '12px',
+                      borderLeft: `4px solid ${
+                        s.fehlerTyp === 'KeinFehler'
+                          ? theme.palette.success.main
+                          : s.fehlerTyp === 'Folgenfehler'
+                            ? theme.palette.warning.main
+                            : theme.palette.error.main
+                      }`,
+                      backgroundColor: '#ffffff',
+                      border: '1px solid #e2e8f0',
+                      boxShadow: '0 1px 3px rgba(0, 0, 0, 0.05)',
+                    }}
+                  >
+                    <CardContent sx={{ padding: '16px !important' }}>
+                      <Stack spacing={1.5}>
+                        <Stack
+                          direction="row"
+                          sx={{ justifyContent: 'space-between', alignItems: 'center' }}
+                        >
+                          <Typography
+                            variant="subtitle2"
+                            sx={{
+                              color: 'text.primary',
+                              fontWeight: 700,
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: 1,
+                            }}
+                          >
+                            Schritt {s.schrittIndex}:
+                            <Box
+                              component="code"
+                              sx={{
+                                fontFamily: 'monospace',
+                                backgroundColor: '#f1f5f9',
+                                border: '1px solid #cbd5e1',
+                                padding: '2px 8px',
+                                borderRadius: '4px',
+                                fontSize: '0.9rem',
+                                color: '#0f172a',
+                              }}
+                            >
+                              {s.schrittText}
+                            </Box>
+                          </Typography>
+
+                          {/* Interactive point selector */}
+                          <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
+                            <Typography variant="caption" sx={{ color: 'text.secondary' }}>
+                              Punkte:
+                            </Typography>
+                            <TextField
+                              type="number"
+                              size="small"
+                              slotProps={{
+                                htmlInput: {
+                                  step: 0.5,
+                                  min: 0,
+                                  max: s.maximalPunkte,
+                                  style: {
+                                    textAlign: 'center',
+                                    fontWeight: 'bold',
+                                    width: '50px',
+                                    padding: '4px 6px',
+                                  },
+                                },
+                              }}
+                              value={s.erreichtePunkte}
+                              onChange={(e) =>
+                                handlePointChange(
+                                  activeTaskIndex,
+                                  sIdx,
+                                  parseFloat(e.target.value) || 0
+                                )
+                              }
+                              sx={{
+                                '& .MuiOutlinedInput-root': {
+                                  backgroundColor: '#ffffff',
+                                  borderRadius: '6px',
+                                },
+                              }}
+                            />
+                            <Typography variant="body2" sx={{ color: 'text.secondary' }}>
+                              / {s.maximalPunkte}
+                            </Typography>
+                          </Stack>
+                        </Stack>
+
+                        <Typography
+                          variant="body2"
+                          sx={{ color: 'text.secondary', lineHeight: 1.5 }}
+                        >
+                          {s.begruendung}
+                        </Typography>
+
+                        <Box>
+                          <Chip
+                            label={
+                              s.fehlerTyp === 'KeinFehler'
+                                ? 'Korrekt'
+                                : s.fehlerTyp === 'Folgenfehler'
+                                  ? 'Folgenfehler (Teilpunkte)'
+                                  : s.fehlerTyp === 'Rechenfehler'
+                                    ? 'Rechenfehler'
+                                    : 'Fehler'
+                            }
+                            size="small"
+                            color={
+                              s.fehlerTyp === 'KeinFehler'
+                                ? 'success'
+                                : s.fehlerTyp === 'Folgenfehler'
+                                  ? 'warning'
+                                  : 'error'
+                            }
+                            variant="outlined"
+                            sx={{ height: '22px', fontSize: '0.75rem', fontWeight: 600 }}
+                          />
+                        </Box>
+                      </Stack>
+                    </CardContent>
+                  </Card>
+                ))}
+              </Stack>
+
+              {/* Teacher Comments Editor */}
+              <Stack spacing={1}>
+                <Typography variant="subtitle2" sx={{ color: 'text.secondary', fontWeight: 600 }}>
+                  Lehrer-Kommentar zu dieser Aufgabe
+                </Typography>
+                <TextField
+                  multiline
+                  rows={3}
+                  value={activeTask.lehrerKommentar}
+                  onChange={(e) => handleCommentChange(activeTaskIndex, e.target.value)}
+                  fullWidth
+                  sx={{
+                    '& .MuiOutlinedInput-root': {
+                      backgroundColor: '#ffffff',
+                    },
+                  }}
+                />
+              </Stack>
+
+              {/* Student Assistance view */}
+              <Card
+                sx={{
+                  background: '#f4f3ff',
+                  borderColor: '#938eef',
+                  boxShadow: 'none',
+                }}
+              >
+                <CardContent sx={{ padding: '20px !important' }}>
+                  <Typography
+                    variant="subtitle1"
+                    sx={{
+                      color: '#0f172a',
+                      marginBottom: '12px',
+                      fontWeight: 700,
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '8px',
+                    }}
+                  >
+                    <AutoAwesomeIcon sx={{ color: 'secondary.main', fontSize: '1.2rem' }} />{' '}
+                    Schüler-Hilfekarte (wird gedruckt)
+                  </Typography>
+                  <Stack spacing={1.5} sx={{ fontSize: '0.9rem', lineHeight: 1.4 }}>
+                    <Box>
+                      <Box component="strong" sx={{ color: 'secondary.dark' }}>
+                        Hilfreicher Tipp:{' '}
+                      </Box>
+                      <Box component="span" sx={{ color: 'text.secondary' }}>
+                        {data.schuelerFeedback.hilfreicherTipp}
+                      </Box>
+                    </Box>
+                    <Box>
+                      <Box component="strong" sx={{ color: 'success.main' }}>
+                        Übungs-Empfehlung:{' '}
+                      </Box>
+                      <Box component="span" sx={{ color: 'text.secondary' }}>
+                        {data.schuelerFeedback.uebungsEmpfehlung}
+                      </Box>
+                    </Box>
+                  </Stack>
+                </CardContent>
+              </Card>
+            </Box>
+
+            {/* Persistent Save status */}
+            <Box
+              sx={{
+                padding: '16px 24px',
+                borderTop: '1px solid #e2e8f0',
+                background: '#ffffff',
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+              }}
+            >
+              <Typography
+                variant="caption"
+                sx={{
+                  color: 'success.main',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  fontWeight: 600,
+                }}
+              >
+                <Box
+                  component="span"
+                  sx={{
+                    width: 8,
+                    height: 8,
+                    borderRadius: '50%',
+                    backgroundColor: 'success.main',
+                    display: 'inline-block',
+                  }}
+                />
+                Änderungen automatisch gesichert
+              </Typography>
+              <Button
+                onClick={() => {
+                  sessionStorage.setItem('gradingResult', JSON.stringify(data));
+                  setShowSaveToast(true);
+                }}
+                className="glow-button"
+                variant="contained"
+                size="small"
+                startIcon={<SaveIcon />}
+                sx={{ borderRadius: '8px', padding: '8px 16px' }}
+              >
+                Änderungen speichern
+              </Button>
+            </Box>
+          </Box>
+        </Box>
+      </Box>
+
+      {/* Toast Notification */}
+      <Snackbar
+        open={showSaveToast}
+        autoHideDuration={3000}
+        onClose={() => setShowSaveToast(false)}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
+      >
+        <Alert
+          onClose={() => setShowSaveToast(false)}
+          severity="success"
+          variant="filled"
+          sx={{
+            borderRadius: '10px',
+            boxShadow: '0 10px 25px -5px rgba(0, 0, 0, 0.3), 0 0 15px rgba(16, 185, 129, 0.4)',
+            fontWeight: 600,
+          }}
+        >
+          Korrekturen erfolgreich gespeichert!
+        </Alert>
+      </Snackbar>
+
+      {/* 2. Hidden HTML A4 Printable View (Rendered only on window.print()) */}
+      <div className="print-only print-page" style={{ fontFamily: 'sans-serif' }}>
+        <div
+          style={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'flex-start',
+            borderBottom: '2px solid #0f172a',
+            paddingBottom: '16px',
+            marginBottom: '20px',
+          }}
+        >
+          <div>
+            <h1 style={{ fontSize: '20pt', margin: 0, fontWeight: 'bold', color: '#0f172a' }}>
+              KlausurKI - Schüler-Feedbackbericht
+            </h1>
+            <p
+              style={{
+                fontSize: '11pt',
+                color: '#475569',
+                fontWeight: 'bold',
+                margin: '6px 0 0 0',
+              }}
+            >
+              Fach: {data.fach} | Klasse: 9b
+            </p>
+          </div>
+          <div style={{ textAlign: 'right', fontSize: '10pt', color: '#334155' }}>
+            <strong>Schüler: {data.schuelerName}</strong>
+            <br />
+            Datum: {data.datum}
+            <br />
+            Ergebnis:{' '}
+            <strong style={{ color: '#0f172a' }}>
+              {data.gesamterzieltePunkte.toFixed(1)} / {data.gesamtmaximalPunkte} Punkte
+            </strong>{' '}
+            (Note: <strong>{data.note}</strong>)
+          </div>
+        </div>
+
+        <h3
+          style={{
+            fontSize: '13pt',
+            borderBottom: '1px solid #cbd5e1',
+            paddingBottom: '4px',
+            marginTop: '24px',
+            color: '#0f172a',
+          }}
+        >
+          Notenspiegel & Bepunktung
+        </h3>
+        <table
+          style={{
+            width: '100%',
+            borderCollapse: 'collapse',
+            marginTop: '10px',
+            fontSize: '10pt',
+          }}
+        >
+          <thead>
+            <tr style={{ backgroundColor: '#f8fafc', borderBottom: '1.5px solid #cbd5e1' }}>
+              <th style={{ padding: '8px 12px', textAlign: 'left' }}>Aufgabe</th>
+              <th style={{ padding: '8px 12px', textAlign: 'center' }}>Erreichte Punkte</th>
+              <th style={{ padding: '8px 12px', textAlign: 'center' }}>Maximalpunkte</th>
+              <th style={{ padding: '8px 12px', textAlign: 'left' }}>Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            {data.aufgaben.map((t) => (
+              <tr key={t.aufgabeId} style={{ borderBottom: '1px solid #e2e8f0' }}>
+                <td style={{ padding: '8px 12px' }}>{t.titel}</td>
+                <td style={{ padding: '8px 12px', textAlign: 'center' }}>
+                  <strong>{t.erzieltePunkte.toFixed(1)}</strong>
+                </td>
+                <td style={{ padding: '8px 12px', textAlign: 'center' }}>{t.maximalPunkte}</td>
+                <td style={{ padding: '8px 12px' }}>
+                  <span
+                    style={{
+                      color:
+                        t.status === 'Korrekt'
+                          ? 'green'
+                          : t.status === 'Folgenfehler'
+                            ? 'orange'
+                            : 'red',
+                      fontWeight: 'bold',
+                    }}
+                  >
+                    {t.status === 'Folgenfehler' ? 'Folgenfehler berücksichtigt' : t.status}
+                  </span>
+                </td>
+              </tr>
+            ))}
+            <tr
+              style={{
+                backgroundColor: '#f1f5f9',
+                fontWeight: 'bold',
+                borderTop: '1.5px solid #cbd5e1',
+              }}
+            >
+              <td style={{ padding: '10px 12px' }}>GESAMT</td>
+              <td style={{ padding: '10px 12px', textAlign: 'center' }}>
+                {data.gesamterzieltePunkte.toFixed(1)}
+              </td>
+              <td style={{ padding: '10px 12px', textAlign: 'center' }}>
+                {data.gesamtmaximalPunkte}
+              </td>
+              <td style={{ padding: '10px 12px' }}>Note: {data.note}</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <h3
+          style={{
+            fontSize: '13pt',
+            borderBottom: '1px solid #cbd5e1',
+            paddingBottom: '4px',
+            marginTop: '30px',
+            color: '#0f172a',
+          }}
+        >
+          Detailliertes Gutachten & Hinweise der Lehrkraft
+        </h3>
+        {data.aufgaben.map((t) => (
+          <div key={t.aufgabeId} style={{ marginTop: '16px', pageBreakInside: 'avoid' }}>
+            <h4 style={{ fontSize: '11pt', color: '#0f172a', margin: '0 0 4px 0' }}>{t.titel}</h4>
+            <p
+              style={{
+                fontStyle: 'italic',
+                color: '#475569',
+                fontSize: '9.5pt',
+                margin: '4px 0 8px 0',
+              }}
+            >
+              Schülerlösung: {t.schuelerAntwort}
+            </p>
+            <p style={{ fontSize: '10pt', color: '#0f172a', lineHeight: 1.4, margin: 0 }}>
+              <strong>Korrekturkommentar: </strong>
+              {t.lehrerKommentar}
+            </p>
+          </div>
+        ))}
+
+        <div
+          style={{
+            marginTop: '32px',
+            border: '1.5px solid #cbd5e1',
+            borderRadius: '8px',
+            padding: '16px',
+            pageBreakInside: 'avoid',
+            backgroundColor: '#f8fafc',
+          }}
+        >
+          <h3
+            style={{
+              fontSize: '12pt',
+              margin: '0 0 12px 0',
+              color: '#0f172a',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+            }}
+          >
+            🎯 Individueller Lern- und Übungsplan
+          </h3>
+
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px' }}>
+            <div>
+              <strong style={{ color: '#0f172a', fontSize: '9.5pt' }}>Deine Stärken:</strong>
+              <ul
+                style={{ margin: '6px 0 0 16px', padding: 0, fontSize: '9.5pt', color: '#334155' }}
+              >
+                {data.schuelerFeedback.staerken.map((s, i) => (
+                  <li key={i} style={{ marginBottom: '4px' }}>
+                    {s}
+                  </li>
+                ))}
+              </ul>
+            </div>
+            <div>
+              <strong style={{ color: '#0f172a', fontSize: '9.5pt' }}>
+                Daran arbeiten wir noch:
+              </strong>
+              <ul
+                style={{ margin: '6px 0 0 16px', padding: 0, fontSize: '9.5pt', color: '#334155' }}
+              >
+                {data.schuelerFeedback.schwaechen.map((s, i) => (
+                  <li key={i} style={{ marginBottom: '4px' }}>
+                    {s}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          </div>
+
+          <div style={{ marginTop: '16px', borderTop: '1px solid #cbd5e1', paddingTop: '12px' }}>
+            <p style={{ fontSize: '10pt', lineHeight: 1.4, margin: '0 0 8px 0', color: '#0f172a' }}>
+              💡 <strong>Lern-Tipp: </strong> {data.schuelerFeedback.hilfreicherTipp}
+            </p>
+            <p style={{ fontSize: '10pt', lineHeight: 1.4, margin: 0, color: '#0f172a' }}>
+              📚 <strong>Deine Übungs-Empfehlung: </strong>{' '}
+              {data.schuelerFeedback.uebungsEmpfehlung}
+            </p>
+          </div>
+        </div>
+
+        <div
+          style={{
+            marginTop: '40px',
+            textAlign: 'center',
+            fontSize: '9pt',
+            color: '#64748b',
+            borderTop: '1px solid #cbd5e1',
+            paddingTop: '10px',
+          }}
+        >
+          Viel Erfolg beim Lernen! Mit fleißigem Üben klappt es beim nächsten Mal noch besser.
+        </div>
+      </div>
+    </Box>
+  );
+}

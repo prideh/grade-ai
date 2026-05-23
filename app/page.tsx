@@ -1,0 +1,377 @@
+'use client';
+
+import * as React from 'react';
+import Link from 'next/link';
+import { Box, Container, Typography, Button, Grid, Card, CardContent, Stack } from '@mui/material';
+import CreateIcon from '@mui/icons-material/Create';
+import FunctionsIcon from '@mui/icons-material/Functions';
+import AssessmentIcon from '@mui/icons-material/Assessment';
+import ArrowForwardIcon from '@mui/icons-material/ArrowForward';
+import SchoolIcon from '@mui/icons-material/School';
+
+export default function Home() {
+  return (
+    <Box
+      sx={{
+        minHeight: '100vh',
+        display: 'flex',
+        flexDirection: 'column',
+        justifyContent: 'space-between',
+        position: 'relative',
+        backgroundColor: '#f8fafc', // Soft light gray background
+        overflow: 'hidden',
+      }}
+    >
+      {/* Header bar */}
+      <Box
+        component="header"
+        className="no-print"
+        sx={{
+          padding: '20px 40px',
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          backgroundColor: '#ffffff',
+          borderBottom: '1px solid #e2e8f0',
+          zIndex: 10,
+        }}
+      >
+        <Stack direction="row" spacing={1.5} sx={{ alignItems: 'center' }}>
+          <Box
+            sx={{
+              width: '36px',
+              height: '36px',
+              borderRadius: '8px',
+              backgroundColor: '#1b77d1', // Escola Blue
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+            }}
+          >
+            <SchoolIcon sx={{ color: 'white', fontSize: '1.2rem' }} />
+          </Box>
+          <Typography
+            variant="h5"
+            component="span"
+            sx={{
+              fontWeight: 800,
+              letterSpacing: '-0.02em',
+              color: '#0f172a',
+            }}
+          >
+            Klausur
+            <Box component="span" sx={{ color: '#1b77d1', fontWeight: 800 }}>
+              KI
+            </Box>
+          </Typography>
+        </Stack>
+
+        <Stack direction="row" spacing={2} sx={{ alignItems: 'center' }}>
+          <Typography
+            variant="body2"
+            sx={{ color: '#666666', display: { xs: 'none', sm: 'block' }, fontWeight: 500 }}
+          >
+            Nativ Deutsch 🇩🇪
+          </Typography>
+          <Box
+            sx={{
+              fontSize: '0.8rem',
+              backgroundColor: '#f1f5f9',
+              padding: '4px 12px',
+              borderRadius: '20px',
+              border: '1px solid #e2e8f0',
+              color: '#475569',
+              fontWeight: 600,
+            }}
+          >
+            Gemini 3.5 Ready
+          </Box>
+        </Stack>
+      </Box>
+
+      {/* Hero section */}
+      <Container
+        maxWidth="lg"
+        sx={{
+          flex: 1,
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          justifyContent: 'center',
+          padding: '80px 20px',
+          textAlign: 'center',
+          zIndex: 5,
+        }}
+      >
+        <Box
+          sx={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: '8px',
+            backgroundColor: '#e6f4ea', // Soft pastel green like Escola
+            border: '1px solid #a3cfbb',
+            padding: '6px 16px',
+            borderRadius: '30px',
+            color: '#137333',
+            fontSize: '0.9rem',
+            fontWeight: 600,
+            marginBottom: '28px',
+          }}
+        >
+          ✨ Schweizer Zuverlässigkeit & moderne KI-Didaktik
+        </Box>
+
+        <Typography
+          variant="h2"
+          component="h1"
+          sx={{
+            fontSize: { xs: '2.2rem', md: '3.6rem' },
+            lineHeight: 1.2,
+            marginBottom: '24px',
+            fontWeight: 800,
+            letterSpacing: '-0.03em',
+            color: '#0f172a',
+          }}
+        >
+          Klausuren bewerten.
+          <br />
+          <Box
+            component="span"
+            sx={{
+              color: '#1b77d1', // Escola Blue
+            }}
+          >
+            Mit KI-Präzision & Folgenfehler-Logik.
+          </Box>
+        </Typography>
+
+        <Typography
+          variant="h6"
+          component="p"
+          sx={{
+            color: '#666666',
+            maxWidth: '680px',
+            lineHeight: 1.6,
+            marginBottom: '40px',
+            fontSize: { xs: '1rem', md: '1.2rem' },
+            fontWeight: 400,
+          }}
+        >
+          Die professionelle deutsche Klausur-Assistenten-Plattform, die handschriftliche Arbeiten
+          liest, Teilpunkte vergibt und mathematische Folgenfehler vollautomatisch berücksichtigt.
+          Sparen Sie bis zu 80% Ihrer Korrekturzeit.
+        </Typography>
+
+        <Stack spacing={2} sx={{ alignItems: 'center' }}>
+          <Link href="/dashboard" passHref style={{ textDecoration: 'none' }}>
+            <Button
+              variant="contained"
+              size="large"
+              endIcon={<ArrowForwardIcon />}
+              sx={{
+                fontSize: '1.1rem',
+                padding: '14px 36px',
+                borderRadius: '8px',
+                minWidth: '260px',
+                backgroundColor: '#1b77d1',
+                color: '#ffffff',
+                textTransform: 'none',
+                fontWeight: 600,
+                boxShadow: '0 2px 8px rgba(27, 119, 209, 0.2)',
+                '&:hover': {
+                  backgroundColor: '#1565c0',
+                  boxShadow: '0 4px 12px rgba(27, 119, 209, 0.3)',
+                },
+              }}
+            >
+              Zum Korrektur-Workspace
+            </Button>
+          </Link>
+          <Typography
+            variant="caption"
+            sx={{ color: '#9e9e9e', fontSize: '0.85rem', fontWeight: 500 }}
+          >
+            Sofort testen im Hybrid-Modus – kein API-Key erforderlich!
+          </Typography>
+        </Stack>
+      </Container>
+
+      {/* Feature section */}
+      <Container
+        maxWidth="lg"
+        className="no-print"
+        sx={{
+          paddingBottom: '100px',
+          zIndex: 5,
+        }}
+      >
+        <Grid container spacing={4}>
+          {/* Feature 1 */}
+          <Grid size={{ xs: 12, md: 4 }}>
+            <Card
+              sx={{
+                height: '100%',
+                display: 'flex',
+                flexDirection: 'column',
+                border: '1px solid #e2e8f0',
+                borderTop: '4px solid #1b77d1', // Accent top line like Escola
+                borderRadius: '8px',
+                backgroundColor: '#ffffff',
+                boxShadow: '0 2px 8px rgba(0,0,0,0.02)',
+              }}
+            >
+              <CardContent
+                sx={{
+                  padding: '32px',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '16px',
+                  flexGrow: 1,
+                }}
+              >
+                <Box
+                  sx={{
+                    width: '48px',
+                    height: '48px',
+                    backgroundColor: '#e3f2fd',
+                    borderRadius: '8px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    color: '#1b77d1',
+                  }}
+                >
+                  <CreateIcon sx={{ fontSize: '1.5rem' }} />
+                </Box>
+                <Typography variant="h5" component="h3" sx={{ color: '#0f172a', fontWeight: 700 }}>
+                  Präzise Handschrift-OCR
+                </Typography>
+                <Typography variant="body2" sx={{ color: '#666666', lineHeight: 1.6 }}>
+                  Liest handschriftliche Klausuren von Schülern. Die KI nutzt den Kontext des
+                  Erwartungshorizonts, um selbst krakelige oder unsaubere Schriftzüge zuverlässig zu
+                  entziffern.
+                </Typography>
+              </CardContent>
+            </Card>
+          </Grid>
+
+          {/* Feature 2 */}
+          <Grid size={{ xs: 12, md: 4 }}>
+            <Card
+              sx={{
+                height: '100%',
+                display: 'flex',
+                flexDirection: 'column',
+                border: '1px solid #e2e8f0',
+                borderTop: '4px solid #938eef', // Accent top line lavender
+                borderRadius: '8px',
+                backgroundColor: '#ffffff',
+                boxShadow: '0 2px 8px rgba(0,0,0,0.02)',
+              }}
+            >
+              <CardContent
+                sx={{
+                  padding: '32px',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '16px',
+                  flexGrow: 1,
+                }}
+              >
+                <Box
+                  sx={{
+                    width: '48px',
+                    height: '48px',
+                    backgroundColor: '#f3e5f5',
+                    borderRadius: '8px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    color: '#938eef',
+                  }}
+                >
+                  <FunctionsIcon sx={{ fontSize: '1.5rem' }} />
+                </Box>
+                <Typography variant="h5" component="h3" sx={{ color: '#0f172a', fontWeight: 700 }}>
+                  Folgenfehler & Teilpunkte
+                </Typography>
+                <Typography variant="body2" sx={{ color: '#666666', lineHeight: 1.6 }}>
+                  Erkennt Rechenfehler sofort und zieht Teilpunkte ab. Die KI rechnet nachfolgende
+                  Schritte jedoch konsequent mit dem Fehlerwert weiter, um Folgepunkte voll
+                  anzurechnen.
+                </Typography>
+              </CardContent>
+            </Card>
+          </Grid>
+
+          {/* Feature 3 */}
+          <Grid size={{ xs: 12, md: 4 }}>
+            <Card
+              sx={{
+                height: '100%',
+                display: 'flex',
+                flexDirection: 'column',
+                border: '1px solid #e2e8f0',
+                borderTop: '4px solid #ed6c02', // Accent top line orange
+                borderRadius: '8px',
+                backgroundColor: '#ffffff',
+                boxShadow: '0 2px 8px rgba(0,0,0,0.02)',
+              }}
+            >
+              <CardContent
+                sx={{
+                  padding: '32px',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '16px',
+                  flexGrow: 1,
+                }}
+              >
+                <Box
+                  sx={{
+                    width: '48px',
+                    height: '48px',
+                    backgroundColor: '#fff3e0',
+                    borderRadius: '8px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    color: '#ed6c02',
+                  }}
+                >
+                  <AssessmentIcon sx={{ fontSize: '1.5rem' }} />
+                </Box>
+                <Typography variant="h5" component="h3" sx={{ color: '#0f172a', fontWeight: 700 }}>
+                  Schüler-Feedback (PDF)
+                </Typography>
+                <Typography variant="body2" sx={{ color: '#666666', lineHeight: 1.6 }}>
+                  Erstellt per Mausklick ein ausdruckbares Feedback-Blatt für Schüler mit den
+                  erreichten Punkten, einer Auswertung ihrer Stärken/Schwächen und konkreten
+                  Übungstipps.
+                </Typography>
+              </CardContent>
+            </Card>
+          </Grid>
+        </Grid>
+      </Container>
+
+      {/* Footer */}
+      <Box
+        component="footer"
+        sx={{
+          padding: '24px 40px',
+          borderTop: '1px solid #e2e8f0',
+          textAlign: 'center',
+          backgroundColor: '#ffffff',
+          color: '#666666',
+          fontSize: '0.85rem',
+          fontWeight: 500,
+          zIndex: 5,
+        }}
+      >
+        © 2026 KlausurKI – Entwickelt im professionellen Schul-Design für den modernen Schweizer und
+        deutschen Schulalltag.
+      </Box>
+    </Box>
+  );
+}
