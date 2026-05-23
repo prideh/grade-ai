@@ -1,6 +1,5 @@
 import { NextResponse } from 'next/server';
 import { runLiveGeminiCorrection } from '../../../lib/gemini';
-import { MOCK_EXAM_RESULT } from '../../../lib/mockData';
 
 export async function POST(request: Request) {
   try {
@@ -8,12 +7,6 @@ export async function POST(request: Request) {
     const studentExam = formData.get('studentExam') as File | null;
     const rubric = formData.get('rubric') as File | string | null;
     const model = (formData.get('model') as string) || 'gemini-3.5-flash';
-    const forceMock = formData.get('forceMock') === 'true';
-
-    console.info(
-      `Received correction request. Student Exam: ${studentExam?.name || 'none'}, Model: ${model}, Force Mock: ${forceMock}`
-    );
-
     // Retrieve API key from environment variable or client-side Authorization header
     let apiKey = process.env.GEMINI_API_KEY;
     const authHeader = request.headers.get('Authorization');
@@ -24,11 +17,15 @@ export async function POST(request: Request) {
       }
     }
 
-    if (forceMock || !apiKey) {
-      console.info('Using high-fidelity German Mock Engine (Key missing or forced mock).');
-      // Simulate network delay to make the experience feel realistic
-      await new Promise((resolve) => setTimeout(resolve, 2500));
-      return NextResponse.json(MOCK_EXAM_RESULT);
+    // Verify we have an API key configured
+    if (!apiKey) {
+      return NextResponse.json(
+        {
+          error:
+            'Gemini API-Schlüssel fehlt. Bitte trage deinen API-Schlüssel in der .env.local Datei ein.',
+        },
+        { status: 401 }
+      );
     }
 
     // Otherwise, perform real Gemini multimodal evaluation!

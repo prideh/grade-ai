@@ -33,7 +33,6 @@ import FlashOnIcon from '@mui/icons-material/FlashOn';
 export default function Dashboard() {
   const router = useRouter();
   const [model, setModel] = useState<'gemini-3.5-flash' | 'gemini-3.1-pro'>('gemini-3.5-flash');
-  const [forceMock, setForceMock] = useState<boolean>(true); // Mock mode active by default for immediate testing
   const [apiKey, setApiKey] = useState<string>('');
 
   // File upload states
@@ -54,13 +53,12 @@ export default function Dashboard() {
     e.preventDefault();
     if (e.dataTransfer.files && e.dataTransfer.files[0]) {
       setStudentFile(e.dataTransfer.files[0]);
-      setForceMock(false); // Automatically disable mock mode
       setError('');
     }
   };
 
   const startAnalysis = async () => {
-    if (!studentFile && !forceMock) {
+    if (!studentFile) {
       setError('Bitte lade eine Schülerarbeit (PDF oder Bild) hoch.');
       return;
     }
@@ -93,7 +91,6 @@ export default function Dashboard() {
         formData.append('rubric', rubricText || 'Standard Mathematik-Musterlösung');
       }
       formData.append('model', model);
-      formData.append('forceMock', String(forceMock));
 
       const res = await fetch('/api/correct', {
         method: 'POST',
@@ -252,7 +249,6 @@ export default function Dashboard() {
                         const target = e.target as HTMLInputElement;
                         if (target.files && target.files[0]) {
                           setStudentFile(target.files[0]);
-                          setForceMock(false);
                           setError('');
                         }
                       };
@@ -288,35 +284,17 @@ export default function Dashboard() {
                     ) : (
                       <Stack spacing={1.5} sx={{ alignItems: 'center' }}>
                         <CloudUploadIcon sx={{ fontSize: '3rem', color: 'text.secondary' }} />
-                        {forceMock ? (
-                          <>
-                            <Typography
-                              variant="subtitle1"
-                              sx={{ fontWeight: 650, color: 'text.primary' }}
-                            >
-                              Demo-Prüfung vorausgewählt 📊
-                            </Typography>
-                            <Typography
-                              variant="body2"
-                              sx={{ color: 'text.secondary', maxWidth: '80%', lineHeight: 1.4 }}
-                            >
-                              Zieh eine Datei hierher oder klicke zum Hochladen eigener Arbeiten
-                              (schaltet Demo-Modus aus)
-                            </Typography>
-                          </>
-                        ) : (
-                          <>
-                            <Typography
-                              variant="subtitle1"
-                              sx={{ fontWeight: 650, color: 'text.primary' }}
-                            >
-                              Zieh deine Datei hierher oder klicke zum Auswählen
-                            </Typography>
-                            <Typography variant="body2" sx={{ color: 'text.secondary' }}>
-                              Unterstützt PDF, JPG, PNG • Max. 20MB
-                            </Typography>
-                          </>
-                        )}
+                        <>
+                          <Typography
+                            variant="subtitle1"
+                            sx={{ fontWeight: 650, color: 'text.primary' }}
+                          >
+                            Zieh deine Datei hierher oder klicke zum Auswählen
+                          </Typography>
+                          <Typography variant="body2" sx={{ color: 'text.secondary' }}>
+                            Unterstützt PDF, JPG, PNG • Max. 20MB
+                          </Typography>
+                        </>
                       </Stack>
                     )}
                   </Box>
@@ -383,9 +361,6 @@ export default function Dashboard() {
                           rows={4}
                           onChange={(e) => {
                             setRubricText(e.target.value);
-                            if (e.target.value.trim() !== '') {
-                              setForceMock(false);
-                            }
                           }}
                           fullWidth
                           sx={{
@@ -405,8 +380,8 @@ export default function Dashboard() {
                             id="rubricFile"
                             onChange={(e) => {
                               if (e.target.files && e.target.files[0]) {
+                                // Selected file
                                 setRubricFile(e.target.files[0]);
-                                setForceMock(false);
                               }
                             }}
                             style={{ display: 'none' }}
@@ -451,34 +426,6 @@ export default function Dashboard() {
                 </Typography>
                 <Divider />
 
-                {/* Demo Mode Toggle */}
-                <Stack spacing={1}>
-                  <FormControlLabel
-                    control={
-                      <Checkbox
-                        checked={forceMock}
-                        onChange={(e) => setForceMock(e.target.checked)}
-                        sx={{ color: 'primary.main' }}
-                      />
-                    }
-                    label={
-                      <Typography
-                        variant="subtitle2"
-                        sx={{ fontWeight: 650, color: 'text.primary' }}
-                      >
-                        Demo-Modus aktivieren
-                      </Typography>
-                    }
-                  />
-                  <Typography
-                    variant="caption"
-                    sx={{ color: 'text.secondary', display: 'block', pl: 3, fontWeight: 500 }}
-                  >
-                    Zeigt sofort ein mathematisch komplexes Folgenfehler-Korrekturergebnis ohne
-                    echten API-Schlüssel.
-                  </Typography>
-                </Stack>
-
                 {/* Model selection */}
                 <Stack spacing={1.5}>
                   <Typography variant="subtitle2" sx={{ fontWeight: 650, color: 'text.primary' }}>
@@ -488,7 +435,6 @@ export default function Dashboard() {
                     value={model}
                     onChange={(e) => {
                       setModel(e.target.value as 'gemini-3.5-flash' | 'gemini-3.1-pro');
-                      setForceMock(false);
                     }}
                   >
                     <Stack spacing={1.5}>
@@ -576,24 +522,22 @@ export default function Dashboard() {
                 </Stack>
 
                 {/* Optional API Key Input */}
-                {!forceMock && (
-                  <Stack spacing={1}>
-                    <Typography variant="subtitle2" sx={{ fontWeight: 650, color: 'text.primary' }}>
-                      Eigener Gemini API-Key (Optional)
-                    </Typography>
-                    <TextField
-                      type="password"
-                      placeholder="AIzaSy..."
-                      value={apiKey}
-                      onChange={(e) => setApiKey(e.target.value)}
-                      size="small"
-                      fullWidth
-                    />
-                    <Typography variant="caption" sx={{ color: 'text.secondary', fontWeight: 500 }}>
-                      Wird nur lokal im Browser für diese Anfrage verwendet.
-                    </Typography>
-                  </Stack>
-                )}
+                <Stack spacing={1}>
+                  <Typography variant="subtitle2" sx={{ fontWeight: 650, color: 'text.primary' }}>
+                    Gemini API-Key (Optionaler Override)
+                  </Typography>
+                  <TextField
+                    type="password"
+                    placeholder="AIzaSy..."
+                    value={apiKey}
+                    onChange={(e) => setApiKey(e.target.value)}
+                    size="small"
+                    fullWidth
+                  />
+                  <Typography variant="caption" sx={{ color: 'text.secondary', fontWeight: 500 }}>
+                    Wird nur verwendet, um den .env.local Key temporär im Browser zu überschreiben.
+                  </Typography>
+                </Stack>
 
                 {/* Start Button */}
                 <Button

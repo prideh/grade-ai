@@ -191,7 +191,7 @@ export default function Home() {
             variant="caption"
             sx={{ color: '#9e9e9e', fontSize: '0.85rem', fontWeight: 500 }}
           >
-            Sofort testen im Hybrid-Modus – kein API-Key erforderlich!
+            Professionelle Korrektur direkt über deine eigene Gemini API!
           </Typography>
         </Stack>
       </Container>
