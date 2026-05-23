@@ -30,7 +30,6 @@ import ErrorIcon from '@mui/icons-material/Error';
 import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome';
 
 import { ExamCorrectionResult } from '../../../lib/gemini';
-import { MOCK_EXAM_RESULT } from '../../../lib/mockData';
 
 export default function CorrectWorkspace() {
   const params = useParams();
@@ -40,8 +39,9 @@ export default function CorrectWorkspace() {
   const [data, setData] = useState<ExamCorrectionResult | null>(null);
   const [activeTaskIndex, setActiveTaskIndex] = useState<number>(0);
   const [showSaveToast, setShowSaveToast] = useState<boolean>(false);
+  const [noSession, setNoSession] = useState<boolean>(false);
 
-  // Initialize data from sessionStorage or fall back to a high-quality default
+  // Initialize data from sessionStorage
   useEffect(() => {
     const stored = sessionStorage.getItem('gradingResult');
     let loadedFromStore = false;
@@ -49,8 +49,6 @@ export default function CorrectWorkspace() {
     if (stored) {
       try {
         const parsed = JSON.parse(stored);
-        // Lenient check: if the stored object is a valid grading result,
-        // we prioritize and load it to prevent data loss or fallback to mock exam.
         if (parsed && parsed.schuelerName && Array.isArray(parsed.aufgaben)) {
           setTimeout(() => {
             setData(parsed);
@@ -63,24 +61,75 @@ export default function CorrectWorkspace() {
     }
 
     if (!loadedFromStore) {
-      const formattedName = id
-        ? String(id)
-            .split('-')
-            .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
-            .join(' ')
-        : 'Max Mustermann';
-
-      const newResult = {
-        ...MOCK_EXAM_RESULT,
-        schuelerName: formattedName,
-      };
-
-      sessionStorage.setItem('gradingResult', JSON.stringify(newResult));
       setTimeout(() => {
-        setData(newResult);
+        setNoSession(true);
       }, 0);
     }
   }, [id]);
+
+  if (noSession) {
+    return (
+      <Box
+        sx={{
+          minHeight: '100vh',
+          background: '#f8fafc',
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          justifyContent: 'center',
+          padding: '24px',
+          textAlign: 'center',
+        }}
+      >
+        <Box
+          sx={{
+            width: '64px',
+            height: '64px',
+            borderRadius: '16px',
+            backgroundColor: '#fee2e2',
+            color: '#ef4444',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            marginBottom: '20px',
+          }}
+        >
+          <ErrorIcon sx={{ fontSize: '2.5rem' }} />
+        </Box>
+        <Typography
+          variant="h5"
+          component="h2"
+          sx={{ fontWeight: 800, color: '#0f172a', marginBottom: '8px' }}
+        >
+          Keine aktive Korrektur-Sitzung gefunden
+        </Typography>
+        <Typography
+          variant="body1"
+          sx={{ color: 'text.secondary', maxWidth: '400px', marginBottom: '28px', lineHeight: 1.5 }}
+        >
+          Bitte lade zuerst eine Schülerarbeit auf dem Dashboard hoch, um die automatisierte Analyse
+          und Korrektur zu starten.
+        </Typography>
+        <Link href="/dashboard" passHref style={{ textDecoration: 'none' }}>
+          <Button
+            variant="contained"
+            sx={{
+              backgroundColor: '#1b77d1',
+              padding: '10px 24px',
+              borderRadius: '8px',
+              fontWeight: 600,
+              textTransform: 'none',
+              '&:hover': {
+                backgroundColor: '#1565c0',
+              },
+            }}
+          >
+            Zurück zum Dashboard
+          </Button>
+        </Link>
+      </Box>
+    );
+  }
 
   if (!data) {
     return (
