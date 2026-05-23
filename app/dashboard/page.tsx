@@ -172,9 +172,9 @@ export default function Dashboard() {
                 color: '#0f172a',
               }}
             >
-              Klausur
+              Grade
               <Box component="span" sx={{ color: '#1b77d1', fontWeight: 800 }}>
-                KI
+                Ai
               </Box>
             </Typography>
           </Stack>
@@ -205,7 +205,7 @@ export default function Dashboard() {
             Neue Korrektur starten
           </Typography>
           <Typography variant="body1" sx={{ color: 'text.secondary', fontWeight: 500 }}>
-            Lade deine Klausur-Scans und die Musterlösung hoch, um die automatisierte Korrektur zu
+            Lade deine Prüfungs-Scans und die Musterlösung hoch, um die automatisierte Korrektur zu
             starten.
           </Typography>
         </Box>
@@ -294,7 +294,7 @@ export default function Dashboard() {
                               variant="subtitle1"
                               sx={{ fontWeight: 650, color: 'text.primary' }}
                             >
-                              Demo-Klausur vorausgewählt 📊
+                              Demo-Prüfung vorausgewählt 📊
                             </Typography>
                             <Typography
                               variant="body2"
@@ -611,7 +611,7 @@ export default function Dashboard() {
                     marginTop: '10px',
                   }}
                 >
-                  Klausur analysieren!
+                  Prüfung analysieren!
                 </Button>
               </CardContent>
             </Card>
@@ -656,7 +656,7 @@ export default function Dashboard() {
               textAlign: 'center',
             }}
           >
-            Klausuranalyse läuft
+            Prüfungsanalyse läuft
           </Typography>
           <Typography
             variant="body1"

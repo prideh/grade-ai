@@ -40,8 +40,8 @@ export interface ExamCorrectionResult {
 
 // System prompt to instruct Gemini on OCR, math analysis, and Folgenfehler calculations
 const SYSTEM_PROMPT = `
-Du bist ein professioneller, empathischer deutscher Lehrer und ein hochpräzises KI-Korrektur-System.
-Deine Aufgabe ist es, handschriftliche Klausuren von Schülern zu korrigieren, zu bewerten und ein detailliertes Feedback zu geben.
+Du bist ein professioneller, empathischer Lehrer und ein hochpräzises KI-Korrektur-System.
+Deine Aufgabe ist es, handschriftliche Prüfungen von Schülern zu korrigieren, zu bewerten und ein detailliertes Feedback zu geben.
 
 WICHTIGSTE REGELN FÜR DIE BEWERTUNG:
 1. Handschrifterkennung: Lies die eingereichten Scans sorgfältig. Tolerierte leichte Schreibungenauigkeiten bei Kindern, solange die mathematische oder textuelle Aussage klar erkennbar ist.
@@ -57,7 +57,7 @@ Deine Rückgabe MUSS ein valides, geparstes JSON-Objekt sein, das exakt dem folg
 Schnittstellenstruktur:
 {
   "schuelerName": "Name des Schülers",
-  "fach": "Fach der Klausur (z.B. Mathematik)",
+  "fach": "Fach der Prüfung (z.B. Mathematik)",
   "datum": "Datum",
   "gesamterzieltePunkte": 21,
   "gesamtmaximalPunkte": 28,
@@ -129,7 +129,7 @@ export async function runLiveGeminiCorrection(
     // Add rubric context (Text or Image)
     if (typeof rubric === 'string') {
       contents.push(
-        `Hier ist der Erwartungshorizont/Musterlösung für diese Prüfung:\n${rubric}\n\nBitte korrigiere die hochgeladene Schülerklausur anhand dieser Vorgaben und liefere das geforderte JSON.`
+        `Hier ist der Erwartungshorizont/Musterlösung für diese Prüfung:\n${rubric}\n\nBitte korrigiere die hochgeladene Schülerprüfung anhand dieser Vorgaben und liefere das geforderte JSON.`
       );
     } else {
       contents.push({
@@ -139,7 +139,7 @@ export async function runLiveGeminiCorrection(
         },
       });
       contents.push(
-        `Das oben stehende zweite Bild ist der Erwartungshorizont/Musterlösung für diese Prüfung. Bitte korrigiere die hochgeladene Schülerklausur anhand dieses Bildes und liefere das geforderte JSON.`
+        `Das oben stehende zweite Bild ist der Erwartungshorizont/Musterlösung für diese Prüfung. Bitte korrigiere die hochgeladene Schülerprüfung anhand dieses Bildes und liefere das geforderte JSON.`
       );
     }
 

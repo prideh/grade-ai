@@ -3,9 +3,9 @@ import ThemeRegistry from '@/lib/ThemeRegistry';
 import './globals.css';
 
 export const metadata: Metadata = {
-  title: 'KlausurKI - Intelligente Klausurkorrektur für Lehrkräfte',
+  title: 'GradeAI - Intelligente Prüfungskorrektur für Lehrpersonen',
   description:
-    'Die innovative deutsche K-12 Korrektur-Plattform. Automatisierte Klausurbewertung mit Handschrifterkennung, Teilpunktevergabe und mathematischer Folgenfehler-Berücksichtigung.',
+    'Die innovative Schweizer K-12 Korrektur-Plattform. Automatisierte Prüfungsbewertung mit Handschrifterkennung, Teilpunktevergabe und mathematischer Folgenfehler-Berücksichtigung.',
 };
 
 export default function RootLayout({

@@ -59,9 +59,9 @@ export default function Home() {
               color: '#0f172a',
             }}
           >
-            Klausur
+            Grade
             <Box component="span" sx={{ color: '#1b77d1', fontWeight: 800 }}>
-              KI
+              Ai
             </Box>
           </Typography>
         </Stack>
@@ -133,7 +133,7 @@ export default function Home() {
             color: '#0f172a',
           }}
         >
-          Klausuren bewerten.
+          Prüfungen bewerten.
           <br />
           <Box
             component="span"
@@ -157,7 +157,7 @@ export default function Home() {
             fontWeight: 400,
           }}
         >
-          Die professionelle deutsche Klausur-Assistenten-Plattform, die handschriftliche Arbeiten
+          Die professionelle Schweizer Prüfungs-Assistenten-Plattform, die handschriftliche Arbeiten
           liest, Teilpunkte vergibt und mathematische Folgenfehler vollautomatisch berücksichtigt.
           Sparen Sie bis zu 80% Ihrer Korrekturzeit.
         </Typography>
@@ -247,7 +247,7 @@ export default function Home() {
                   Präzise Handschrift-OCR
                 </Typography>
                 <Typography variant="body2" sx={{ color: '#666666', lineHeight: 1.6 }}>
-                  Liest handschriftliche Klausuren von Schülern. Die KI nutzt den Kontext des
+                  Liest handschriftliche Prüfungen von Schülern. Die KI nutzt den Kontext des
                   Erwartungshorizonts, um selbst krakelige oder unsaubere Schriftzüge zuverlässig zu
                   entziffern.
                 </Typography>
@@ -369,8 +369,8 @@ export default function Home() {
           zIndex: 5,
         }}
       >
-        © 2026 KlausurKI – Entwickelt im professionellen Schul-Design für den modernen Schweizer und
-        deutschen Schulalltag.
+        © 2026 GradeAi – Entwickelt im professionellen Schul-Design für die moderne Schweizer
+        Schule.
       </Box>
     </Box>
   );
