@@ -450,7 +450,7 @@ export default function CorrectWorkspace() {
                     pointerEvents: 'none',
                   }}
                 >
-                  {data.aufgaben[0].erzieltePunkte.toFixed(1)}/3
+                  {data.aufgaben[0]?.erzieltePunkte?.toFixed(1) ?? '0.0'}/3
                 </Box>
               </Box>
 
@@ -552,7 +552,7 @@ export default function CorrectWorkspace() {
                     pointerEvents: 'none',
                   }}
                 >
-                  {data.aufgaben[1].erzieltePunkte.toFixed(1)}/5
+                  {data.aufgaben[1]?.erzieltePunkte?.toFixed(1) ?? '0.0'}/5
                 </Box>
               </Box>
 
@@ -635,7 +635,7 @@ export default function CorrectWorkspace() {
                     pointerEvents: 'none',
                   }}
                 >
-                  {data.aufgaben[2].erzieltePunkte.toFixed(1)}/8
+                  {data.aufgaben[2]?.erzieltePunkte?.toFixed(1) ?? '0.0'}/8
                 </Box>
               </Box>
             </Box>
