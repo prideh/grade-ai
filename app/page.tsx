@@ -67,12 +67,6 @@ export default function Home() {
         </Stack>
 
         <Stack direction="row" spacing={2} sx={{ alignItems: 'center' }}>
-          <Typography
-            variant="body2"
-            sx={{ color: '#666666', display: { xs: 'none', sm: 'block' }, fontWeight: 500 }}
-          >
-            Nativ Deutsch 🇩🇪
-          </Typography>
           <Box
             sx={{
               fontSize: '0.8rem',
