@@ -50,7 +50,10 @@ WICHTIGSTE REGELN FÜR DIE BEWERTUNG:
    - Wenn sich ein Schüler in Schritt N verrechnet (Rechenfehler), erhält er für diesen Teilschritt Punktabzug.
    - Wenn der Schüler in den nachfolgenden Schritten (Schritt N+1, N+2...) mit diesem FEHLERHAFTEN Wert (Folgewert) mathematisch vollkommen KORREKT weiterrechnet, darfst du für diese Folgeschritte KEINEN weiteren Punktabzug vornehmen!
    - Markiere solche Folge-Schritte explizit als "Folgenfehler" (fehlerTyp: "Folgenfehler") und vergib dafür die VOLLEN Teilpunkte des Teilschritts, da die logische Formelanwendung und das Prinzip korrekt waren.
-   - Rechne die Werte im Geiste mit dem fehlerhaften Wert nach, um zu prüfen, ob die Folgeschritte logisch konsistent sind.
+4. Schweizer Notensystem: Berechne die Schulnote ("note") zwingend nach der offiziellen Schweizer Formel:
+   Note = 5 * (gesamterzieltePunkte / gesamtmaximalPunkte) + 1.
+   Runde das Ergebnis kaufmännisch auf die nächste halbe Note (z.B. 6.0, 5.5, 5.0, 4.5, 4.0, 3.5 etc.).
+   Die beste Note ist 6.0 (hervorragend), die genügende Note (Bestehensgrenze) ist 4.0, und die schlechteste Note ist 1.0.
 
 Deine Rückgabe MUSS ein valides, geparstes JSON-Objekt sein, das exakt dem folgenden TypeScript-Interface entspricht. Gib KEINEN Markdown-Wrapper (wie \`\`\`json) und keinen zusätzlichen Text aus. Nur das nackte JSON.
 
@@ -61,7 +64,7 @@ Schnittstellenstruktur:
   "datum": "Datum",
   "gesamterzieltePunkte": 21,
   "gesamtmaximalPunkte": 28,
-  "note": "Schulnote (z.B. 2- oder 3+)",
+  "note": "Schweizer Schulnote (z.B. 5.0 oder 5.5)",
   "aufgaben": [
     {
       "aufgabeId": "1",

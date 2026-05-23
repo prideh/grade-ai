@@ -125,21 +125,10 @@ export default function CorrectWorkspace() {
     // Recalculate total score
     const totalScore = updatedTasks.reduce((sum, t) => sum + t.erzieltePunkte, 0);
 
-    // Recalculate school grade dynamically based on points percentage
+    // Recalculate school grade dynamically based on Swiss linear grading scale (6 is best, 4 is passing, rounded to nearest 0.5)
     const maxScore = data.gesamtmaximalPunkte;
-    const pct = (totalScore / maxScore) * 100;
-    let newGrade = '6';
-    if (pct >= 95) newGrade = '1';
-    else if (pct >= 90) newGrade = '1-';
-    else if (pct >= 85) newGrade = '2+';
-    else if (pct >= 80) newGrade = '2';
-    else if (pct >= 75) newGrade = '2-';
-    else if (pct >= 70) newGrade = '3+';
-    else if (pct >= 65) newGrade = '3';
-    else if (pct >= 60) newGrade = '3-';
-    else if (pct >= 50) newGrade = '4';
-    else if (pct >= 40) newGrade = '4-';
-    else if (pct >= 25) newGrade = '5';
+    const rawGrade = maxScore > 0 ? 5 * (totalScore / maxScore) + 1 : 1;
+    const newGrade = (Math.round(rawGrade * 2) / 2).toFixed(1);
 
     const updatedResult = {
       ...data,
