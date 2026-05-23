@@ -97,24 +97,6 @@ export default function Home() {
           zIndex: 5,
         }}
       >
-        <Box
-          sx={{
-            display: 'inline-flex',
-            alignItems: 'center',
-            gap: '8px',
-            backgroundColor: '#e6f4ea', // Soft pastel green like Escola
-            border: '1px solid #a3cfbb',
-            padding: '6px 16px',
-            borderRadius: '30px',
-            color: '#137333',
-            fontSize: '0.9rem',
-            fontWeight: 600,
-            marginBottom: '28px',
-          }}
-        >
-          ✨ Schweizer Zuverlässigkeit & moderne KI-Didaktik
-        </Box>
-
         <Typography
           variant="h2"
           component="h1"
