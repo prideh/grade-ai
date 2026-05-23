@@ -117,7 +117,7 @@ export default function Home() {
               color: '#1b77d1', // Escola Blue
             }}
           >
-            Mit KI-Präzision & Folgenfehler-Logik.
+            Mit KI-Präzision & Folgefehler-Logik.
           </Box>
         </Typography>
 
@@ -134,7 +134,7 @@ export default function Home() {
           }}
         >
           Die professionelle Schweizer Prüfungs-Assistenten-Plattform, die handschriftliche Arbeiten
-          liest, Teilpunkte vergibt und mathematische Folgenfehler vollautomatisch berücksichtigt.
+          liest, Teilpunkte vergibt und mathematische Folgefehler vollautomatisch berücksichtigt.
           Sparen Sie bis zu 80% Ihrer Korrekturzeit.
         </Typography>
 
@@ -269,7 +269,7 @@ export default function Home() {
                   <FunctionsIcon sx={{ fontSize: '1.5rem' }} />
                 </Box>
                 <Typography variant="h5" component="h3" sx={{ color: '#0f172a', fontWeight: 700 }}>
-                  Folgenfehler & Teilpunkte
+                  Folgefehler & Teilpunkte
                 </Typography>
                 <Typography variant="body2" sx={{ color: '#666666', lineHeight: 1.6 }}>
                   Erkennt Rechenfehler sofort und zieht Teilpunkte ab. Die KI rechnet nachfolgende

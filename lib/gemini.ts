@@ -5,7 +5,7 @@ export interface CorrectedStep {
   schrittIndex: number;
   schrittText: string;
   istKorrekt: boolean;
-  fehlerTyp: 'KeinFehler' | 'Rechenfehler' | 'Folgenfehler' | 'SonstigerFehler';
+  fehlerTyp: 'KeinFehler' | 'Rechenfehler' | 'Folgefehler' | 'SonstigerFehler';
   erreichtePunkte: number;
   maximalPunkte: number;
   begruendung: string;
@@ -17,7 +17,7 @@ export interface CorrectedTask {
   schuelerAntwort: string;
   erzieltePunkte: number;
   maximalPunkte: number;
-  status: 'Korrekt' | 'Folgenfehler' | 'Fehler';
+  status: 'Korrekt' | 'Folgefehler' | 'Fehler';
   schritte: CorrectedStep[];
   lehrerKommentar: string;
 }
@@ -38,7 +38,7 @@ export interface ExamCorrectionResult {
   };
 }
 
-// System prompt to instruct Gemini on OCR, math analysis, and Folgenfehler calculations
+// System prompt to instruct Gemini on OCR, math analysis, and Folgefehler calculations
 const SYSTEM_PROMPT = `
 Du bist ein professioneller, empathischer Lehrer und ein hochpräzises KI-Korrektur-System.
 Deine Aufgabe ist es, handschriftliche Prüfungen von Schülern zu korrigieren, zu bewerten und ein detailliertes Feedback zu geben.
@@ -46,10 +46,10 @@ Deine Aufgabe ist es, handschriftliche Prüfungen von Schülern zu korrigieren, 
 WICHTIGSTE REGELN FÜR DIE BEWERTUNG:
 1. Handschrifterkennung: Lies die eingereichten Scans sorgfältig. Tolerierte leichte Schreibungenauigkeiten bei Kindern, solange die mathematische oder textuelle Aussage klar erkennbar ist.
 2. Teilpunktvergabe (Partial Credits): Vergib Teilpunkte für jeden richtigen Teilschritt, auch wenn das Endergebnis falsch ist.
-3. Folgenfehler (Consequential/Carry-over Errors) - BESONDERS WICHTIG FÜR MATHE:
+3. Folgefehler (Consequential/Carry-over Errors) - BESONDERS WICHTIG FÜR MATHE:
    - Wenn sich ein Schüler in Schritt N verrechnet (Rechenfehler), erhält er für diesen Teilschritt Punktabzug.
    - Wenn der Schüler in den nachfolgenden Schritten (Schritt N+1, N+2...) mit diesem FEHLERHAFTEN Wert (Folgewert) mathematisch vollkommen KORREKT weiterrechnet, darfst du für diese Folgeschritte KEINEN weiteren Punktabzug vornehmen!
-   - Markiere solche Folge-Schritte explizit als "Folgenfehler" (fehlerTyp: "Folgenfehler") und vergib dafür die VOLLEN Teilpunkte des Teilschritts, da die logische Formelanwendung und das Prinzip korrekt waren.
+   - Markiere solche Folge-Schritte explizit als "Folgefehler" (fehlerTyp: "Folgefehler") und vergib dafür die VOLLEN Teilpunkte des Teilschritts, da die logische Formelanwendung und das Prinzip korrekt waren.
 4. Schweizer Notensystem: Berechne die Schulnote ("note") zwingend nach der offiziellen Schweizer Formel:
    Note = 5 * (gesamterzieltePunkte / gesamtmaximalPunkte) + 1.
    Runde das Ergebnis kaufmännisch auf die nächste halbe Note (z.B. 6.0, 5.5, 5.0, 4.5, 4.0, 3.5 etc.).
@@ -72,13 +72,13 @@ Schnittstellenstruktur:
       "schuelerAntwort": "Transkription der Schülerantwort",
       "erzieltePunkte": 4,
       "maximalPunkte": 5,
-      "status": "Folgenfehler", // "Korrekt" | "Folgenfehler" | "Fehler"
+      "status": "Folgefehler", // "Korrekt" | "Folgefehler" | "Fehler"
       "schritte": [
         {
           "schrittIndex": 1,
           "schrittText": "4x = 16",
           "istKorrekt": false,
-          "fehlerTyp": "Rechenfehler", // "KeinFehler" | "Rechenfehler" | "Folgenfehler" | "SonstigerFehler"
+          "fehlerTyp": "Rechenfehler", // "KeinFehler" | "Rechenfehler" | "Folgefehler" | "SonstigerFehler"
           "erreichtePunkte": 0,
           "maximalPunkte": 1,
           "begruendung": "Es wurde fälschlicherweise 12 subtrahiert statt addiert."
@@ -87,10 +87,10 @@ Schnittstellenstruktur:
           "schrittIndex": 2,
           "schrittText": "x = 4",
           "istKorrekt": true,
-          "fehlerTyp": "Folgenfehler",
+          "fehlerTyp": "Folgefehler",
           "erreichtePunkte": 2,
           "maximalPunkte": 2,
-          "begruendung": "Folgenfehler: Richtig durch 4 geteilt basierend auf dem falschen Zwischenschritt."
+          "begruendung": "Folgefehler: Richtig durch 4 geteilt basierend auf dem falschen Zwischenschritt."
         }
       ],
       "lehrerKommentar": "Guter Rechenweg, leider ein kleiner Vorzeichenfehler zu Beginn, danach sauber weitergerechnet."

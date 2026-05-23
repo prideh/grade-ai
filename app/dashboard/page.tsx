@@ -70,7 +70,7 @@ export default function Dashboard() {
       'Lese Dokumente ein...',
       'Entziffere Handschrift mit multimodaler KI...',
       'Lade Erwartungshorizont...',
-      'Analysiere Lösungswege auf Folgenfehler...',
+      'Analysiere Lösungswege auf Folgefehler...',
       'Vergebe Teilpunkte für Zwischenschritte...',
       'Generiere personalisiertes Schüler-Feedback...',
       'Bereite Korrektur-Workspace vor...',
@@ -353,7 +353,7 @@ export default function Dashboard() {
                     ) : (
                       <>
                         <TextField
-                          placeholder="Trage hier die Musterlösung, Formeln oder Bepunktungsvorgaben ein (z.B. 'Aufgabe 1: 4x-12=8, Erg. x=5, Max 3P. Folgenfehler erlaubt')"
+                          placeholder="Trage hier die Musterlösung, Formeln oder Bepunktungsvorgaben ein (z.B. 'Aufgabe 1: 4x-12=8, Erg. x=5, Max 3P. Folgefehler erlaubt')"
                           value={rubricText}
                           multiline
                           rows={4}
@@ -511,7 +511,7 @@ export default function Dashboard() {
                             variant="caption"
                             sx={{ color: 'text.secondary', display: 'block', fontWeight: 500 }}
                           >
-                            Thorough (Tiefgehendes Folgenfehler-Tracking)
+                            Thorough (Tiefgehendes Folgefehler-Tracking)
                           </Typography>
                         </Box>
                       </Box>

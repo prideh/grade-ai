@@ -14,7 +14,7 @@ export const MOCK_EXAM_RESULT: ExamCorrectionResult = {
       schuelerAntwort: '4x - 12 = 8\n4x = 16\nx = 4',
       erzieltePunkte: 2,
       maximalPunkte: 3,
-      status: 'Folgenfehler',
+      status: 'Folgefehler',
       schritte: [
         {
           schrittIndex: 1,
@@ -30,15 +30,15 @@ export const MOCK_EXAM_RESULT: ExamCorrectionResult = {
           schrittIndex: 2,
           schrittText: 'x = 4',
           istKorrekt: true,
-          fehlerTyp: 'Folgenfehler',
+          fehlerTyp: 'Folgefehler',
           erreichtePunkte: 2,
           maximalPunkte: 2,
           begruendung:
-            'Folgenfehler: Basierend auf der vorherigen fehlerhaften Zeile (4x = 16) wurde die Äquivalenzumformung (Division durch 4) mathematisch fehlerfrei und konsequent ausgeführt. Daher volle Teilpunktzahl für diesen Schritt!',
+            'Folgefehler: Basierend auf der vorherigen fehlerhaften Zeile (4x = 16) wurde die Äquivalenzumformung (Division durch 4) mathematisch fehlerfrei und konsequent ausgeführt. Daher volle Teilpunktzahl für diesen Schritt!',
         },
       ],
       lehrerKommentar:
-        'Sehr guter und sauber aufgeschriebener Rechenweg! Du hast dich leider direkt im ersten Schritt beim Vorzeichen vertan (-12 statt +12). Da du danach aber absolut fehlerfrei mit deinem Zwischenergebnis weitergerechnet hast, erhältst du vollen Punktabzug für den Rechenfehler, aber volle Punkte für den Folgeschritt (Folgenfehler-Regel).',
+        'Sehr guter und sauber aufgeschriebener Rechenweg! Du hast dich leider direkt im ersten Schritt beim Vorzeichen vertan (-12 statt +12). Da du danach aber absolut fehlerfrei mit deinem Zwischenergebnis weitergerechnet hast, erhältst du vollen Punktabzug für den Rechenfehler, aber volle Punkte für den Folgeschritt (Folgefehler-Regel).',
     },
     {
       aufgabeId: '2',
@@ -47,7 +47,7 @@ export const MOCK_EXAM_RESULT: ExamCorrectionResult = {
         'x^2 - 6x + 8 = 0\nx = [ 6 +- sqrt(36 - 4*1*7) ] / 2\nx = [ 6 +- sqrt(36 - 28) ] / 2\nx = [ 6 +- sqrt(8) ] / 2\nx = (6 +- 2.83) / 2',
       erzieltePunkte: 4.5,
       maximalPunkte: 5,
-      status: 'Folgenfehler',
+      status: 'Folgefehler',
       schritte: [
         {
           schrittIndex: 1,
@@ -63,11 +63,11 @@ export const MOCK_EXAM_RESULT: ExamCorrectionResult = {
           schrittIndex: 2,
           schrittText: 'Einsetzen in Formel & Ausrechnen',
           istKorrekt: true,
-          fehlerTyp: 'Folgenfehler',
+          fehlerTyp: 'Folgefehler',
           erreichtePunkte: 4,
           maximalPunkte: 4,
           begruendung:
-            'Folgenfehler: Die Mitternachtsformel wurde korrekt notiert und alle weiteren Rechenschritte inklusive Wurzelziehen und Division wurden mit dem fehlerhaften Wert c = 7 konsequent richtig gelöst.',
+            'Folgefehler: Die Mitternachtsformel wurde korrekt notiert und alle weiteren Rechenschritte inklusive Wurzelziehen und Division wurden mit dem fehlerhaften Wert c = 7 konsequent richtig gelöst.',
         },
       ],
       lehrerKommentar:

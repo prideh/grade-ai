@@ -412,7 +412,7 @@ export default function CorrectWorkspace() {
                               {step.maximalPunkte - step.erreichtePunkte} P.)
                             </Box>
                           );
-                        } else if (step.fehlerTyp === 'Folgenfehler') {
+                        } else if (step.fehlerTyp === 'Folgefehler') {
                           return (
                             <Box
                               key={step.schrittIndex}
@@ -429,7 +429,7 @@ export default function CorrectWorkspace() {
                                 mb: 1,
                               }}
                             >
-                              Schritt {step.schrittIndex}: Folgenfehler berücksichtigt! ✔️ (
+                              Schritt {step.schrittIndex}: Folgefehler berücksichtigt! ✔️ (
                               {step.erreichtePunkte}/{step.maximalPunkte} P.)
                             </Box>
                           );
@@ -568,21 +568,19 @@ export default function CorrectWorkspace() {
 
                 <Chip
                   label={
-                    activeTask.status === 'Folgenfehler'
-                      ? 'Folgenfehler erkannt'
-                      : activeTask.status
+                    activeTask.status === 'Folgefehler' ? 'Folgefehler erkannt' : activeTask.status
                   }
                   color={
                     activeTask.status === 'Korrekt'
                       ? 'success'
-                      : activeTask.status === 'Folgenfehler'
+                      : activeTask.status === 'Folgefehler'
                         ? 'warning'
                         : 'error'
                   }
                   icon={
                     activeTask.status === 'Korrekt' ? (
                       <CheckCircleIcon />
-                    ) : activeTask.status === 'Folgenfehler' ? (
+                    ) : activeTask.status === 'Folgefehler' ? (
                       <WarningIcon />
                     ) : (
                       <ErrorIcon />
@@ -606,7 +604,7 @@ export default function CorrectWorkspace() {
                       borderLeft: `4px solid ${
                         s.fehlerTyp === 'KeinFehler'
                           ? theme.palette.success.main
-                          : s.fehlerTyp === 'Folgenfehler'
+                          : s.fehlerTyp === 'Folgefehler'
                             ? theme.palette.warning.main
                             : theme.palette.error.main
                       }`,
@@ -702,8 +700,8 @@ export default function CorrectWorkspace() {
                             label={
                               s.fehlerTyp === 'KeinFehler'
                                 ? 'Korrekt'
-                                : s.fehlerTyp === 'Folgenfehler'
-                                  ? 'Folgenfehler (Teilpunkte)'
+                                : s.fehlerTyp === 'Folgefehler'
+                                  ? 'Folgefehler (Teilpunkte)'
                                   : s.fehlerTyp === 'Rechenfehler'
                                     ? 'Rechenfehler'
                                     : 'Fehler'
@@ -712,7 +710,7 @@ export default function CorrectWorkspace() {
                             color={
                               s.fehlerTyp === 'KeinFehler'
                                 ? 'success'
-                                : s.fehlerTyp === 'Folgenfehler'
+                                : s.fehlerTyp === 'Folgefehler'
                                   ? 'warning'
                                   : 'error'
                             }
@@ -943,13 +941,13 @@ export default function CorrectWorkspace() {
                       color:
                         t.status === 'Korrekt'
                           ? 'green'
-                          : t.status === 'Folgenfehler'
+                          : t.status === 'Folgefehler'
                             ? 'orange'
                             : 'red',
                       fontWeight: 'bold',
                     }}
                   >
-                    {t.status === 'Folgenfehler' ? 'Folgenfehler berücksichtigt' : t.status}
+                    {t.status === 'Folgefehler' ? 'Folgefehler berücksichtigt' : t.status}
                   </span>
                 </td>
               </tr>
