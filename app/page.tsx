@@ -191,7 +191,7 @@ export default function Home() {
             variant="caption"
             sx={{ color: '#9e9e9e', fontSize: '0.85rem', fontWeight: 500 }}
           >
-            Professionelle Korrektur direkt über deine eigene Gemini API!
+            Professionelle Prüfungskorrektur direkt über die integrierte Gemini-Schnittstelle.
           </Typography>
         </Stack>
       </Container>
