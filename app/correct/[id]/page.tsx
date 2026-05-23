@@ -351,293 +351,129 @@ export default function CorrectWorkspace() {
                 <Box>Datum: {data.datum}</Box>
               </Box>
 
-              {/* Hand written task 1 section */}
-              <Box
-                onClick={() => setActiveTaskIndex(0)}
-                sx={{
-                  position: 'relative',
-                  padding: '16px',
-                  borderRadius: '8px',
-                  marginBottom: '24px',
-                  cursor: 'pointer',
-                  border: activeTaskIndex === 0 ? '1px dashed #1b77d1' : '1px solid transparent',
-                  background: activeTaskIndex === 0 ? 'rgba(27, 119, 209, 0.05)' : 'transparent',
-                  '&:hover': {
-                    background: 'rgba(27, 119, 209, 0.02)',
-                  },
-                }}
-              >
-                <Typography
-                  sx={{
-                    fontFamily: 'sans-serif',
-                    fontSize: '0.95rem',
-                    fontWeight: 'bold',
-                    color: '#1e293b',
-                    marginBottom: '8px',
-                  }}
-                >
-                  Aufgabe 1: Lineare Gleichungen
-                </Typography>
-                <Typography
-                  component="div"
-                  sx={{
-                    fontSize: '1.25rem',
-                    letterSpacing: '0.05em',
-                    lineHeight: 1.8,
-                    color: '#334155',
-                    fontFamily: 'inherit',
-                  }}
-                >
-                  4x - 12 = 8 <br />
-                  4x = 16
-                  {/* Digital Red Ink annotation for step 1 error */}
-                  <Box
-                    component="span"
-                    sx={{
-                      color: 'error.main',
-                      marginLeft: '20px',
-                      fontSize: '0.9rem',
-                      border: `1.5px solid ${theme.palette.error.main}`,
-                      padding: '2px 8px',
-                      borderRadius: '4px',
-                      fontFamily: 'sans-serif',
-                      fontWeight: 'bold',
-                      display: 'inline-block',
-                      transform: 'rotate(-2deg)',
-                      backgroundColor: 'rgba(239, 68, 68, 0.05)',
-                    }}
-                  >
-                    falsches Vorzeichen! (-12 subtrahiert statt addiert) ❌ (0/1 P.)
-                  </Box>
-                  <br />x = 4{/* Digital Red Ink annotation for step 2 Folgenfehler */}
-                  <Box
-                    component="span"
-                    sx={{
-                      color: 'warning.main',
-                      marginLeft: '20px',
-                      fontSize: '0.9rem',
-                      border: `1.5px solid ${theme.palette.warning.main}`,
-                      padding: '2px 8px',
-                      borderRadius: '4px',
-                      fontFamily: 'sans-serif',
-                      fontWeight: 'bold',
-                      display: 'inline-block',
-                      transform: 'rotate(1deg)',
-                      backgroundColor: 'rgba(245, 158, 11, 0.05)',
-                    }}
-                  >
-                    Folgenfehler berücksichtigt! Richtig geteilt. ✔️ (2/2 P.)
-                  </Box>
-                </Typography>
-
-                {/* Red ink point marker */}
+              {/* Dynamically render actual student tasks & transcribed handwriting from Gemini API */}
+              {data.aufgaben.map((task, taskIdx) => (
                 <Box
+                  key={task.aufgabeId}
+                  onClick={() => setActiveTaskIndex(taskIdx)}
                   sx={{
-                    position: 'absolute',
-                    right: '15px',
-                    top: '15px',
-                    fontSize: '1.4rem',
-                    color: 'error.main',
-                    fontWeight: 'bold',
-                    border: '3px double #ef4444',
-                    width: '56px',
-                    height: '56px',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    borderRadius: '50%',
-                    transform: 'rotate(-10deg)',
-                    pointerEvents: 'none',
+                    position: 'relative',
+                    padding: '16px',
+                    borderRadius: '8px',
+                    marginBottom: '24px',
+                    cursor: 'pointer',
+                    border:
+                      activeTaskIndex === taskIdx ? '1px dashed #1b77d1' : '1px solid transparent',
+                    background:
+                      activeTaskIndex === taskIdx ? 'rgba(27, 119, 209, 0.05)' : 'transparent',
+                    '&:hover': {
+                      background: 'rgba(27, 119, 209, 0.02)',
+                    },
                   }}
                 >
-                  {data.aufgaben[0]?.erzieltePunkte?.toFixed(1) ?? '0.0'}/3
-                </Box>
-              </Box>
-
-              {/* Hand written task 2 section */}
-              <Box
-                onClick={() => setActiveTaskIndex(1)}
-                sx={{
-                  position: 'relative',
-                  padding: '16px',
-                  borderRadius: '8px',
-                  marginBottom: '24px',
-                  cursor: 'pointer',
-                  border: activeTaskIndex === 1 ? '1px dashed #1b77d1' : '1px solid transparent',
-                  background: activeTaskIndex === 1 ? 'rgba(27, 119, 209, 0.05)' : 'transparent',
-                  '&:hover': {
-                    background: 'rgba(27, 119, 209, 0.02)',
-                  },
-                }}
-              >
-                <Typography
-                  sx={{
-                    fontFamily: 'sans-serif',
-                    fontSize: '0.95rem',
-                    fontWeight: 'bold',
-                    color: '#1e293b',
-                    marginBottom: '8px',
-                  }}
-                >
-                  Aufgabe 2: Quadratische Gleichungen
-                </Typography>
-                <Typography
-                  component="div"
-                  sx={{
-                    fontSize: '1.25rem',
-                    letterSpacing: '0.05em',
-                    lineHeight: 1.8,
-                    color: '#334155',
-                    fontFamily: 'inherit',
-                  }}
-                >
-                  x² - 6x + 8 = 0 <br />x = [ 6 ± √(36 - 4 · 1 ·{' '}
-                  <Box component="span" sx={{ textDecoration: 'underline double #ef4444' }}>
-                    7
-                  </Box>
-                  ) ] / 2{/* Digital Red Ink copy error */}
-                  <Box
-                    component="span"
+                  <Typography
                     sx={{
-                      color: 'error.main',
-                      marginLeft: '20px',
+                      fontFamily: 'sans-serif',
                       fontSize: '0.95rem',
-                      fontFamily: 'sans-serif',
                       fontWeight: 'bold',
-                      display: 'inline-block',
-                      transform: 'rotate(-0.5deg)',
+                      color: '#1e293b',
+                      marginBottom: '8px',
                     }}
                   >
-                    ← Abschreibfehler! c = 7 statt 8 ❌ (-0.5 P.)
-                  </Box>
-                  <br />
-                  x = [ 6 ± √8 ] / 2 <br />x ≈ (6 ± 2.83) / 2
-                  <Box
-                    component="span"
+                    {task.titel}
+                  </Typography>
+                  <Typography
+                    component="div"
                     sx={{
-                      color: 'warning.main',
-                      marginLeft: '20px',
-                      fontSize: '0.9rem',
-                      border: `1.5px solid ${theme.palette.warning.main}`,
-                      padding: '2px 8px',
-                      borderRadius: '4px',
-                      fontFamily: 'sans-serif',
-                      fontWeight: 'bold',
-                      display: 'inline-block',
-                      transform: 'rotate(1.5deg)',
-                      backgroundColor: 'rgba(245, 158, 11, 0.05)',
+                      fontSize: '1.25rem',
+                      letterSpacing: '0.05em',
+                      lineHeight: 1.8,
+                      color: '#334155',
+                      fontFamily: 'inherit',
+                      whiteSpace: 'pre-wrap',
+                      maxWidth: '85%',
                     }}
                   >
-                    Folgefehler korrekt weitergerechnet! ✔️ (4/4 P.)
-                  </Box>
-                </Typography>
+                    {task.schuelerAntwort}
 
-                {/* Red ink point marker */}
-                <Box
-                  sx={{
-                    position: 'absolute',
-                    right: '15px',
-                    top: '15px',
-                    fontSize: '1.4rem',
-                    color: 'error.main',
-                    fontWeight: 'bold',
-                    border: '3px double #ef4444',
-                    width: '56px',
-                    height: '56px',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    borderRadius: '50%',
-                    transform: 'rotate(-5deg)',
-                    pointerEvents: 'none',
-                  }}
-                >
-                  {data.aufgaben[1]?.erzieltePunkte?.toFixed(1) ?? '0.0'}/5
-                </Box>
-              </Box>
+                    {/* Dynamic Digital Red Ink corrections drawn based on real steps! */}
+                    <Box sx={{ mt: 1.5, fontFamily: 'sans-serif', fontSize: '0.9rem' }}>
+                      {task.schritte.map((step) => {
+                        if (
+                          step.fehlerTyp === 'Rechenfehler' ||
+                          step.fehlerTyp === 'SonstigerFehler'
+                        ) {
+                          return (
+                            <Box
+                              key={step.schrittIndex}
+                              sx={{
+                                color: 'error.main',
+                                border: `1.5px solid ${theme.palette.error.main}`,
+                                padding: '2px 8px',
+                                borderRadius: '4px',
+                                fontWeight: 'bold',
+                                display: 'inline-block',
+                                transform: `rotate(${step.schrittIndex % 2 === 0 ? -1 : 1}deg)`,
+                                backgroundColor: 'rgba(239, 68, 68, 0.05)',
+                                mr: 1,
+                                mb: 1,
+                              }}
+                            >
+                              Schritt {step.schrittIndex}: {step.begruendung} ❌ (-
+                              {step.maximalPunkte - step.erreichtePunkte} P.)
+                            </Box>
+                          );
+                        } else if (step.fehlerTyp === 'Folgenfehler') {
+                          return (
+                            <Box
+                              key={step.schrittIndex}
+                              sx={{
+                                color: 'warning.main',
+                                border: `1.5px solid ${theme.palette.warning.main}`,
+                                padding: '2px 8px',
+                                borderRadius: '4px',
+                                fontWeight: 'bold',
+                                display: 'inline-block',
+                                transform: `rotate(${step.schrittIndex % 2 === 0 ? 1 : -0.5}deg)`,
+                                backgroundColor: 'rgba(245, 158, 11, 0.05)',
+                                mr: 1,
+                                mb: 1,
+                              }}
+                            >
+                              Schritt {step.schrittIndex}: Folgenfehler berücksichtigt! ✔️ (
+                              {step.erreichtePunkte}/{step.maximalPunkte} P.)
+                            </Box>
+                          );
+                        }
+                        return null;
+                      })}
+                    </Box>
+                  </Typography>
 
-              {/* Hand written task 3 section */}
-              <Box
-                onClick={() => setActiveTaskIndex(2)}
-                sx={{
-                  position: 'relative',
-                  padding: '16px',
-                  borderRadius: '8px',
-                  cursor: 'pointer',
-                  border: activeTaskIndex === 2 ? '1px dashed #1b77d1' : '1px solid transparent',
-                  background: activeTaskIndex === 2 ? 'rgba(27, 119, 209, 0.05)' : 'transparent',
-                  '&:hover': {
-                    background: 'rgba(27, 119, 209, 0.02)',
-                  },
-                }}
-              >
-                <Typography
-                  sx={{
-                    fontFamily: 'sans-serif',
-                    fontSize: '0.95rem',
-                    fontWeight: 'bold',
-                    color: '#1e293b',
-                    marginBottom: '8px',
-                  }}
-                >
-                  Aufgabe 3: Biologie (Photosynthese)
-                </Typography>
-                <Typography
-                  component="div"
-                  sx={{
-                    fontSize: '1.25rem',
-                    letterSpacing: '0.05em',
-                    lineHeight: 1.8,
-                    color: '#334155',
-                    fontFamily: 'inherit',
-                    maxWidth: '85%',
-                  }}
-                >
-                  Pflanzen brauchen Licht, Wasser und{' '}
-                  <Box component="span" sx={{ textDecoration: 'underline wavy #ef4444' }}>
-                    Kolendioxid
-                  </Box>
-                  , um Sauerstoff und Zucker herzustellen. Das machen sie in den Chloroplasten.
-                  {/* Orthography check overlay */}
+                  {/* Red ink point stamp */}
                   <Box
-                    component="span"
                     sx={{
+                      position: 'absolute',
+                      right: '15px',
+                      top: '15px',
+                      fontSize: '1.4rem',
                       color: 'error.main',
-                      marginLeft: '10px',
-                      fontSize: '0.95rem',
-                      fontFamily: 'sans-serif',
                       fontWeight: 'bold',
-                      display: 'inline-block',
-                      transform: 'rotate(1deg)',
+                      border: '3px double #ef4444',
+                      width: '56px',
+                      height: '56px',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      borderRadius: '50%',
+                      transform: `rotate(${taskIdx % 2 === 0 ? -8 : 6}deg)`,
+                      pointerEvents: 'none',
                     }}
                   >
-                    ← R: Kohlendioxid mit h! ❌ (-2 P.)
+                    {task.erzieltePunkte?.toFixed(1) ?? '0.0'}/{task.maximalPunkte}
                   </Box>
-                </Typography>
-
-                {/* Red ink point marker */}
-                <Box
-                  sx={{
-                    position: 'absolute',
-                    right: '15px',
-                    top: '15px',
-                    fontSize: '1.4rem',
-                    color: 'error.main',
-                    fontWeight: 'bold',
-                    border: '3px double #ef4444',
-                    width: '56px',
-                    height: '56px',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    borderRadius: '50%',
-                    transform: 'rotate(5deg)',
-                    pointerEvents: 'none',
-                  }}
-                >
-                  {data.aufgaben[2]?.erzieltePunkte?.toFixed(1) ?? '0.0'}/8
                 </Box>
-              </Box>
+              ))}
             </Box>
           </Box>
 
