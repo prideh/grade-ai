@@ -363,8 +363,7 @@ export default function Home() {
           zIndex: 5,
         }}
       >
-        © 2026 GradeAi – Entwickelt im professionellen Schul-Design für die moderne Schweizer
-        Schule.
+        © 2026 GradeAi. Die intelligente Prüfungskorrektur für Schweizer Lehrpersonen.
       </Box>
     </Box>
   );
