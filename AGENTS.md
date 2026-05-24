@@ -4,6 +4,8 @@
 
 This version has breaking changes — APIs, conventions, and file structure may all differ from your training data. Read the relevant guide in `node_modules/next/dist/docs/` before writing any code. Heed deprecation notices.
 
+- **Edge Routing / Middleware:** Use `proxy.ts` in the root instead of `middleware.ts`. Export a named `proxy` function (e.g., `export async function proxy(request: NextRequest)`) instead of a default `middleware` export. Using `middleware.ts` will trigger Next.js 16 deprecation warnings.
+
 <!-- END:nextjs-agent-rules -->
 
 # Audit Agent Shortcut Instruction Set
