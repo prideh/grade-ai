@@ -55,17 +55,19 @@ model Exam {
 }
 
 enum SubmissionStatus {
-  DRAFT
+  PENDING
+  PROCESSING
   COMPLETED
+  FAILED
 }
 
 model Submission {
   id                     String           @id @default(uuid())
   examId                 String
   exam                   Exam             @relation(fields: [examId], references: [id], onDelete: Cascade)
-  studentId              String
-  student                Student          @relation(fields: [studentId], references: [id], onDelete: Cascade)
-  status                 SubmissionStatus @default(DRAFT)
+  studentId              String?
+  student                Student?         @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  status                 SubmissionStatus @default(PENDING)
   
   // Grading metrics
   earnedPoints           Float            @default(0.0)
@@ -75,8 +77,11 @@ model Submission {
   // AI summary feedback
   strengths              String[]
   weaknesses             String[]
-  helpfulTip             String
-  exerciseRecommendation String
+  helpfulTip             String?
+  exerciseRecommendation String?
+  
+  // Failure reason capturing
+  errorMessage           String?
   
   // Scan metadata
   // NOTE FOR PRODUCTION DEPLOYMENTS:

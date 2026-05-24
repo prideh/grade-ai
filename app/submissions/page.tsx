@@ -287,12 +287,28 @@ export default function SubmissionsPage() {
                 {filteredSubmissions.map((sub) => (
                   <TableRow key={sub.id} sx={{ '&:last-child td, &:last-child th': { border: 0 } }}>
                     <TableCell sx={{ fontWeight: 700 }}>
-                      <Link
-                        href={`/students/${sub.studentId}`}
-                        style={{ textDecoration: 'none', color: '#1b77d1' }}
-                      >
-                        {sub.studentName}
-                      </Link>
+                      {sub.studentId ? (
+                        <Link
+                          href={`/students/${sub.studentId}`}
+                          style={{ textDecoration: 'none', color: '#1b77d1' }}
+                        >
+                          {sub.studentName}
+                        </Link>
+                      ) : (
+                        <Typography
+                          variant="body2"
+                          sx={{
+                            color: '#d97706',
+                            fontStyle: 'italic',
+                            fontWeight: 700,
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '4px',
+                          }}
+                        >
+                          ⚠️ Nicht zugeordnet
+                        </Typography>
+                      )}
                     </TableCell>
                     <TableCell sx={{ fontWeight: 600 }}>{sub.className}</TableCell>
                     <TableCell>{sub.examTitle}</TableCell>
@@ -323,13 +339,39 @@ export default function SubmissionsPage() {
                       )}
                     </TableCell>
                     <TableCell>
-                      <Chip
-                        label={sub.status === 'COMPLETED' ? 'Abgeschlossen' : 'Entwurf'}
-                        size="small"
-                        color={sub.status === 'COMPLETED' ? 'success' : 'warning'}
-                        variant="outlined"
-                        sx={{ fontWeight: 'bold' }}
-                      />
+                      {sub.status === 'COMPLETED' ? (
+                        <Chip
+                          label="Abgeschlossen"
+                          size="small"
+                          color="success"
+                          variant="outlined"
+                          sx={{ fontWeight: 'bold' }}
+                        />
+                      ) : sub.status === 'PROCESSING' ? (
+                        <Chip
+                          label="Wird korrigiert..."
+                          size="small"
+                          color="info"
+                          variant="outlined"
+                          sx={{ fontWeight: 'bold' }}
+                        />
+                      ) : sub.status === 'FAILED' ? (
+                        <Chip
+                          label="Fehlgeschlagen"
+                          size="small"
+                          color="error"
+                          variant="outlined"
+                          sx={{ fontWeight: 'bold' }}
+                        />
+                      ) : (
+                        <Chip
+                          label="Warteschlange"
+                          size="small"
+                          color="warning"
+                          variant="outlined"
+                          sx={{ fontWeight: 'bold' }}
+                        />
+                      )}
                     </TableCell>
                     <TableCell>{sub.date}</TableCell>
                     <TableCell sx={{ textAlign: 'right' }}>

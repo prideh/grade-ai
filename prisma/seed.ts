@@ -178,7 +178,7 @@ async function main() {
     exam: { id: string; maxPoints: number };
     earnedPoints: number;
     grade: string;
-    status?: 'DRAFT' | 'COMPLETED';
+    status?: 'PENDING' | 'PROCESSING' | 'COMPLETED' | 'FAILED';
     strengths?: string[];
     weaknesses?: string[];
     helpfulTip?: string;
@@ -317,7 +317,7 @@ async function main() {
     exam: exam9aMath1,
     earnedPoints: 14,
     grade: '4.5',
-    status: 'DRAFT', // Keep one as draft to test status badges!
+    status: 'PENDING', // Keep one as pending to test status badges!
     strengths: ['Gute mathematische Intuition'],
     weaknesses: ['Unvollständige Begründungen bei Beweisen'],
     helpfulTip: 'Schreibe jeden mathematischen Zwischenschritt explizit auf.',

@@ -45,6 +45,8 @@ import AddCircleIcon from '@mui/icons-material/AddCircle';
 import GroupIcon from '@mui/icons-material/Group';
 import AssignmentIcon from '@mui/icons-material/Assignment';
 import TrendingUpIcon from '@mui/icons-material/TrendingUp';
+import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome';
+import ErrorIcon from '@mui/icons-material/Error';
 import DashboardLayout from '@/components/DashboardLayout';
 import { getCachedTeacher, setCachedTeacher } from '@/lib/sessionCache';
 
@@ -76,6 +78,8 @@ interface DashboardSubmission {
   points: string;
   grade: string;
   date: string;
+  status: 'PENDING' | 'PROCESSING' | 'COMPLETED' | 'FAILED';
+  errorMessage?: string | null;
 }
 
 export default function Dashboard() {
@@ -95,7 +99,7 @@ export default function Dashboard() {
 
   // Selection states
   const [selectedClassId, setSelectedClassId] = useState<string>('');
-  const [selectedStudentId, setSelectedStudentId] = useState<string>('');
+  const [selectedStudentId, setSelectedStudentId] = useState<string>('AUTO'); // Recommended default
   const [selectedExamId, setSelectedExamId] = useState<string>('NEW'); // 'NEW' or specific exam UUID
 
   // New exam states
@@ -106,7 +110,8 @@ export default function Dashboard() {
 
   // Correction configs
   const [model, setModel] = useState<'gemini-3.5-flash' | 'gemini-3.1-pro'>('gemini-3.5-flash');
-  const [studentFile, setStudentFile] = useState<File | null>(null);
+  const [studentFiles, setStudentFiles] = useState<File[]>([]); // Supports bulk uploads
+  const [assignState, setAssignState] = useState<Record<string, string>>({}); // Inline student assignments
 
   // Loading & Error states
   const [loading, setLoading] = useState<boolean>(false);
@@ -117,7 +122,8 @@ export default function Dashboard() {
   // 4. Handle Class Change (Fetch Students & Exams for selected class)
   const handleClassChange = React.useCallback(async (classId: string) => {
     setSelectedClassId(classId);
-    setSelectedStudentId('');
+    setSelectedStudentId('AUTO'); // Recommended default: Auto-Match
+    setStudentFiles([]); // Reset uploads
     setExams([]);
     setStudents([]);
 
@@ -217,6 +223,22 @@ export default function Dashboard() {
     };
   }, [router, fetchClasses, fetchRecentSubmissions]);
 
+  // Memoized check for active background jobs to prevent unnecessary polling interval resets
+  const hasActiveJobs = React.useMemo(() => {
+    return recentSubmissions.some((sub) => sub.status === 'PENDING' || sub.status === 'PROCESSING');
+  }, [recentSubmissions]);
+
+  // Poll recent submissions if there are any pending/processing jobs in the queue
+  useEffect(() => {
+    if (!hasActiveJobs) return;
+
+    const interval = setInterval(() => {
+      fetchRecentSubmissions();
+    }, 3000);
+
+    return () => clearInterval(interval);
+  }, [hasActiveJobs, fetchRecentSubmissions]);
+
   // 5. Handle Logout
   const _handleLogout = async () => {
     try {
@@ -235,9 +257,43 @@ export default function Dashboard() {
 
   const handleDropStudent = (e: React.DragEvent) => {
     e.preventDefault();
-    if (e.dataTransfer.files && e.dataTransfer.files[0]) {
-      setStudentFile(e.dataTransfer.files[0]);
+    if (e.dataTransfer.files) {
+      const files = Array.from(e.dataTransfer.files);
+      if (selectedStudentId === 'AUTO') {
+        setStudentFiles((prev) => [...prev, ...files]);
+      } else if (files[0]) {
+        setStudentFiles([files[0]]);
+      }
       setError('');
+    }
+  };
+
+  const handleManualAssign = async (submissionId: string) => {
+    const studentId = assignState[submissionId];
+    if (!studentId) return;
+
+    try {
+      const res = await fetch(`/api/submissions/${submissionId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ studentId }),
+      });
+
+      if (!res.ok) {
+        const errData = await res.json();
+        throw new Error(errData.error || 'Zuweisung fehlgeschlagen');
+      }
+
+      // Refresh submissions
+      fetchRecentSubmissions();
+      setAssignState((prev) => {
+        const copy = { ...prev };
+        delete copy[submissionId];
+        return copy;
+      });
+    } catch (err) {
+      console.error('Error in manual assignment:', err);
+      setError(err instanceof Error ? err.message : 'Zuweisung fehlgeschlagen.');
     }
   };
 
@@ -250,87 +306,102 @@ export default function Dashboard() {
       return;
     }
     if (!selectedStudentId) {
-      setError('Bitte wähle einen Schüler aus.');
+      setError('Bitte wähle einen Schüler oder Auto-Match aus.');
       return;
     }
     if (selectedExamId === 'NEW' && (!examTitle || !examSubject)) {
       setError('Bitte gib einen Prüfungstitel und ein Fach für die neue Prüfung an.');
       return;
     }
-    if (!studentFile) {
-      setError('Bitte lade eine Schülerarbeit (PDF oder Bild) hoch.');
+    if (studentFiles.length === 0) {
+      setError('Bitte lade mindestens eine Schülerarbeit (PDF oder Bild) hoch.');
       return;
     }
 
     setLoading(true);
     setError('');
+    setLoadingStep('Bereite Upload vor...');
 
-    // Simulate analysis progress steps for interactive UX
-    const steps = [
-      'Lese Dokumente ein...',
-      'Entziffere Handschrift mit multimodaler KI...',
-      'Lade Erwartungshorizont...',
-      'Analysiere Lösungswege auf Folgefehler...',
-      'Vergebe Teilpunkte für Zwischenschritte...',
-      'Generiere personalisiertes Schüler-Feedback...',
-      'Bereite Korrektur-Workspace vor...',
-    ];
-
-    let currentStep = 0;
-    const progressInterval = setInterval(() => {
-      if (currentStep < steps.length) {
-        setLoadingStep(steps[currentStep]);
-        currentStep++;
-      }
-    }, 700);
+    let resolvedExamId = selectedExamId;
 
     try {
-      const formData = new FormData();
-      formData.append('classId', selectedClassId);
-      formData.append('studentId', selectedStudentId);
-      formData.append('studentExam', studentFile);
-      formData.append('model', model);
-      if (shouldOverwrite) {
-        formData.append('overwrite', 'true');
-      }
+      const uploadFile = async (file: File, isFirst = false) => {
+        const formData = new FormData();
+        formData.append('classId', selectedClassId);
+        formData.append('studentExam', file);
+        formData.append('model', model);
 
-      if (selectedExamId === 'NEW') {
-        formData.append('examTitle', examTitle);
-        formData.append('examSubject', examSubject);
-        if (rubricFile) {
-          formData.append('rubric', rubricFile);
+        if (shouldOverwrite) {
+          formData.append('overwrite', 'true');
+        }
+
+        if (!isFirst && resolvedExamId !== 'NEW') {
+          formData.append('examId', resolvedExamId);
+        } else if (selectedExamId === 'NEW') {
+          formData.append('examTitle', examTitle);
+          formData.append('examSubject', examSubject);
+          if (rubricFile) {
+            formData.append('rubric', rubricFile);
+          } else {
+            formData.append('rubric', rubricText || 'Standard Musterlösung');
+          }
         } else {
-          formData.append('rubric', rubricText || 'Standard Musterlösung');
+          formData.append('examId', selectedExamId);
         }
+
+        if (selectedStudentId !== 'AUTO') {
+          formData.append('studentId', selectedStudentId);
+        }
+
+        const res = await fetch('/api/correct', {
+          method: 'POST',
+          body: formData,
+        });
+
+        if (!res.ok) {
+          const errorData = await res.json();
+          if (res.status === 409 && errorData.exists) {
+            setLoading(false);
+            setOpenConfirmOverwrite(true);
+            throw new Error('DUPLICATE_SUBMISSION');
+          }
+          throw new Error(errorData.error || `Fehler beim Upload von ${file.name}`);
+        }
+
+        return await res.json();
+      };
+
+      setLoadingStep(`Lade Arbeit 1 von ${studentFiles.length} hoch...`);
+      const firstResult = await uploadFile(studentFiles[0], true);
+      resolvedExamId = firstResult.examId;
+
+      if (studentFiles.length > 1) {
+        setLoadingStep(`Lade verbleibende ${studentFiles.length - 1} Arbeiten hoch...`);
+        const uploadPromises = studentFiles.slice(1).map((file) => {
+          return uploadFile(file, false).catch((err) => {
+            console.error(`Swallowed individual upload error for ${file.name}:`, err);
+            return { error: err.message, fileName: file.name };
+          });
+        });
+
+        await Promise.all(uploadPromises);
+      }
+
+      setStudentFiles([]);
+      setLoading(false);
+      fetchRecentSubmissions();
+
+      // For single file, navigate to it, otherwise scroll to top to see queue
+      if (studentFiles.length === 1 && firstResult.submissionId) {
+        router.push(`/correct/${firstResult.submissionId}`);
       } else {
-        formData.append('examId', selectedExamId);
+        window.scrollTo({ top: 0, behavior: 'smooth' });
       }
-
-      const res = await fetch('/api/correct', {
-        method: 'POST',
-        body: formData,
-      });
-
-      clearInterval(progressInterval);
-
-      if (!res.ok) {
-        const errorData = await res.json();
-        if (res.status === 409 && errorData.exists) {
-          setLoading(false);
-          setOpenConfirmOverwrite(true);
-          return;
-        }
-        throw new Error(errorData.error || 'Serverfehler während der Analyse');
-      }
-
-      const result = await res.json();
-      router.push(`/correct/${result.submissionId}`);
     } catch (err) {
-      clearInterval(progressInterval);
-      const errMsg =
-        err instanceof Error
-          ? err.message
-          : 'Ein Fehler ist aufgetreten. Bitte versuche es erneut.';
+      if (err instanceof Error && err.message === 'DUPLICATE_SUBMISSION') {
+        return; // Handled by overwrite modal
+      }
+      const errMsg = err instanceof Error ? err.message : 'Ein Fehler ist aufgetreten.';
       setError(errMsg);
       setLoading(false);
     }
@@ -488,6 +559,157 @@ export default function Dashboard() {
           </Grid>
         </Grid>
 
+        {/* Active Corrections Queue Tracker */}
+        {recentSubmissions.some(
+          (sub) =>
+            sub.status === 'PENDING' || sub.status === 'PROCESSING' || sub.status === 'FAILED'
+        ) && (
+          <Card
+            sx={{
+              borderRadius: '16px',
+              border: '2px solid #e0f2fe',
+              boxShadow: '0 4px 20px rgba(2, 132, 199, 0.08)',
+              background: 'linear-gradient(135deg, #f0f9ff 0%, #e0f2fe 100%)',
+              overflow: 'hidden',
+            }}
+          >
+            <CardContent sx={{ p: '24px' }}>
+              <Stack
+                direction="row"
+                sx={{ justifyContent: 'space-between', alignItems: 'center', mb: 2.5 }}
+              >
+                <Stack direction="row" spacing={1.5} sx={{ alignItems: 'center' }}>
+                  <CircularProgress size={22} thickness={5} sx={{ color: '#0284c7' }} />
+                  <Typography
+                    variant="h6"
+                    sx={{ fontWeight: 800, color: '#0369a1', letterSpacing: '-0.01em' }}
+                  >
+                    Aktive Korrekturen in der Warteschlange
+                  </Typography>
+                </Stack>
+                <Chip
+                  label={`${recentSubmissions.filter((sub) => sub.status === 'PENDING' || sub.status === 'PROCESSING').length} aktiv`}
+                  size="small"
+                  sx={{ backgroundColor: '#0284c7', color: '#ffffff', fontWeight: 'bold' }}
+                />
+              </Stack>
+
+              <Stack spacing={1.5}>
+                {recentSubmissions
+                  .filter(
+                    (sub) =>
+                      sub.status === 'PENDING' ||
+                      sub.status === 'PROCESSING' ||
+                      sub.status === 'FAILED'
+                  )
+                  .slice(0, 5) // Show top 5
+                  .map((job) => {
+                    const isProcessing = job.status === 'PROCESSING';
+                    const isFailed = job.status === 'FAILED';
+
+                    return (
+                      <Box
+                        key={job.id}
+                        sx={{
+                          backgroundColor: '#ffffff',
+                          borderRadius: '12px',
+                          border: '1px solid #cbd5e1',
+                          padding: '14px 18px',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'space-between',
+                          boxShadow: '0 1px 3px rgba(0,0,0,0.02)',
+                        }}
+                      >
+                        <Stack
+                          direction="row"
+                          spacing={2}
+                          sx={{ alignItems: 'center', overflow: 'hidden' }}
+                        >
+                          {isFailed ? (
+                            <Box sx={{ color: 'error.main', display: 'flex' }}>
+                              <ErrorIcon />
+                            </Box>
+                          ) : isProcessing ? (
+                            <CircularProgress
+                              size={18}
+                              thickness={5}
+                              sx={{ color: 'primary.main' }}
+                            />
+                          ) : (
+                            <Box
+                              sx={{
+                                color: 'text.secondary',
+                                animation: 'pulse 1.5s infinite',
+                                display: 'flex',
+                              }}
+                            >
+                              <SettingsIcon />
+                            </Box>
+                          )}
+
+                          <Box sx={{ overflow: 'hidden', textAlign: 'left' }}>
+                            <Typography variant="body2" sx={{ fontWeight: 700, color: '#1e293b' }}>
+                              {job.studentName === 'Nicht zugeordnet' ? (
+                                <Box
+                                  component="span"
+                                  sx={{
+                                    color: '#d97706',
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    gap: '4px',
+                                  }}
+                                >
+                                  🤖 Auto-Match läuft... ({job.examTitle.split(':')[0]})
+                                </Box>
+                              ) : (
+                                `${job.studentName} — ${job.examTitle}`
+                              )}
+                            </Typography>
+                            <Typography
+                              variant="caption"
+                              sx={{ color: 'text.secondary', display: 'block' }}
+                            >
+                              {isFailed
+                                ? `Fehlgeschlagen: ${job.errorMessage || 'Unbekannter KI-Fehler'}`
+                                : isProcessing
+                                  ? 'KI analysiert Lösungswege auf Folgefehler...'
+                                  : 'In der Warteschlange...'}
+                            </Typography>
+                          </Box>
+                        </Stack>
+
+                        <Stack direction="row" spacing={1.5} sx={{ alignItems: 'center' }}>
+                          <Chip
+                            label={
+                              isFailed ? 'Fehler' : isProcessing ? 'Wird korrigiert' : 'Wartend'
+                            }
+                            size="small"
+                            color={isFailed ? 'error' : isProcessing ? 'info' : 'warning'}
+                            sx={{ fontWeight: 'bold' }}
+                          />
+                          <Link
+                            href={`/correct/${job.id}`}
+                            passHref
+                            style={{ textDecoration: 'none' }}
+                          >
+                            <Button
+                              size="small"
+                              variant="text"
+                              sx={{ textTransform: 'none', fontWeight: 600 }}
+                            >
+                              Workspace öffnen
+                            </Button>
+                          </Link>
+                        </Stack>
+                      </Box>
+                    );
+                  })}
+              </Stack>
+            </CardContent>
+          </Card>
+        )}
+
         {/* Wizard Start Title */}
         <Box>
           <Typography
@@ -578,6 +800,58 @@ export default function Dashboard() {
                           </Typography>
                         ) : (
                           <Grid container spacing={2}>
+                            {/* Option A (Recommended Default): AI Auto-Matching */}
+                            <Grid size={{ xs: 6, sm: 4 }} key="AUTO">
+                              <Box
+                                onClick={() => {
+                                  setSelectedStudentId('AUTO');
+                                  setError('');
+                                  setStudentFiles([]); // Reset uploads
+                                }}
+                                sx={{
+                                  border:
+                                    selectedStudentId === 'AUTO'
+                                      ? '2.5px solid #1b77d1'
+                                      : '1px solid #e2e8f0',
+                                  borderRadius: '12px',
+                                  padding: '16px',
+                                  textAlign: 'center',
+                                  cursor: 'pointer',
+                                  backgroundColor:
+                                    selectedStudentId === 'AUTO' ? '#f0f7ff' : '#ffffff',
+                                  transition: 'all 0.2s ease',
+                                  boxShadow:
+                                    selectedStudentId === 'AUTO'
+                                      ? '0 4px 12px rgba(27, 119, 209, 0.08)'
+                                      : 'none',
+                                  '&:hover': {
+                                    borderColor: '#1b77d1',
+                                    backgroundColor:
+                                      selectedStudentId === 'AUTO' ? '#f0f7ff' : '#f8fafc',
+                                  },
+                                }}
+                              >
+                                <AutoAwesomeIcon
+                                  sx={{
+                                    fontSize: '2rem',
+                                    color:
+                                      selectedStudentId === 'AUTO' ? '#1b77d1' : 'text.secondary',
+                                    mb: 1,
+                                  }}
+                                />
+                                <Typography
+                                  variant="body2"
+                                  sx={{
+                                    fontWeight: selectedStudentId === 'AUTO' ? 700 : 500,
+                                    color:
+                                      selectedStudentId === 'AUTO' ? '#1b77d1' : 'text.primary',
+                                  }}
+                                >
+                                  Auto-Match (🤖)
+                                </Typography>
+                              </Box>
+                            </Grid>
+
                             {students.map((student) => {
                               const isSelected = selectedStudentId === student.id;
                               return (
@@ -586,12 +860,13 @@ export default function Dashboard() {
                                     onClick={() => {
                                       setSelectedStudentId(student.id);
                                       setError('');
+                                      setStudentFiles([]); // Reset uploads
                                     }}
                                     sx={{
                                       border: isSelected
                                         ? '2.5px solid #1b77d1'
                                         : '1px solid #e2e8f0',
-                                      borderRadius: '8px',
+                                      borderRadius: '12px',
                                       padding: '16px',
                                       textAlign: 'center',
                                       cursor: 'pointer',
@@ -829,7 +1104,9 @@ export default function Dashboard() {
                       <Box component="span" sx={{ color: 'primary.main', fontWeight: 'bold' }}>
                         ③
                       </Box>{' '}
-                      Schülerarbeit hochladen (Scans/Fotos/PDF)
+                      {selectedStudentId === 'AUTO'
+                        ? 'Schülerarbeiten hochladen (Bulk-Upload)'
+                        : 'Schülerarbeit hochladen (Scans/Fotos/PDF)'}
                     </Typography>
 
                     <Box
@@ -838,18 +1115,25 @@ export default function Dashboard() {
                       onClick={() => {
                         const input = document.createElement('input');
                         input.type = 'file';
+                        input.multiple = selectedStudentId === 'AUTO';
                         input.accept = 'image/*,application/pdf';
                         input.onchange = (e: Event) => {
                           const target = e.target as HTMLInputElement;
-                          if (target.files && target.files[0]) {
-                            setStudentFile(target.files[0]);
+                          if (target.files) {
+                            const files = Array.from(target.files);
+                            if (selectedStudentId === 'AUTO') {
+                              setStudentFiles((prev) => [...prev, ...files]);
+                            } else if (files[0]) {
+                              setStudentFiles([files[0]]);
+                            }
                             setError('');
                           }
                         };
                         input.click();
                       }}
                       sx={{
-                        border: studentFile ? '2px dashed #2e7d32' : '2px dashed #cbd5e1',
+                        border:
+                          studentFiles.length > 0 ? '2px dashed #2e7d32' : '2px dashed #cbd5e1',
                         borderRadius: '8px',
                         padding: '40px 20px',
                         textAlign: 'center',
@@ -862,18 +1146,129 @@ export default function Dashboard() {
                         },
                       }}
                     >
-                      {studentFile ? (
-                        <Stack spacing={1.5} sx={{ alignItems: 'center' }}>
-                          <DescriptionIcon sx={{ fontSize: '3rem', color: 'success.main' }} />
-                          <Typography
-                            variant="subtitle1"
-                            sx={{ fontWeight: 650, color: 'success.main' }}
-                          >
-                            {studentFile.name}
-                          </Typography>
-                          <Typography variant="caption" sx={{ color: 'text.secondary' }}>
-                            {(studentFile.size / (1024 * 1024)).toFixed(2)} MB • Bereit für Analyse
-                          </Typography>
+                      {studentFiles.length > 0 ? (
+                        <Stack spacing={1.5} sx={{ width: '100%' }}>
+                          {selectedStudentId === 'AUTO' ? (
+                            <>
+                              <Typography
+                                variant="subtitle2"
+                                sx={{
+                                  fontWeight: 700,
+                                  color: 'text.secondary',
+                                  textAlign: 'left',
+                                  mb: 0.5,
+                                }}
+                              >
+                                Ausgewählte Arbeiten ({studentFiles.length}):
+                              </Typography>
+                              <Box
+                                sx={{
+                                  display: 'grid',
+                                  gridTemplateColumns: '1fr',
+                                  gap: '8px',
+                                  width: '100%',
+                                }}
+                              >
+                                {studentFiles.map((file, fileIdx) => (
+                                  <Box
+                                    key={fileIdx}
+                                    sx={{
+                                      display: 'flex',
+                                      alignItems: 'center',
+                                      justifyContent: 'space-between',
+                                      padding: '10px 16px',
+                                      borderRadius: '8px',
+                                      border: '1px solid #cbd5e1',
+                                      background: '#ffffff',
+                                    }}
+                                    onClick={(e) => e.stopPropagation()} // Stop triggering file picker
+                                  >
+                                    <Stack
+                                      direction="row"
+                                      spacing={1.5}
+                                      sx={{ alignItems: 'center', overflow: 'hidden' }}
+                                    >
+                                      <DescriptionIcon sx={{ color: 'primary.main' }} />
+                                      <Box sx={{ textAlign: 'left', overflow: 'hidden' }}>
+                                        <Typography
+                                          variant="body2"
+                                          sx={{
+                                            fontWeight: 700,
+                                            color: 'text.primary',
+                                            overflow: 'hidden',
+                                            textOverflow: 'ellipsis',
+                                            whiteSpace: 'nowrap',
+                                          }}
+                                        >
+                                          {file.name}
+                                        </Typography>
+                                        <Typography
+                                          variant="caption"
+                                          sx={{ color: 'text.secondary' }}
+                                        >
+                                          {(file.size / (1024 * 1024)).toFixed(2)} MB
+                                        </Typography>
+                                      </Box>
+                                    </Stack>
+                                    <Button
+                                      size="small"
+                                      color="error"
+                                      sx={{
+                                        minWidth: 'auto',
+                                        p: '4px',
+                                        textTransform: 'none',
+                                        fontWeight: 600,
+                                      }}
+                                      onClick={() => {
+                                        setStudentFiles((prev) =>
+                                          prev.filter((_, idx) => idx !== fileIdx)
+                                        );
+                                      }}
+                                    >
+                                      Entfernen
+                                    </Button>
+                                  </Box>
+                                ))}
+                              </Box>
+                              <Button
+                                size="small"
+                                variant="outlined"
+                                startIcon={<CloudUploadIcon />}
+                                sx={{ mt: 1, textTransform: 'none', fontWeight: 600 }}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  const input = document.createElement('input');
+                                  input.type = 'file';
+                                  input.multiple = true;
+                                  input.accept = 'image/*,application/pdf';
+                                  input.onchange = (evt: Event) => {
+                                    const target = evt.target as HTMLInputElement;
+                                    if (target.files) {
+                                      const files = Array.from(target.files);
+                                      setStudentFiles((prev) => [...prev, ...files]);
+                                    }
+                                  };
+                                  input.click();
+                                }}
+                              >
+                                Weitere Arbeiten hinzufügen
+                              </Button>
+                            </>
+                          ) : (
+                            <Stack spacing={1.5} sx={{ alignItems: 'center' }}>
+                              <DescriptionIcon sx={{ fontSize: '3rem', color: 'success.main' }} />
+                              <Typography
+                                variant="subtitle1"
+                                sx={{ fontWeight: 650, color: 'success.main' }}
+                              >
+                                {studentFiles[0].name}
+                              </Typography>
+                              <Typography variant="caption" sx={{ color: 'text.secondary' }}>
+                                {(studentFiles[0].size / (1024 * 1024)).toFixed(2)} MB • Bereit für
+                                Analyse
+                              </Typography>
+                            </Stack>
+                          )}
                         </Stack>
                       ) : (
                         <Stack spacing={1.5} sx={{ alignItems: 'center' }}>
@@ -882,10 +1277,12 @@ export default function Dashboard() {
                             variant="subtitle1"
                             sx={{ fontWeight: 650, color: 'text.primary' }}
                           >
-                            Zieh die Arbeit hierher oder klicke zum Auswählen
+                            Zieh die Arbeit(en) hierher oder klicke zum Auswählen
                           </Typography>
                           <Typography variant="body2" sx={{ color: 'text.secondary' }}>
-                            Unterstützt PDF, JPG, PNG • Max. 20MB
+                            {selectedStudentId === 'AUTO'
+                              ? 'Wähle eine oder mehrere Dateien aus • PDF, JPG, PNG'
+                              : 'Wähle eine einzelne Datei aus • PDF, JPG, PNG'}
                           </Typography>
                         </Stack>
                       )}
@@ -1001,13 +1398,13 @@ export default function Dashboard() {
 
                 {/* Start Button */}
                 <Button
-                  onClick={startAnalysis}
+                  onClick={() => startAnalysis(false)}
                   className="glow-button"
                   variant="contained"
                   fullWidth
                   size="large"
                   endIcon={<FlashOnIcon />}
-                  disabled={!selectedStudentId || !studentFile || loading}
+                  disabled={!selectedStudentId || studentFiles.length === 0 || loading}
                   sx={{
                     padding: '14px',
                     borderRadius: '8px',
@@ -1058,7 +1455,53 @@ export default function Dashboard() {
                       key={sub.id}
                       sx={{ '&:last-child td, &:last-child th': { border: 0 } }}
                     >
-                      <TableCell sx={{ fontWeight: 600 }}>{sub.studentName}</TableCell>
+                      <TableCell sx={{ fontWeight: 600 }}>
+                        {sub.studentName !== 'Nicht zugeordnet' ? (
+                          sub.studentName
+                        ) : (
+                          <Box
+                            sx={{ display: 'flex', alignItems: 'center', gap: '8px' }}
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            <FormControl size="small" sx={{ minWidth: '160px' }}>
+                              <Select
+                                value={assignState[sub.id] || ''}
+                                onChange={(e) =>
+                                  setAssignState((prev) => ({ ...prev, [sub.id]: e.target.value }))
+                                }
+                                displayEmpty
+                                sx={{ height: '32px', fontSize: '0.85rem', borderRadius: '6px' }}
+                              >
+                                <MenuItem value="" disabled>
+                                  <em>Schüler zuordnen...</em>
+                                </MenuItem>
+                                {students.map((st) => (
+                                  <MenuItem key={st.id} value={st.id}>
+                                    {st.name}
+                                  </MenuItem>
+                                ))}
+                              </Select>
+                            </FormControl>
+                            <Button
+                              size="small"
+                              variant="contained"
+                              disabled={!assignState[sub.id]}
+                              onClick={() => handleManualAssign(sub.id)}
+                              sx={{
+                                minWidth: 'auto',
+                                px: 1.5,
+                                py: 0.5,
+                                height: '32px',
+                                textTransform: 'none',
+                                borderRadius: '6px',
+                                fontWeight: 600,
+                              }}
+                            >
+                              Zuordnen
+                            </Button>
+                          </Box>
+                        )}
+                      </TableCell>
                       <TableCell>{sub.examTitle}</TableCell>
                       <TableCell>
                         <Chip
@@ -1069,16 +1512,42 @@ export default function Dashboard() {
                       </TableCell>
                       <TableCell sx={{ fontWeight: 600 }}>{sub.points}</TableCell>
                       <TableCell>
-                        <Chip
-                          label={sub.grade}
-                          size="small"
-                          sx={{
-                            backgroundColor: '#1b77d1',
-                            color: '#ffffff',
-                            fontWeight: 'bold',
-                            borderRadius: '6px',
-                          }}
-                        />
+                        {sub.status === 'COMPLETED' ? (
+                          <Chip
+                            label={sub.grade}
+                            size="small"
+                            sx={{
+                              backgroundColor: '#1b77d1',
+                              color: '#ffffff',
+                              fontWeight: 'bold',
+                              borderRadius: '6px',
+                            }}
+                          />
+                        ) : sub.status === 'PROCESSING' ? (
+                          <Chip
+                            label="Läuft..."
+                            size="small"
+                            color="info"
+                            variant="outlined"
+                            sx={{ fontWeight: 'bold' }}
+                          />
+                        ) : sub.status === 'FAILED' ? (
+                          <Chip
+                            label="Fehler"
+                            size="small"
+                            color="error"
+                            variant="outlined"
+                            sx={{ fontWeight: 'bold' }}
+                          />
+                        ) : (
+                          <Chip
+                            label="Wartend"
+                            size="small"
+                            color="warning"
+                            variant="outlined"
+                            sx={{ fontWeight: 'bold' }}
+                          />
+                        )}
                       </TableCell>
                       <TableCell>{sub.date}</TableCell>
                       <TableCell sx={{ textAlign: 'right' }}>

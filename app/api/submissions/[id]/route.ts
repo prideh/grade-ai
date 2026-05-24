@@ -3,10 +3,7 @@ import { db } from '@/lib/db';
 import { getSession } from '@/lib/session';
 
 // GET: Fetch a submission by ID and map to standard ExamCorrectionResult
-export async function GET(
-  request: Request,
-  { params }: { params: Promise<{ id: string }> }
-) {
+export async function GET(request: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
     const session = await getSession();
     if (!session) {
@@ -47,7 +44,11 @@ export async function GET(
     // Map DB relational model to ExamCorrectionResult frontend format
     const responseData = {
       id: submission.id,
-      schuelerName: submission.student.name,
+      status: submission.status,
+      errorMessage: submission.errorMessage,
+      schuelerName: submission.student?.name || 'Nicht zugeordnet',
+      studentId: submission.studentId,
+      classId: submission.exam.classId,
       fach: submission.exam.subject,
       datum: submission.createdAt.toLocaleDateString('de-CH'),
       gesamterzieltePunkte: submission.earnedPoints,
@@ -62,22 +63,24 @@ export async function GET(
         maximalPunkte: task.maximalPunkte,
         status: task.status,
         lehrerKommentar: task.lehrerKommentar,
-        schritte: task.schritte.map((step) => ({
-          id: step.id,
-          schrittIndex: step.schrittIndex,
-          schrittText: step.schrittText,
-          istKorrekt: step.istKorrekt,
-          fehlerTyp: step.fehlerTyp,
-          erreichtePunkte: step.erreichtePunkte,
-          maximalPunkte: step.maximalPunkte,
-          begruendung: step.begruendung,
-        })).sort((a, b) => a.schrittIndex - b.schrittIndex),
+        schritte: task.schritte
+          .map((step) => ({
+            id: step.id,
+            schrittIndex: step.schrittIndex,
+            schrittText: step.schrittText,
+            istKorrekt: step.istKorrekt,
+            fehlerTyp: step.fehlerTyp,
+            erreichtePunkte: step.erreichtePunkte,
+            maximalPunkte: step.maximalPunkte,
+            begruendung: step.begruendung,
+          }))
+          .sort((a, b) => a.schrittIndex - b.schrittIndex),
       })),
       schuelerFeedback: {
         staerken: submission.strengths,
-        schwaechen: submission.weaknesses,
-        hilfreicherTipp: submission.helpfulTip,
-        uebungsEmpfehlung: submission.exerciseRecommendation,
+        weaknesses: submission.weaknesses,
+        hilfreicherTipp: submission.helpfulTip || '',
+        uebungsEmpfehlung: submission.exerciseRecommendation || '',
       },
     };
 
@@ -89,10 +92,7 @@ export async function GET(
 }
 
 // POST: Save updated teacher points, comments, and recalculate grades
-export async function POST(
-  request: Request,
-  { params }: { params: Promise<{ id: string }> }
-) {
+export async function POST(request: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
     const session = await getSession();
     if (!session) {
@@ -139,7 +139,10 @@ export async function POST(
         if (Array.isArray(updatedTask.schritte)) {
           for (const updatedStep of updatedTask.schritte) {
             // Clamp points between 0 and max
-            const clampedPoints = Math.max(0, Math.min(updatedStep.maximalPunkte, updatedStep.erreichtePunkte));
+            const clampedPoints = Math.max(
+              0,
+              Math.min(updatedStep.maximalPunkte, updatedStep.erreichtePunkte)
+            );
             taskPoints += clampedPoints;
 
             // If step ID is present, update in DB
@@ -197,5 +200,88 @@ export async function POST(
   } catch (error) {
     console.error('Error updating submission:', error);
     return NextResponse.json({ error: 'Speichern fehlgeschlagen.' }, { status: 500 });
+  }
+}
+
+// PATCH: Update studentId for manual mapping / AI Auto-Matching override
+export async function PATCH(request: Request, { params }: { params: Promise<{ id: string }> }) {
+  try {
+    const session = await getSession();
+    if (!session) {
+      return NextResponse.json({ error: 'Nicht autorisiert.' }, { status: 401 });
+    }
+
+    const { id: submissionId } = await params;
+    const body = await request.json();
+    const { studentId } = body;
+
+    if (!studentId) {
+      return NextResponse.json({ error: 'Schüler-ID fehlt.' }, { status: 400 });
+    }
+
+    // Load the submission
+    const submission = await db.submission.findUnique({
+      where: { id: submissionId },
+      include: {
+        exam: {
+          include: {
+            class: true,
+          },
+        },
+      },
+    });
+
+    if (!submission) {
+      return NextResponse.json({ error: 'Korrektur nicht gefunden.' }, { status: 404 });
+    }
+
+    // Verify ownership
+    if (submission.exam.class.teacherId !== session.userId) {
+      return NextResponse.json({ error: 'Nicht autorisiert.' }, { status: 403 });
+    }
+
+    // Verify student exists in the same class
+    const student = await db.student.findUnique({
+      where: { id: studentId },
+    });
+
+    if (!student || student.classId !== submission.exam.classId) {
+      return NextResponse.json({ error: 'Ungültiger Schüler für diese Klasse.' }, { status: 400 });
+    }
+
+    // Check if a submission already exists for this exam and student
+    const existingSubmission = await db.submission.findFirst({
+      where: {
+        examId: submission.examId,
+        studentId: studentId,
+        id: { not: submissionId },
+      },
+    });
+
+    if (existingSubmission) {
+      return NextResponse.json(
+        {
+          error: 'Für diesen Schüler existiert bereits eine Korrektur für diese Prüfung.',
+          code: 'DUPLICATE_SUBMISSION',
+        },
+        { status: 409 }
+      );
+    }
+
+    // Update studentId
+    const updated = await db.submission.update({
+      where: { id: submissionId },
+      data: { studentId },
+      include: { student: true },
+    });
+
+    return NextResponse.json({
+      success: true,
+      studentId: updated.studentId,
+      studentName: updated.student?.name,
+    });
+  } catch (error) {
+    console.error('Error assigning student to submission:', error);
+    return NextResponse.json({ error: 'Zuweisung fehlgeschlagen.' }, { status: 500 });
   }
 }

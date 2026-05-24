@@ -35,16 +35,18 @@ export async function GET() {
     const mapped = submissions.map((sub) => ({
       id: sub.id,
       studentId: sub.studentId,
-      studentName: sub.student.name,
+      studentName: sub.student?.name || 'Nicht zugeordnet',
       examId: sub.examId,
       examTitle: sub.exam.title,
       classId: sub.exam.classId,
       className: sub.exam.class.name,
       subject: sub.exam.subject,
-      grade: sub.gradeRounded,
-      points: `${sub.earnedPoints.toFixed(1)} / ${sub.exam.maxPoints}`,
+      grade: sub.status === 'COMPLETED' ? sub.gradeRounded : '—',
+      points:
+        sub.status === 'COMPLETED' ? `${sub.earnedPoints.toFixed(1)} / ${sub.exam.maxPoints}` : '—',
       status: sub.status,
       date: sub.createdAt.toLocaleDateString('de-CH'),
+      errorMessage: sub.errorMessage,
     }));
 
     return NextResponse.json({ submissions: mapped });
@@ -53,4 +55,3 @@ export async function GET() {
     return NextResponse.json({ error: 'Fehler beim Laden der Korrekturen.' }, { status: 500 });
   }
 }
-

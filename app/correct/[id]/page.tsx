@@ -3,6 +3,7 @@
 import * as React from 'react';
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
+import Image from 'next/image';
 import { useParams } from 'next/navigation';
 import {
   Box,
@@ -31,12 +32,19 @@ import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome';
 
 import { ExamCorrectionResult } from '../../../lib/gemini';
 
+interface WorkspaceSubmission extends ExamCorrectionResult {
+  status: 'PENDING' | 'PROCESSING' | 'COMPLETED' | 'FAILED';
+  errorMessage?: string | null;
+  studentId?: string | null;
+  classId?: string | null;
+}
+
 export default function CorrectWorkspace() {
   const params = useParams();
   const id = params?.id;
   const theme = useTheme();
 
-  const [data, setData] = useState<ExamCorrectionResult | null>(null);
+  const [data, setData] = useState<WorkspaceSubmission | null>(null);
   const [activeTaskIndex, setActiveTaskIndex] = useState<number>(0);
   const [showSaveToast, setShowSaveToast] = useState<boolean>(false);
   const [noSession, setNoSession] = useState<boolean>(false);
@@ -44,12 +52,12 @@ export default function CorrectWorkspace() {
 
   // Debounced auto-save function to prevent network storms
   const saveTimeoutRef = React.useRef<NodeJS.Timeout | null>(null);
-  
+
   const saveToDatabase = (updatedData: ExamCorrectionResult, immediate = false) => {
     if (saveTimeoutRef.current) {
       clearTimeout(saveTimeoutRef.current);
     }
-    
+
     const executeSave = async () => {
       try {
         const res = await fetch(`/api/submissions/${id}`, {
@@ -79,10 +87,10 @@ export default function CorrectWorkspace() {
     };
   }, []);
 
-  // Initialize data from PostgreSQL database instead of sessionStorage
+  // Initialize data from PostgreSQL database
   useEffect(() => {
     if (!id) return;
-    
+
     async function loadSubmission() {
       try {
         const res = await fetch(`/api/submissions/${id}`);
@@ -100,6 +108,26 @@ export default function CorrectWorkspace() {
 
     loadSubmission();
   }, [id]);
+
+  // Live polling for PENDING & PROCESSING status updates
+  useEffect(() => {
+    if (!id || !data) return;
+    if (data.status !== 'PENDING' && data.status !== 'PROCESSING') return;
+
+    const interval = setInterval(async () => {
+      try {
+        const res = await fetch(`/api/submissions/${id}`);
+        if (res.ok) {
+          const parsed = await res.json();
+          setData(parsed);
+        }
+      } catch (e) {
+        console.error('Failed to poll status:', e);
+      }
+    }, 3000);
+
+    return () => clearInterval(interval);
+  }, [id, data]);
 
   if (noSession) {
     return (
@@ -182,6 +210,129 @@ export default function CorrectWorkspace() {
         <Typography variant="body2" sx={{ color: 'text.secondary' }}>
           Korrektur-Daten werden geladen...
         </Typography>
+      </Box>
+    );
+  }
+
+  // Waiting screen for PENDING and PROCESSING queue states
+  if (data.status === 'PENDING' || data.status === 'PROCESSING') {
+    return (
+      <Box
+        sx={{
+          minHeight: '100vh',
+          background: '#f8fafc',
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          justifyContent: 'center',
+          gap: '24px',
+          padding: '24px',
+          textAlign: 'center',
+        }}
+      >
+        <Box sx={{ position: 'relative', display: 'inline-flex' }}>
+          <CircularProgress size={80} thickness={4.5} sx={{ color: 'primary.main' }} />
+          <Box
+            sx={{
+              top: 0,
+              left: 0,
+              bottom: 0,
+              right: 0,
+              position: 'absolute',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+            }}
+          >
+            <AutoAwesomeIcon sx={{ color: 'primary.main', fontSize: '2rem' }} />
+          </Box>
+        </Box>
+
+        <Box>
+          <Typography variant="h5" sx={{ fontWeight: 800, color: '#0f172a', mb: 1 }}>
+            {data.status === 'PENDING' ? 'In der Warteschlange...' : 'KI-Analyse läuft...'}
+          </Typography>
+          <Typography
+            variant="body2"
+            sx={{ color: 'text.secondary', maxWidth: '450px', mx: 'auto', lineHeight: 1.6 }}
+          >
+            {data.status === 'PENDING'
+              ? 'Deine Schülerarbeit wartet darauf, von der KI bewertet zu werden. Der Prozess startet in wenigen Sekunden.'
+              : 'Die multimodale KI entziffert die Handschrift, überprüft Lösungswege auf Folgefehler und erstellt personalisiertes Feedback.'}
+          </Typography>
+        </Box>
+
+        <Link href="/dashboard" passHref style={{ textDecoration: 'none' }}>
+          <Button
+            variant="outlined"
+            sx={{ borderRadius: '8px', textTransform: 'none', fontWeight: 600, px: 3 }}
+          >
+            Zurück zum Dashboard
+          </Button>
+        </Link>
+      </Box>
+    );
+  }
+
+  // Failure screen for FAILED state
+  if (data.status === 'FAILED') {
+    return (
+      <Box
+        sx={{
+          minHeight: '100vh',
+          background: '#f8fafc',
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          justifyContent: 'center',
+          gap: '20px',
+          padding: '24px',
+          textAlign: 'center',
+        }}
+      >
+        <Box
+          sx={{
+            width: '72px',
+            height: '72px',
+            borderRadius: '50%',
+            backgroundColor: '#fee2e2',
+            color: '#ef4444',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+          }}
+        >
+          <ErrorIcon sx={{ fontSize: '3rem' }} />
+        </Box>
+
+        <Box sx={{ maxWidth: '500px', width: '100%' }}>
+          <Typography variant="h5" sx={{ fontWeight: 800, color: '#0f172a', mb: 1 }}>
+            KI-Korrektur fehlgeschlagen
+          </Typography>
+          <Typography variant="body2" sx={{ color: 'text.secondary', mb: 3 }}>
+            Während der automatisierten Korrektur ist ein Fehler aufgetreten.
+          </Typography>
+
+          <Alert severity="error" sx={{ textAlign: 'left', borderRadius: '8px', mb: 4 }}>
+            {data.errorMessage || 'Ein unbekannter Fehler ist aufgetreten.'}
+          </Alert>
+        </Box>
+
+        <Link href="/dashboard" passHref style={{ textDecoration: 'none' }}>
+          <Button
+            variant="contained"
+            sx={{
+              backgroundColor: '#1b77d1',
+              borderRadius: '8px',
+              textTransform: 'none',
+              fontWeight: 600,
+              px: 4,
+              '&:hover': { backgroundColor: '#1565c0' },
+            }}
+          >
+            Zurück zum Dashboard
+          </Button>
+        </Link>
       </Box>
     );
   }
@@ -371,10 +522,14 @@ export default function CorrectWorkspace() {
               <Typography variant="subtitle1" sx={{ color: 'text.primary', fontWeight: 700 }}>
                 Original Schüler-Arbeit (Multimodale Visualisierung)
               </Typography>
-              
+
               {/* Transcript / Scan switcher tabs */}
               {data.studentExamUrl && (
-                <Stack direction="row" spacing={0.5} sx={{ backgroundColor: '#e2e8f0', p: '3px', borderRadius: '6px' }}>
+                <Stack
+                  direction="row"
+                  spacing={0.5}
+                  sx={{ backgroundColor: '#e2e8f0', p: '3px', borderRadius: '6px' }}
+                >
                   <Button
                     size="small"
                     onClick={() => setLeftPanelTab('transcript')}
@@ -387,8 +542,12 @@ export default function CorrectWorkspace() {
                       backgroundColor: leftPanelTab === 'transcript' ? '#ffffff' : 'transparent',
                       color: leftPanelTab === 'transcript' ? '#1b77d1' : '#475569',
                       fontWeight: leftPanelTab === 'transcript' ? 700 : 500,
-                      boxShadow: leftPanelTab === 'transcript' ? '0 1px 3px rgba(0,0,0,0.1)' : 'none',
-                      '&:hover': { backgroundColor: leftPanelTab === 'transcript' ? '#ffffff' : 'rgba(0,0,0,0.04)' }
+                      boxShadow:
+                        leftPanelTab === 'transcript' ? '0 1px 3px rgba(0,0,0,0.1)' : 'none',
+                      '&:hover': {
+                        backgroundColor:
+                          leftPanelTab === 'transcript' ? '#ffffff' : 'rgba(0,0,0,0.04)',
+                      },
                     }}
                   >
                     Digitales Transkript
@@ -406,7 +565,9 @@ export default function CorrectWorkspace() {
                       color: leftPanelTab === 'scan' ? '#1b77d1' : '#475569',
                       fontWeight: leftPanelTab === 'scan' ? 700 : 500,
                       boxShadow: leftPanelTab === 'scan' ? '0 1px 3px rgba(0,0,0,0.1)' : 'none',
-                      '&:hover': { backgroundColor: leftPanelTab === 'scan' ? '#ffffff' : 'rgba(0,0,0,0.04)' }
+                      '&:hover': {
+                        backgroundColor: leftPanelTab === 'scan' ? '#ffffff' : 'rgba(0,0,0,0.04)',
+                      },
                     }}
                   >
                     Originaler Scan
@@ -414,7 +575,10 @@ export default function CorrectWorkspace() {
                 </Stack>
               )}
 
-              <Typography variant="caption" sx={{ color: 'text.secondary', display: { xs: 'none', sm: 'block' } }}>
+              <Typography
+                variant="caption"
+                sx={{ color: 'text.secondary', display: { xs: 'none', sm: 'block' } }}
+              >
                 Seite 1 von 1
               </Typography>
             </Stack>
@@ -427,24 +591,26 @@ export default function CorrectWorkspace() {
                   borderRadius: '8px',
                   padding: '12px',
                   minHeight: '680px',
+                  height: '750px',
                   boxShadow: '0 4px 12px rgba(0, 0, 0, 0.08)',
                   display: 'flex',
                   justifyContent: 'center',
                   alignItems: 'center',
                   border: '1px solid #cbd5e1',
                   overflow: 'hidden',
+                  position: 'relative',
                 }}
               >
-                <img
+                <Image
                   src={data.studentExamUrl}
                   alt="Original Schülerarbeit Scan"
+                  fill
                   style={{
-                    maxWidth: '100%',
-                    maxHeight: '750px',
                     objectFit: 'contain',
-                    borderRadius: '4px',
-                    boxShadow: '0 2px 8px rgba(0,0,0,0.08)',
+                    padding: '12px',
                   }}
+                  sizes="(max-width: 1200px) 100vw, 50vw"
+                  priority
                 />
               </Box>
             ) : (
@@ -478,149 +644,151 @@ export default function CorrectWorkspace() {
                   }}
                 />
 
-              {/* Student Header details */}
-              <Box
-                sx={{
-                  display: 'flex',
-                  justifyContent: 'space-between',
-                  borderBottom: '1px solid #94a3b8',
-                  paddingBottom: '10px',
-                  marginBottom: '30px',
-                  fontFamily: 'sans-serif',
-                  fontSize: '0.85rem',
-                  color: '#475569',
-                  fontWeight: 500,
-                }}
-              >
-                <Box>Name: {data.schuelerName}</Box>
-                <Box>Klasse: 9b</Box>
-                <Box>Datum: {data.datum}</Box>
-              </Box>
-
-              {/* Dynamically render actual student tasks & transcribed handwriting from Gemini API */}
-              {data.aufgaben.map((task, taskIdx) => (
+                {/* Student Header details */}
                 <Box
-                  key={task.aufgabeId}
-                  onClick={() => setActiveTaskIndex(taskIdx)}
                   sx={{
-                    position: 'relative',
-                    padding: '16px',
-                    borderRadius: '8px',
-                    marginBottom: '24px',
-                    cursor: 'pointer',
-                    border:
-                      activeTaskIndex === taskIdx ? '1px dashed #1b77d1' : '1px solid transparent',
-                    background:
-                      activeTaskIndex === taskIdx ? 'rgba(27, 119, 209, 0.05)' : 'transparent',
-                    '&:hover': {
-                      background: 'rgba(27, 119, 209, 0.02)',
-                    },
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    borderBottom: '1px solid #94a3b8',
+                    paddingBottom: '10px',
+                    marginBottom: '30px',
+                    fontFamily: 'sans-serif',
+                    fontSize: '0.85rem',
+                    color: '#475569',
+                    fontWeight: 500,
                   }}
                 >
-                  <Typography
-                    sx={{
-                      fontFamily: 'sans-serif',
-                      fontSize: '0.95rem',
-                      fontWeight: 'bold',
-                      color: '#1e293b',
-                      marginBottom: '8px',
-                    }}
-                  >
-                    {task.titel}
-                  </Typography>
-                  <Typography
-                    component="div"
-                    sx={{
-                      fontSize: '1.25rem',
-                      letterSpacing: '0.05em',
-                      lineHeight: 1.8,
-                      color: '#334155',
-                      fontFamily: 'inherit',
-                      whiteSpace: 'pre-wrap',
-                      maxWidth: '85%',
-                    }}
-                  >
-                    {task.schuelerAntwort}
-
-                    {/* Dynamic Digital Red Ink corrections drawn based on real steps! */}
-                    <Box sx={{ mt: 1.5, fontFamily: 'sans-serif', fontSize: '0.9rem' }}>
-                      {task.schritte.map((step) => {
-                        if (
-                          step.fehlerTyp === 'Rechenfehler' ||
-                          step.fehlerTyp === 'SonstigerFehler'
-                        ) {
-                          return (
-                            <Box
-                              key={step.schrittIndex}
-                              sx={{
-                                color: 'error.main',
-                                border: `1.5px solid ${theme.palette.error.main}`,
-                                padding: '2px 8px',
-                                borderRadius: '4px',
-                                fontWeight: 'bold',
-                                display: 'inline-block',
-                                transform: `rotate(${step.schrittIndex % 2 === 0 ? -1 : 1}deg)`,
-                                backgroundColor: 'rgba(239, 68, 68, 0.05)',
-                                mr: 1,
-                                mb: 1,
-                              }}
-                            >
-                              Schritt {step.schrittIndex}: {step.begruendung} ❌ (-
-                              {step.maximalPunkte - step.erreichtePunkte} P.)
-                            </Box>
-                          );
-                        } else if (step.fehlerTyp === 'Folgefehler') {
-                          return (
-                            <Box
-                              key={step.schrittIndex}
-                              sx={{
-                                color: 'warning.main',
-                                border: `1.5px solid ${theme.palette.warning.main}`,
-                                padding: '2px 8px',
-                                borderRadius: '4px',
-                                fontWeight: 'bold',
-                                display: 'inline-block',
-                                transform: `rotate(${step.schrittIndex % 2 === 0 ? 1 : -0.5}deg)`,
-                                backgroundColor: 'rgba(245, 158, 11, 0.05)',
-                                mr: 1,
-                                mb: 1,
-                              }}
-                            >
-                              Schritt {step.schrittIndex}: Folgefehler berücksichtigt! ✔️ (
-                              {step.erreichtePunkte}/{step.maximalPunkte} P.)
-                            </Box>
-                          );
-                        }
-                        return null;
-                      })}
-                    </Box>
-                  </Typography>
-
-                  {/* Red ink point stamp */}
-                  <Box
-                    sx={{
-                      position: 'absolute',
-                      right: '15px',
-                      top: '15px',
-                      fontSize: '1.4rem',
-                      color: 'error.main',
-                      fontWeight: 'bold',
-                      border: '3px double #ef4444',
-                      width: '56px',
-                      height: '56px',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      borderRadius: '50%',
-                      transform: `rotate(${taskIdx % 2 === 0 ? -8 : 6}deg)`,
-                      pointerEvents: 'none',
-                    }}
-                  >
-                    {task.erzieltePunkte?.toFixed(1) ?? '0.0'}/{task.maximalPunkte}
-                  </Box>
+                  <Box>Name: {data.schuelerName}</Box>
+                  <Box>Klasse: 9b</Box>
+                  <Box>Datum: {data.datum}</Box>
                 </Box>
-              ))}
-            </Box>
+
+                {/* Dynamically render actual student tasks & transcribed handwriting from Gemini API */}
+                {data.aufgaben.map((task, taskIdx) => (
+                  <Box
+                    key={task.aufgabeId}
+                    onClick={() => setActiveTaskIndex(taskIdx)}
+                    sx={{
+                      position: 'relative',
+                      padding: '16px',
+                      borderRadius: '8px',
+                      marginBottom: '24px',
+                      cursor: 'pointer',
+                      border:
+                        activeTaskIndex === taskIdx
+                          ? '1px dashed #1b77d1'
+                          : '1px solid transparent',
+                      background:
+                        activeTaskIndex === taskIdx ? 'rgba(27, 119, 209, 0.05)' : 'transparent',
+                      '&:hover': {
+                        background: 'rgba(27, 119, 209, 0.02)',
+                      },
+                    }}
+                  >
+                    <Typography
+                      sx={{
+                        fontFamily: 'sans-serif',
+                        fontSize: '0.95rem',
+                        fontWeight: 'bold',
+                        color: '#1e293b',
+                        marginBottom: '8px',
+                      }}
+                    >
+                      {task.titel}
+                    </Typography>
+                    <Typography
+                      component="div"
+                      sx={{
+                        fontSize: '1.25rem',
+                        letterSpacing: '0.05em',
+                        lineHeight: 1.8,
+                        color: '#334155',
+                        fontFamily: 'inherit',
+                        whiteSpace: 'pre-wrap',
+                        maxWidth: '85%',
+                      }}
+                    >
+                      {task.schuelerAntwort}
+
+                      {/* Dynamic Digital Red Ink corrections drawn based on real steps! */}
+                      <Box sx={{ mt: 1.5, fontFamily: 'sans-serif', fontSize: '0.9rem' }}>
+                        {task.schritte.map((step) => {
+                          if (
+                            step.fehlerTyp === 'Rechenfehler' ||
+                            step.fehlerTyp === 'SonstigerFehler'
+                          ) {
+                            return (
+                              <Box
+                                key={step.schrittIndex}
+                                sx={{
+                                  color: 'error.main',
+                                  border: `1.5px solid ${theme.palette.error.main}`,
+                                  padding: '2px 8px',
+                                  borderRadius: '4px',
+                                  fontWeight: 'bold',
+                                  display: 'inline-block',
+                                  transform: `rotate(${step.schrittIndex % 2 === 0 ? -1 : 1}deg)`,
+                                  backgroundColor: 'rgba(239, 68, 68, 0.05)',
+                                  mr: 1,
+                                  mb: 1,
+                                }}
+                              >
+                                Schritt {step.schrittIndex}: {step.begruendung} ❌ (-
+                                {step.maximalPunkte - step.erreichtePunkte} P.)
+                              </Box>
+                            );
+                          } else if (step.fehlerTyp === 'Folgefehler') {
+                            return (
+                              <Box
+                                key={step.schrittIndex}
+                                sx={{
+                                  color: 'warning.main',
+                                  border: `1.5px solid ${theme.palette.warning.main}`,
+                                  padding: '2px 8px',
+                                  borderRadius: '4px',
+                                  fontWeight: 'bold',
+                                  display: 'inline-block',
+                                  transform: `rotate(${step.schrittIndex % 2 === 0 ? 1 : -0.5}deg)`,
+                                  backgroundColor: 'rgba(245, 158, 11, 0.05)',
+                                  mr: 1,
+                                  mb: 1,
+                                }}
+                              >
+                                Schritt {step.schrittIndex}: Folgefehler berücksichtigt! ✔️ (
+                                {step.erreichtePunkte}/{step.maximalPunkte} P.)
+                              </Box>
+                            );
+                          }
+                          return null;
+                        })}
+                      </Box>
+                    </Typography>
+
+                    {/* Red ink point stamp */}
+                    <Box
+                      sx={{
+                        position: 'absolute',
+                        right: '15px',
+                        top: '15px',
+                        fontSize: '1.4rem',
+                        color: 'error.main',
+                        fontWeight: 'bold',
+                        border: '3px double #ef4444',
+                        width: '56px',
+                        height: '56px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        borderRadius: '50%',
+                        transform: `rotate(${taskIdx % 2 === 0 ? -8 : 6}deg)`,
+                        pointerEvents: 'none',
+                      }}
+                    >
+                      {task.erzieltePunkte?.toFixed(1) ?? '0.0'}/{task.maximalPunkte}
+                    </Box>
+                  </Box>
+                ))}
+              </Box>
             )}
           </Box>
 
@@ -1232,7 +1400,7 @@ export default function CorrectWorkspace() {
             paddingTop: '10px',
           }}
         >
-          Viel Erfolg beim Lernen! Mit fleißigem Üben klappt es beim nächsten Mal noch besser.
+          Viel Erfolg beim Lernen! Mit fleissigem Üben klappt es beim nächsten Mal noch besser.
         </div>
       </div>
     </Box>

@@ -1,10 +1,48 @@
-import { NextResponse } from 'next/server';
+import { NextResponse, after } from 'next/server';
 import { db } from '@/lib/db';
 import { getSession } from '@/lib/session';
 import { runLiveGeminiCorrection } from '@/lib/gemini';
 import fs from 'fs/promises';
 import path from 'path';
 import crypto from 'crypto';
+
+// Helper to fuzzy match student names against class student database
+function matchStudentByName(
+  extractedName: string,
+  students: { id: string; name: string }[]
+): string | null {
+  const clean = (s: string) =>
+    s
+      .toLowerCase()
+      .replace(/[^a-z0-9]/g, '')
+      .trim();
+  const cleanExtracted = clean(extractedName);
+  if (!cleanExtracted) return null;
+
+  // 1. Exact match after cleaning
+  let matches = students.filter((s) => clean(s.name) === cleanExtracted);
+  if (matches.length === 1) return matches[0].id;
+
+  // 2. Part match: database name contains extracted name, or vice versa
+  matches = students.filter((s) => {
+    const cleanDb = clean(s.name);
+    return cleanDb.includes(cleanExtracted) || cleanExtracted.includes(cleanDb);
+  });
+  if (matches.length === 1) return matches[0].id;
+
+  // 3. Token-based matching (e.g. "Max Mustermann" matches "Max" or "Mustermann" if unique)
+  const extractedTokens = cleanExtracted.split(/\s+/).filter(Boolean);
+  matches = students.filter((s) => {
+    const dbTokens = clean(s.name).split(/\s+/).filter(Boolean);
+    return (
+      dbTokens.some((t) => extractedTokens.includes(t)) ||
+      extractedTokens.some((t) => dbTokens.includes(t))
+    );
+  });
+  if (matches.length === 1) return matches[0].id;
+
+  return null;
+}
 
 export async function POST(request: Request) {
   try {
@@ -15,7 +53,7 @@ export async function POST(request: Request) {
     }
 
     const formData = await request.formData();
-    const studentId = formData.get('studentId') as string | null;
+    const studentId = formData.get('studentId') as string | null; // Can be null for AI Auto-matching
     const classId = formData.get('classId') as string | null;
     const examId = formData.get('examId') as string | null; // For existing exams
     const overwrite = formData.get('overwrite') === 'true';
@@ -40,11 +78,8 @@ export async function POST(request: Request) {
       );
     }
 
-    if (!studentId || !classId) {
-      return NextResponse.json(
-        { error: 'Student und Klasse müssen ausgewählt sein.' },
-        { status: 400 }
-      );
+    if (!classId) {
+      return NextResponse.json({ error: 'Klasse muss ausgewählt sein.' }, { status: 400 });
     }
 
     if (!studentExam) {
@@ -54,8 +89,8 @@ export async function POST(request: Request) {
       );
     }
 
-    // Pre-flight check: If the correction already exists, do not call Gemini unless forced (overwrite=true)
-    if (examId && studentId) {
+    // Pre-flight check: If studentId and examId are selected and overwrite is false
+    if (examId && studentId && !overwrite) {
       const existingSubmission = await db.submission.findUnique({
         where: {
           examId_studentId: {
@@ -65,7 +100,7 @@ export async function POST(request: Request) {
         },
       });
 
-      if (existingSubmission && !overwrite) {
+      if (existingSubmission) {
         return NextResponse.json(
           {
             error: 'Für diesen Schüler existiert bereits eine Korrektur für diese Prüfung.',
@@ -79,6 +114,8 @@ export async function POST(request: Request) {
     // 2. Fetch/resolve the rubric data from DB or parameters
     let rubricParam: string | { mimeType: string; data: string } = '';
     let rubricTextString = '';
+
+    let finalExamId = examId;
 
     if (examId) {
       // Fetch existing exam details
@@ -94,7 +131,7 @@ export async function POST(request: Request) {
       rubricParam = existingExam.rubricText;
       rubricTextString = existingExam.rubricText;
     } else {
-      // Process uploaded new rubric
+      // Process uploaded new rubric or find existing one dynamically to avoid double creations in batch
       if (!examTitle || !examSubject || !rubric) {
         return NextResponse.json(
           {
@@ -121,25 +158,37 @@ export async function POST(request: Request) {
           rubricParam = rubricTextString;
         }
       }
+
+      // Check if an exam with this title already exists in this class (for bulk uploader concurrency)
+      const existingExam = await db.exam.findFirst({
+        where: { title: examTitle, classId },
+      });
+
+      if (existingExam) {
+        finalExamId = existingExam.id;
+      } else {
+        const examRecord = await db.exam.create({
+          data: {
+            title: examTitle,
+            subject: examSubject,
+            rubricText: rubricTextString,
+            maxPoints: 0, // Will be updated by the first finished correction
+            classId: classId,
+          },
+        });
+        finalExamId = examRecord.id;
+      }
+    }
+
+    if (!finalExamId) {
+      return NextResponse.json({ error: 'Prüfungszuordnung fehlgeschlagen.' }, { status: 500 });
     }
 
     // 3. Process student exam to base64 for Gemini
     const studentBytes = await studentExam.arrayBuffer();
     const studentBase64 = Buffer.from(studentBytes).toString('base64');
 
-    // 4. Run live Gemini OCR and correction analysis
-    const result = await runLiveGeminiCorrection(
-      studentBase64,
-      rubricParam,
-      model as 'gemini-3.5-flash' | 'gemini-3.1-pro',
-      apiKey
-    );
-
-    // 5. Save the exam sheet document to the local filesystem (Option A)
-    // NOTE FOR PRODUCTION DEPLOYMENTS:
-    // currently we are using Option A (local filesystem upload under public/uploads/).
-    // TODO: Migrate this local storage logic to an S3-compatible cloud storage solution
-    // (e.g. AWS S3, Supabase Storage, or Vercel Blob) when deploying to production.
+    // 4. Save the exam sheet document to the local filesystem (Option A)
     const uploadsDir = path.join(process.cwd(), 'public', 'uploads');
     await fs.mkdir(uploadsDir, { recursive: true });
 
@@ -150,140 +199,192 @@ export async function POST(request: Request) {
     await fs.writeFile(filePath, Buffer.from(studentBytes));
     const savedFilePath = `/uploads/${fileName}`;
 
-    // 6. Execute a transactional write to commit all tables atomically
-    const submission = await db.$transaction(async (tx) => {
-      if (examId && studentId && overwrite) {
-        // Point-lookup deletion using unique compound index for maximum speed
-        await tx.submission.delete({
-          where: {
-            examId_studentId: {
-              examId: examId,
-              studentId: studentId,
-            },
-          },
-        });
-      }
-
-      // Ensure the student exists and matches
-      const studentRecord = await tx.student.findUnique({
-        where: { id: studentId },
-      });
-      if (!studentRecord) {
-        throw new Error('Schüler nicht gefunden.');
-      }
-
-      // Find or create the Exam record
-      let finalExamId = examId;
-      if (!finalExamId) {
-        const examRecord = await tx.exam.create({
-          data: {
-            title: examTitle!,
-            subject: examSubject!,
-            rubricText: rubricTextString,
-            maxPoints: result.gesamtmaximalPunkte,
-            classId: classId,
-          },
-        });
-        finalExamId = examRecord.id;
-      } else {
-        // If the exam already exists, update its maxPoints to match the total rubric points resolved by Gemini.
-        // This prevents mismatch issues if the teacher enters a wrong maxPoints manually in the creation form.
-        await tx.exam.update({
-          where: { id: finalExamId },
-          data: { maxPoints: result.gesamtmaximalPunkte },
-        });
-      }
-
-      // Create the Submission record
-      const submissionRecord = await tx.submission.create({
-        data: {
-          id: submissionId,
-          examId: finalExamId,
-          studentId: studentId,
-          status: 'COMPLETED',
-          earnedPoints: result.gesamterzieltePunkte,
-          gradeRaw: parseFloat(result.note),
-          gradeRounded: result.note,
-          strengths: result.schuelerFeedback.staerken,
-          weaknesses: result.schuelerFeedback.schwaechen,
-          helpfulTip: result.schuelerFeedback.hilfreicherTipp,
-          exerciseRecommendation: result.schuelerFeedback.uebungsEmpfehlung,
-          studentExamUrl: savedFilePath,
-        },
-      });
-
-      // Batch Task and Step corrections in memory and insert using createMany
-      const taskCorrectionsData = [];
-      const stepCorrectionsData = [];
-
-      for (let tIdx = 0; tIdx < result.aufgaben.length; tIdx++) {
-        const task = result.aufgaben[tIdx];
-
-        let taskStatus: 'Korrekt' | 'Folgefehler' | 'Fehler' = 'Korrekt';
-        if (task.status === 'Folgefehler') taskStatus = 'Folgefehler';
-        else if (task.status === 'Fehler') taskStatus = 'Fehler';
-
-        const taskCorrectionId = crypto.randomUUID();
-
-        taskCorrectionsData.push({
-          id: taskCorrectionId,
-          submissionId: submissionRecord.id,
-          taskId: task.aufgabeId,
-          title: task.titel,
-          studentAnswer: task.schuelerAntwort,
-          erzieltePunkte: task.erzieltePunkte,
-          maximalPunkte: task.maximalPunkte,
-          status: taskStatus,
-          lehrerKommentar: task.lehrerKommentar || '',
-          orderIndex: tIdx,
-        });
-
-        // Insert Teilschritte
-        for (const step of task.schritte) {
-          let errorType: 'KeinFehler' | 'Rechenfehler' | 'Folgefehler' | 'SonstigerFehler' =
-            'KeinFehler';
-          if (step.fehlerTyp === 'Rechenfehler') errorType = 'Rechenfehler';
-          else if (step.fehlerTyp === 'Folgefehler') errorType = 'Folgefehler';
-          else if (step.fehlerTyp === 'SonstigerFehler') errorType = 'SonstigerFehler';
-
-          stepCorrectionsData.push({
-            id: crypto.randomUUID(),
-            taskCorrectionId: taskCorrectionId,
-            schrittIndex: step.schrittIndex,
-            schrittText: step.schrittText,
-            istKorrekt: step.istKorrekt,
-            fehlerTyp: errorType,
-            erreichtePunkte: step.erreichtePunkte,
-            maximalPunkte: step.maximalPunkte,
-            begruendung: step.begruendung || '',
-          });
-        }
-      }
-
-      if (taskCorrectionsData.length > 0) {
-        await tx.taskCorrection.createMany({
-          data: taskCorrectionsData,
-        });
-      }
-
-      if (stepCorrectionsData.length > 0) {
-        await tx.stepCorrection.createMany({
-          data: stepCorrectionsData,
-        });
-      }
-
-      return submissionRecord;
+    // 5. Create PENDING placeholder Submission record in the DB
+    const submission = await db.submission.create({
+      data: {
+        id: submissionId,
+        examId: finalExamId,
+        studentId: studentId || null, // Optional. Matched in background if null.
+        status: 'PENDING',
+        earnedPoints: 0.0,
+        gradeRaw: 1.0,
+        gradeRounded: '1.0',
+        strengths: [],
+        weaknesses: [],
+        helpfulTip: null,
+        exerciseRecommendation: null,
+        studentExamUrl: savedFilePath,
+      },
     });
 
-    // Return the created database submission ID
+    // 6. Schedule heavy live Gemini OCR and correction in the background using stable Next.js after()
+    after(async () => {
+      try {
+        // 1. Update status to PROCESSING
+        await db.submission.update({
+          where: { id: submissionId },
+          data: { status: 'PROCESSING' },
+        });
+
+        // 2. Run live Gemini OCR and correction analysis
+        const result = await runLiveGeminiCorrection(
+          studentBase64,
+          rubricParam,
+          model as 'gemini-3.5-flash' | 'gemini-3.1-pro',
+          apiKey
+        );
+
+        // 3. Perform AI Auto-Matching if studentId was not provided synchronously
+        let matchedStudentId = studentId || null;
+        if (!matchedStudentId && result.schuelerName) {
+          const classStudents = await db.student.findMany({
+            where: { classId },
+          });
+          matchedStudentId = matchStudentByName(result.schuelerName, classStudents);
+        }
+
+        // 4. Check for duplicate submissions before committing (if student was resolved)
+        if (matchedStudentId) {
+          const existingSubmission = await db.submission.findFirst({
+            where: {
+              examId: finalExamId,
+              studentId: matchedStudentId,
+              id: { not: submissionId }, // Exclude current record
+            },
+          });
+
+          if (existingSubmission) {
+            if (overwrite) {
+              // Delete existing submission to overwrite
+              await db.submission.delete({
+                where: { id: existingSubmission.id },
+              });
+            } else {
+              throw new Error(
+                `Für Schüler/in "${result.schuelerName}" existiert bereits eine Korrektur. Aktiviere 'Überschreiben', um sie zu ersetzen.`
+              );
+            }
+          }
+        }
+
+        // 5. Update Exam maxPoints based on the resolved points of the first finished grading
+        const examRecord = await db.exam.findUnique({ where: { id: finalExamId } });
+        if (
+          examRecord &&
+          (examRecord.maxPoints === 0 || examRecord.maxPoints !== result.gesamtmaximalPunkte)
+        ) {
+          await db.exam.update({
+            where: { id: finalExamId },
+            data: { maxPoints: result.gesamtmaximalPunkte },
+          });
+        }
+
+        // 6. Execute transaction to write AI grading results
+        await db.$transaction(async (tx) => {
+          await tx.submission.update({
+            where: { id: submissionId },
+            data: {
+              studentId: matchedStudentId, // Can be null if unmatched (unassigned)
+              status: 'COMPLETED',
+              earnedPoints: result.gesamterzieltePunkte,
+              gradeRaw: parseFloat(result.note),
+              gradeRounded: result.note,
+              strengths: result.schuelerFeedback.staerken,
+              weaknesses: result.schuelerFeedback.schwaechen,
+              helpfulTip: result.schuelerFeedback.hilfreicherTipp,
+              exerciseRecommendation: result.schuelerFeedback.uebungsEmpfehlung,
+            },
+          });
+
+          // Batch Task and Step corrections
+          const taskCorrectionsData = [];
+          const stepCorrectionsData = [];
+
+          for (let tIdx = 0; tIdx < result.aufgaben.length; tIdx++) {
+            const task = result.aufgaben[tIdx];
+
+            let taskStatus: 'Korrekt' | 'Folgefehler' | 'Fehler' = 'Korrekt';
+            if (task.status === 'Folgefehler') taskStatus = 'Folgefehler';
+            else if (task.status === 'Fehler') taskStatus = 'Fehler';
+
+            const taskCorrectionId = crypto.randomUUID();
+
+            taskCorrectionsData.push({
+              id: taskCorrectionId,
+              submissionId: submissionId,
+              taskId: task.aufgabeId,
+              title: task.titel,
+              studentAnswer: task.schuelerAntwort,
+              erzieltePunkte: task.erzieltePunkte,
+              maximalPunkte: task.maximalPunkte,
+              status: taskStatus,
+              lehrerKommentar: task.lehrerKommentar || '',
+              orderIndex: tIdx,
+            });
+
+            // Insert Teilschritte
+            for (const step of task.schritte) {
+              let errorType: 'KeinFehler' | 'Rechenfehler' | 'Folgefehler' | 'SonstigerFehler' =
+                'KeinFehler';
+              if (step.fehlerTyp === 'Rechenfehler') errorType = 'Rechenfehler';
+              else if (step.fehlerTyp === 'Folgefehler') errorType = 'Folgefehler';
+              else if (step.fehlerTyp === 'SonstigerFehler') errorType = 'SonstigerFehler';
+
+              stepCorrectionsData.push({
+                id: crypto.randomUUID(),
+                taskCorrectionId: taskCorrectionId,
+                schrittIndex: step.schrittIndex,
+                schrittText: step.schrittText,
+                istKorrekt: step.istKorrekt,
+                fehlerTyp: errorType,
+                erreichtePunkte: step.erreichtePunkte,
+                maximalPunkte: step.maximalPunkte,
+                begruendung: step.begruendung || '',
+              });
+            }
+          }
+
+          if (taskCorrectionsData.length > 0) {
+            await tx.taskCorrection.createMany({
+              data: taskCorrectionsData,
+            });
+          }
+
+          if (stepCorrectionsData.length > 0) {
+            await tx.stepCorrection.createMany({
+              data: stepCorrectionsData,
+            });
+          }
+        });
+      } catch (error) {
+        console.error(`Background grading error for submission ${submissionId}:`, error);
+        const errMsg = error instanceof Error ? error.message : String(error);
+
+        // Mark as FAILED in DB and store error details
+        try {
+          await db.submission.update({
+            where: { id: submissionId },
+            data: {
+              status: 'FAILED',
+              errorMessage: errMsg,
+            },
+          });
+        } catch (dbErr) {
+          console.error(`Failed to set FAILED state on submission ${submissionId}:`, dbErr);
+        }
+      }
+    });
+
+    // 7. Instantly return PENDING submission details to the client
     return NextResponse.json({
       success: true,
       submissionId: submission.id,
-      schuelerName: result.schuelerName,
+      examId: finalExamId,
+      status: 'PENDING',
     });
   } catch (error) {
-    console.error('Error in API /correct route:', error);
+    console.error('Error in API /correct route (sync part):', error);
     const errMessage = error instanceof Error ? error.message : String(error);
-    return NextResponse.json({ error: 'Korrektur fehlgeschlagen: ' + errMessage }, { status: 500 });
+    return NextResponse.json({ error: 'Upload fehlgeschlagen: ' + errMessage }, { status: 500 });
   }
 }

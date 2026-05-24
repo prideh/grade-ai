@@ -31,14 +31,16 @@ export async function signJWT(payload: { userId: string }, expiry = '7d'): Promi
  * @param token The signed compact JWT string
  * @returns The payload if valid, otherwise null.
  */
-export async function verifyJWT(token: string | undefined): Promise<{ userId: string } | null> {
+export async function verifyJWT(
+  token: string | undefined
+): Promise<{ userId: string; exp?: number; iat?: number } | null> {
   if (!token) return null;
   try {
     const key = getSecretKey();
     const { payload } = await jwtVerify(token, key, {
       algorithms: ['HS256'],
     });
-    return payload as { userId: string };
+    return payload as { userId: string; exp?: number; iat?: number };
   } catch (error) {
     // Suppress console spam on expired/empty tokens but capture signature errors
     if (error instanceof Error && !error.message.includes('expired')) {
