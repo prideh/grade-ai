@@ -23,12 +23,14 @@ export interface CorrectedTask {
 }
 
 export interface ExamCorrectionResult {
+  id?: string;
   schuelerName: string;
   fach: string;
   datum: string;
   gesamterzieltePunkte: number;
   gesamtmaximalPunkte: number;
   note: string;
+  studentExamUrl?: string;
   aufgaben: CorrectedTask[];
   schuelerFeedback: {
     staerken: string[];
@@ -52,7 +54,7 @@ WICHTIGSTE REGELN FÜR DIE BEWERTUNG:
    - Markiere solche Folge-Schritte explizit als "Folgefehler" (fehlerTyp: "Folgefehler") und vergib dafür die VOLLEN Teilpunkte des Teilschritts, da die logische Formelanwendung und das Prinzip korrekt waren.
 4. Schweizer Notensystem: Berechne die Schulnote ("note") zwingend nach der offiziellen Schweizer Formel:
    Note = 5 * (gesamterzieltePunkte / gesamtmaximalPunkte) + 1.
-   Runde das Ergebnis kaufmännisch auf die nächste halbe Note (z.B. 6.0, 5.5, 5.0, 4.5, 4.0, 3.5 etc.).
+   Runde das Ergebnis kaufmännisch auf die nächste Zehntelnote (z.B. 6.0, 5.7, 5.6, 5.0, 4.3, 4.0 etc.).
    Die beste Note ist 6.0 (hervorragend), die genügende Note (Bestehensgrenze) ist 4.0, und die schlechteste Note ist 1.0.
 
 Deine Rückgabe MUSS ein valides, geparstes JSON-Objekt sein, das exakt dem folgenden TypeScript-Interface entspricht. Gib KEINEN Markdown-Wrapper (wie \`\`\`json) und keinen zusätzlichen Text aus. Nur das nackte JSON.

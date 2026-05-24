@@ -1,0 +1,139 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client"
+  output   = "../lib/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model Teacher {
+  id           String   @id @default(uuid())
+  email        String   @unique
+  passwordHash String
+  name         String
+  classes      Class[]
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+}
+
+model Class {
+  id        String    @id @default(uuid())
+  name      String    // e.g. "Klasse 9b"
+  teacherId String
+  teacher   Teacher   @relation(fields: [teacherId], references: [id], onDelete: Cascade)
+  students  Student[]
+  exams     Exam[]
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+}
+
+model Student {
+  id          String       @id @default(uuid())
+  name        String       // e.g. "Max Mustermann"
+  classId     String
+  class       Class        @relation(fields: [classId], references: [id], onDelete: Cascade)
+  submissions Submission[]
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+}
+
+model Exam {
+  id          String       @id @default(uuid())
+  title       String       // e.g. "Mathematik Klassenarbeit 1"
+  subject     String       // e.g. "Mathematik"
+  rubricText  String       // The plain text rubric / master solution
+  maxPoints   Float
+  classId     String
+  class       Class        @relation(fields: [classId], references: [id], onDelete: Cascade)
+  submissions Submission[]
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+}
+
+enum SubmissionStatus {
+  DRAFT
+  COMPLETED
+}
+
+model Submission {
+  id                     String           @id @default(uuid())
+  examId                 String
+  exam                   Exam             @relation(fields: [examId], references: [id], onDelete: Cascade)
+  studentId              String
+  student                Student          @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  status                 SubmissionStatus @default(DRAFT)
+  
+  // Grading metrics
+  earnedPoints           Float            @default(0.0)
+  gradeRaw               Float            @default(1.0)
+  gradeRounded           String           @default("1.0") // Schweizer note rounded (e.g. "5.0")
+  
+  // AI summary feedback
+  strengths              String[]
+  weaknesses             String[]
+  helpfulTip             String
+  exerciseRecommendation String
+  
+  // Scan metadata
+  // NOTE FOR PRODUCTION DEPLOYMENTS:
+  // currently we are using Option A (local filesystem upload under public/uploads/).
+  // TODO: Migrate this schema and local filesystem helper functions to an S3-compatible cloud storage solution 
+  // (e.g., AWS S3, Supabase Storage, or Vercel Blob) when deploying to high-volume multi-client production environments.
+  studentExamUrl         String?          
+  
+  tasks                  TaskCorrection[]
+  createdAt              DateTime         @default(now())
+  updatedAt              DateTime         @updatedAt
+
+  @@unique([examId, studentId]) // Prevent duplicate submissions for the same exam per student
+}
+
+enum TaskStatus {
+  Korrekt
+  Folgefehler
+  Fehler
+}
+
+model TaskCorrection {
+  id              String           @id @default(uuid())
+  submissionId    String
+  submission      Submission       @relation(fields: [submissionId], references: [id], onDelete: Cascade)
+  taskId          String           // e.g. "1" (from Gemini response)
+  title           String           // e.g. "Aufgabe 1"
+  studentAnswer   String           // Handwriting transcribed by AI
+  erzieltePunkte  Float            @default(0.0)
+  maximalPunkte   Float
+  status          TaskStatus
+  lehrerKommentar String           @default("")
+  orderIndex      Int              @default(0)
+  
+  schritte        StepCorrection[]
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+}
+
+enum ErrorType {
+  KeinFehler
+  Rechenfehler
+  Folgefehler
+  SonstigerFehler
+}
+
+model StepCorrection {
+  id               String         @id @default(uuid())
+  taskCorrectionId String
+  taskCorrection   TaskCorrection @relation(fields: [taskCorrectionId], references: [id], onDelete: Cascade)
+  schrittIndex     Int
+  schrittText      String         // e.g. "4x = 16"
+  istKorrekt       Boolean
+  fehlerTyp        ErrorType
+  erreichtePunkte  Float          @default(0.0)
+  maximalPunkte    Float
+  begruendung      String
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+}

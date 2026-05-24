@@ -1,0 +1,366 @@
+'use client';
+
+import * as React from 'react';
+import { useState, useEffect } from 'react';
+import { useRouter, usePathname } from 'next/navigation';
+import Link from 'next/link';
+import {
+  Box,
+  Drawer,
+  AppBar,
+  Toolbar,
+  List,
+  Typography,
+  Divider,
+  IconButton,
+  ListItem,
+  ListItemButton,
+  ListItemIcon,
+  ListItemText,
+  Avatar,
+  Stack,
+  CircularProgress,
+  Button,
+} from '@mui/material';
+import MenuIcon from '@mui/icons-material/Menu';
+import SchoolIcon from '@mui/icons-material/School';
+import DashboardIcon from '@mui/icons-material/Dashboard';
+import GroupIcon from '@mui/icons-material/Group';
+import AssignmentIcon from '@mui/icons-material/Assignment';
+import HistoryIcon from '@mui/icons-material/History';
+import LogoutIcon from '@mui/icons-material/Logout';
+import PersonIcon from '@mui/icons-material/Person';
+import { getCachedTeacher, setCachedTeacher, clearSessionCache } from '@/lib/sessionCache';
+
+const drawerWidth = 260;
+
+interface DashboardLayoutProps {
+  children: React.ReactNode;
+}
+
+export default function DashboardLayout({ children }: DashboardLayoutProps) {
+  const router = useRouter();
+  const pathname = usePathname();
+  const [mobileOpen, setMobileOpen] = useState(false);
+  const [teacher, setTeacher] = useState<{ name: string; email: string } | null>(getCachedTeacher());
+  const [loading, setLoading] = useState(!getCachedTeacher());
+
+  // Proactively check auth and fetch profile
+  useEffect(() => {
+    async function checkAuth() {
+      try {
+        const res = await fetch('/api/auth/me');
+        if (!res.ok) {
+          clearSessionCache();
+          router.replace('/login');
+          return;
+        }
+        const data = await res.json();
+        setTeacher(data.teacher);
+        setCachedTeacher(data.teacher);
+      } catch (err) {
+        console.error('Failed to authenticate:', err);
+        clearSessionCache();
+        router.replace('/login');
+      } finally {
+        setLoading(false);
+      }
+    }
+    checkAuth();
+  }, [router]);
+
+  const handleDrawerToggle = () => {
+    setMobileOpen(!mobileOpen);
+  };
+
+  const handleLogout = async () => {
+    try {
+      const res = await fetch('/api/auth/logout', { method: 'POST' });
+      if (res.ok) {
+        clearSessionCache();
+        router.push('/login');
+      }
+    } catch (err) {
+      console.error('Logout failed:', err);
+    }
+  };
+
+  const menuItems = [
+    { text: 'Übersicht', icon: <DashboardIcon />, path: '/dashboard' },
+    { text: 'Klassen', icon: <GroupIcon />, path: '/classes' },
+    { text: 'Prüfungen', icon: <AssignmentIcon />, path: '/exams' },
+    { text: 'Korrekturen', icon: <HistoryIcon />, path: '/submissions' },
+  ];
+
+  const drawerContent = (
+    <Box
+      sx={{
+        display: 'flex',
+        flexDirection: 'column',
+        height: '100%',
+        backgroundColor: '#ffffff',
+        borderRight: '1px solid #e2e8f0',
+      }}
+    >
+      {/* Brand Header */}
+      <Box sx={{ p: '24px 20px', display: 'flex', alignItems: 'center', gap: 1.5 }}>
+        <Box
+          sx={{
+            width: '36px',
+            height: '36px',
+            borderRadius: '10px',
+            backgroundColor: '#1b77d1',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            boxShadow: '0 4px 10px rgba(27, 119, 209, 0.25)',
+          }}
+        >
+          <SchoolIcon sx={{ color: 'white', fontSize: '1.2rem' }} />
+        </Box>
+        <Typography
+          variant="h6"
+          sx={{
+            fontWeight: 850,
+            letterSpacing: '-0.03em',
+            color: '#0f172a',
+          }}
+        >
+          Grade
+          <Box component="span" sx={{ color: '#1b77d1', fontWeight: 850 }}>
+            Ai
+          </Box>
+        </Typography>
+      </Box>
+
+      <Divider sx={{ borderColor: '#f1f5f9' }} />
+
+      {/* Nav Menu Items */}
+      <List sx={{ px: 1.5, py: 2, flexGrow: 1 }}>
+        {menuItems.map((item) => {
+          // Check active state
+          const isActive =
+            pathname === item.path ||
+            (item.path !== '/dashboard' && pathname.startsWith(item.path));
+          
+          return (
+            <ListItem key={item.text} disablePadding sx={{ mb: 0.5 }}>
+              <Link href={item.path} passHref style={{ textDecoration: 'none', width: '100%' }}>
+                <ListItemButton
+                  sx={{
+                    borderRadius: '8px',
+                    p: '10px 16px',
+                    backgroundColor: isActive ? '#f0f7ff' : 'transparent',
+                    color: isActive ? '#1b77d1' : '#475569',
+                    transition: 'all 0.2s ease',
+                    '&:hover': {
+                      backgroundColor: isActive ? '#f0f7ff' : '#f8fafc',
+                      color: isActive ? '#1b77d1' : '#0f172a',
+                      '& .MuiListItemIcon-root': {
+                        color: isActive ? '#1b77d1' : '#0f172a',
+                      },
+                    },
+                  }}
+                >
+                  <ListItemIcon
+                    sx={{
+                      minWidth: '36px',
+                      color: isActive ? '#1b77d1' : '#64748b',
+                      transition: 'color 0.2s ease',
+                    }}
+                  >
+                    {item.icon}
+                  </ListItemIcon>
+                  <ListItemText>
+                    <Typography
+                      sx={{
+                        fontSize: '0.925rem',
+                        fontWeight: isActive ? 700 : 550,
+                        letterSpacing: '-0.01em',
+                      }}
+                    >
+                      {item.text}
+                    </Typography>
+                  </ListItemText>
+                </ListItemButton>
+              </Link>
+            </ListItem>
+          );
+        })}
+      </List>
+
+      <Divider sx={{ borderColor: '#f1f5f9' }} />
+
+      {/* Teacher Profile Info & Logout */}
+      <Box sx={{ p: 2 }}>
+        {teacher ? (
+          <Stack spacing={2}>
+            <Stack direction="row" spacing={1.5} sx={{ alignItems: 'center', p: 1 }}>
+              <Avatar
+                sx={{
+                  width: '38px',
+                  height: '38px',
+                  bgcolor: '#1b77d1',
+                  color: 'white',
+                  fontWeight: 'bold',
+                  fontSize: '0.95rem',
+                }}
+              >
+                {teacher.name.charAt(0)}
+              </Avatar>
+              <Box sx={{ overflow: 'hidden' }}>
+                <Typography variant="body2" noWrap sx={{ fontWeight: 700, color: '#0f172a' }}>
+                  {teacher.name}
+                </Typography>
+                <Typography variant="caption" noWrap sx={{ color: 'text.secondary', display: 'block' }}>
+                  {teacher.email}
+                </Typography>
+              </Box>
+            </Stack>
+
+            <Button
+              onClick={handleLogout}
+              variant="outlined"
+              fullWidth
+              startIcon={<LogoutIcon />}
+              sx={{
+                borderRadius: '8px',
+                p: '8px 16px',
+                borderColor: '#e2e8f0',
+                color: '#475569',
+                textTransform: 'none',
+                fontWeight: 650,
+                fontSize: '0.85rem',
+                '&:hover': {
+                  borderColor: 'error.light',
+                  color: 'error.main',
+                  backgroundColor: '#fef2f2',
+                },
+              }}
+            >
+              Abmelden
+            </Button>
+          </Stack>
+        ) : (
+          <CircularProgress size={20} />
+        )}
+      </Box>
+    </Box>
+  );
+
+  if (loading) {
+    return (
+      <Box
+        sx={{
+          minHeight: '100vh',
+          background: '#f8fafc',
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          justifyContent: 'center',
+          gap: '16px',
+        }}
+      >
+        <CircularProgress size={40} thickness={4} sx={{ color: 'primary.main' }} />
+        <Typography variant="body2" sx={{ color: 'text.secondary', fontWeight: 600 }}>
+          Sitzung wird geladen...
+        </Typography>
+      </Box>
+    );
+  }
+
+  return (
+    <Box sx={{ display: 'flex', minHeight: '100vh', backgroundColor: '#f8fafc' }}>
+      {/* AppBar for mobile displays */}
+      <AppBar
+        position="fixed"
+        elevation={0}
+        sx={{
+          width: { md: `calc(100% - ${drawerWidth}px)` },
+          ml: { md: `${drawerWidth}px` },
+          backgroundColor: '#ffffff',
+          borderBottom: '1px solid #e2e8f0',
+          display: { md: 'none' },
+        }}
+      >
+        <Toolbar sx={{ justifyContent: 'space-between' }}>
+          <Stack direction="row" spacing={1.5} sx={{ alignItems: 'center' }}>
+            <Box
+              sx={{
+                width: '30px',
+                height: '30px',
+                borderRadius: '8px',
+                backgroundColor: '#1b77d1',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+              }}
+            >
+              <SchoolIcon sx={{ color: 'white', fontSize: '0.9rem' }} />
+            </Box>
+            <Typography variant="h6" component="span" sx={{ fontWeight: 800, color: '#0f172a', fontSize: '1.1rem' }}>
+              Grade<Box component="span" sx={{ color: '#1b77d1' }}>Ai</Box>
+            </Typography>
+          </Stack>
+          <IconButton
+            color="inherit"
+            aria-label="open drawer"
+            edge="start"
+            onClick={handleDrawerToggle}
+            sx={{ color: '#0f172a' }}
+          >
+            <MenuIcon />
+          </IconButton>
+        </Toolbar>
+      </AppBar>
+
+      {/* Sidebar Drawer Container */}
+      <Box
+        component="nav"
+        sx={{ width: { md: drawerWidth }, flexShrink: { md: 0 } }}
+        aria-label="mailbox folders"
+      >
+        {/* Mobile side navigation drawer */}
+        <Drawer
+          variant="temporary"
+          open={mobileOpen}
+          onClose={handleDrawerToggle}
+          ModalProps={{
+            keepMounted: true, // Better open performance on mobile.
+          }}
+          sx={{
+            display: { xs: 'block', sm: 'block', md: 'none' },
+            '& .MuiDrawer-paper': { boxSizing: 'border-box', width: drawerWidth },
+          }}
+        >
+          {drawerContent}
+        </Drawer>
+
+        {/* Desktop side navigation drawer */}
+        <Drawer
+          variant="permanent"
+          sx={{
+            display: { xs: 'none', sm: 'none', md: 'block' },
+            '& .MuiDrawer-paper': { boxSizing: 'border-box', width: drawerWidth },
+          }}
+          open
+        >
+          {drawerContent}
+        </Drawer>
+      </Box>
+
+      {/* Main content viewport */}
+      <Box
+        component="main"
+        sx={{
+          flexGrow: 1,
+          p: { xs: 3, md: 4 },
+          width: { md: `calc(100% - ${drawerWidth}px)` },
+          mt: { xs: 7, md: 0 },
+        }}
+      >
+        {children}
+      </Box>
+    </Box>
+  );
+}

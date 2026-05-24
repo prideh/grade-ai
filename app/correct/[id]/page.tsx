@@ -40,31 +40,65 @@ export default function CorrectWorkspace() {
   const [activeTaskIndex, setActiveTaskIndex] = useState<number>(0);
   const [showSaveToast, setShowSaveToast] = useState<boolean>(false);
   const [noSession, setNoSession] = useState<boolean>(false);
+  const [leftPanelTab, setLeftPanelTab] = useState<'transcript' | 'scan'>('transcript');
 
-  // Initialize data from sessionStorage
-  useEffect(() => {
-    const stored = sessionStorage.getItem('gradingResult');
-    let loadedFromStore = false;
-
-    if (stored) {
+  // Debounced auto-save function to prevent network storms
+  const saveTimeoutRef = React.useRef<NodeJS.Timeout | null>(null);
+  
+  const saveToDatabase = (updatedData: ExamCorrectionResult, immediate = false) => {
+    if (saveTimeoutRef.current) {
+      clearTimeout(saveTimeoutRef.current);
+    }
+    
+    const executeSave = async () => {
       try {
-        const parsed = JSON.parse(stored);
-        if (parsed && parsed.schuelerName && Array.isArray(parsed.aufgaben)) {
-          setTimeout(() => {
-            setData(parsed);
-          }, 0);
-          loadedFromStore = true;
+        const res = await fetch(`/api/submissions/${id}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ aufgaben: updatedData.aufgaben }),
+        });
+        if (res.ok) {
+          setShowSaveToast(true);
         }
       } catch (e) {
-        console.error('Failed to parse stored grading result', e);
+        console.error('Failed to auto-save:', e);
+      }
+    };
+
+    if (immediate) {
+      executeSave();
+    } else {
+      saveTimeoutRef.current = setTimeout(executeSave, 1000); // 1-second debounce
+    }
+  };
+
+  // Clean up timeout on unmount
+  useEffect(() => {
+    return () => {
+      if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
+    };
+  }, []);
+
+  // Initialize data from PostgreSQL database instead of sessionStorage
+  useEffect(() => {
+    if (!id) return;
+    
+    async function loadSubmission() {
+      try {
+        const res = await fetch(`/api/submissions/${id}`);
+        if (!res.ok) {
+          setNoSession(true);
+          return;
+        }
+        const parsed = await res.json();
+        setData(parsed);
+      } catch (e) {
+        console.error('Failed to load submission from database', e);
+        setNoSession(true);
       }
     }
 
-    if (!loadedFromStore) {
-      setTimeout(() => {
-        setNoSession(true);
-      }, 0);
-    }
+    loadSubmission();
   }, [id]);
 
   if (noSession) {
@@ -174,10 +208,10 @@ export default function CorrectWorkspace() {
     // Recalculate total score
     const totalScore = updatedTasks.reduce((sum, t) => sum + t.erzieltePunkte, 0);
 
-    // Recalculate school grade dynamically based on Swiss linear grading scale (6 is best, 4 is passing, rounded to nearest 0.5)
+    // Recalculate school grade dynamically based on Swiss linear grading scale (6 is best, 4 is passing, rounded to nearest 0.1)
     const maxScore = data.gesamtmaximalPunkte;
     const rawGrade = maxScore > 0 ? 5 * (totalScore / maxScore) + 1 : 1;
-    const newGrade = (Math.round(rawGrade * 2) / 2).toFixed(1);
+    const newGrade = (Math.round(rawGrade * 10) / 10).toFixed(1);
 
     const updatedResult = {
       ...data,
@@ -187,7 +221,8 @@ export default function CorrectWorkspace() {
     };
 
     setData(updatedResult);
-    sessionStorage.setItem('gradingResult', JSON.stringify(updatedResult));
+    // Auto-save Point adjustments directly to PostgreSQL
+    saveToDatabase(updatedResult);
   };
 
   // Handle inline comments adjustments by the teacher
@@ -205,7 +240,8 @@ export default function CorrectWorkspace() {
     };
 
     setData(updatedResult);
-    sessionStorage.setItem('gradingResult', JSON.stringify(updatedResult));
+    // Auto-save Comment changes directly to PostgreSQL (debounced)
+    saveToDatabase(updatedResult);
   };
 
   const activeTask = data.aufgaben[activeTaskIndex];
@@ -335,40 +371,112 @@ export default function CorrectWorkspace() {
               <Typography variant="subtitle1" sx={{ color: 'text.primary', fontWeight: 700 }}>
                 Original Schüler-Arbeit (Multimodale Visualisierung)
               </Typography>
-              <Typography variant="caption" sx={{ color: 'text.secondary' }}>
+              
+              {/* Transcript / Scan switcher tabs */}
+              {data.studentExamUrl && (
+                <Stack direction="row" spacing={0.5} sx={{ backgroundColor: '#e2e8f0', p: '3px', borderRadius: '6px' }}>
+                  <Button
+                    size="small"
+                    onClick={() => setLeftPanelTab('transcript')}
+                    sx={{
+                      fontSize: '0.75rem',
+                      py: '2px',
+                      px: '10px',
+                      textTransform: 'none',
+                      borderRadius: '4px',
+                      backgroundColor: leftPanelTab === 'transcript' ? '#ffffff' : 'transparent',
+                      color: leftPanelTab === 'transcript' ? '#1b77d1' : '#475569',
+                      fontWeight: leftPanelTab === 'transcript' ? 700 : 500,
+                      boxShadow: leftPanelTab === 'transcript' ? '0 1px 3px rgba(0,0,0,0.1)' : 'none',
+                      '&:hover': { backgroundColor: leftPanelTab === 'transcript' ? '#ffffff' : 'rgba(0,0,0,0.04)' }
+                    }}
+                  >
+                    Digitales Transkript
+                  </Button>
+                  <Button
+                    size="small"
+                    onClick={() => setLeftPanelTab('scan')}
+                    sx={{
+                      fontSize: '0.75rem',
+                      py: '2px',
+                      px: '10px',
+                      textTransform: 'none',
+                      borderRadius: '4px',
+                      backgroundColor: leftPanelTab === 'scan' ? '#ffffff' : 'transparent',
+                      color: leftPanelTab === 'scan' ? '#1b77d1' : '#475569',
+                      fontWeight: leftPanelTab === 'scan' ? 700 : 500,
+                      boxShadow: leftPanelTab === 'scan' ? '0 1px 3px rgba(0,0,0,0.1)' : 'none',
+                      '&:hover': { backgroundColor: leftPanelTab === 'scan' ? '#ffffff' : 'rgba(0,0,0,0.04)' }
+                    }}
+                  >
+                    Originaler Scan
+                  </Button>
+                </Stack>
+              )}
+
+              <Typography variant="caption" sx={{ color: 'text.secondary', display: { xs: 'none', sm: 'block' } }}>
                 Seite 1 von 1
               </Typography>
             </Stack>
 
-            {/* Premium Simulated Scanned Sheet with red grading ink */}
-            <Box
-              sx={{
-                background: '#ffffff',
-                backgroundImage: 'radial-gradient(#cbd5e1 1.5px, transparent 1.5px)',
-                backgroundSize: '24px 24px',
-                color: '#0f172a',
-                borderRadius: '8px',
-                padding: '30px',
-                minHeight: '680px',
-                boxShadow: '0 4px 12px rgba(0, 0, 0, 0.08)',
-                position: 'relative',
-                fontFamily: '"Architects Daughter", "Comic Sans MS", cursive, sans-serif',
-                border: '1px solid #cbd5e1',
-                overflow: 'hidden',
-              }}
-            >
-              {/* Paper line markers */}
+            {leftPanelTab === 'scan' && data.studentExamUrl ? (
+              /* Premium Real Scanned Sheet Viewer */
               <Box
                 sx={{
-                  position: 'absolute',
-                  top: 0,
-                  left: '40px',
-                  width: '1px',
-                  height: '100%',
-                  background: 'rgba(239, 68, 68, 0.15)',
-                  pointerEvents: 'none',
+                  background: '#f1f5f9',
+                  borderRadius: '8px',
+                  padding: '12px',
+                  minHeight: '680px',
+                  boxShadow: '0 4px 12px rgba(0, 0, 0, 0.08)',
+                  display: 'flex',
+                  justifyContent: 'center',
+                  alignItems: 'center',
+                  border: '1px solid #cbd5e1',
+                  overflow: 'hidden',
                 }}
-              />
+              >
+                <img
+                  src={data.studentExamUrl}
+                  alt="Original Schülerarbeit Scan"
+                  style={{
+                    maxWidth: '100%',
+                    maxHeight: '750px',
+                    objectFit: 'contain',
+                    borderRadius: '4px',
+                    boxShadow: '0 2px 8px rgba(0,0,0,0.08)',
+                  }}
+                />
+              </Box>
+            ) : (
+              /* Premium Simulated Scanned Sheet with red grading ink */
+              <Box
+                sx={{
+                  background: '#ffffff',
+                  backgroundImage: 'radial-gradient(#cbd5e1 1.5px, transparent 1.5px)',
+                  backgroundSize: '24px 24px',
+                  color: '#0f172a',
+                  borderRadius: '8px',
+                  padding: '30px',
+                  minHeight: '680px',
+                  boxShadow: '0 4px 12px rgba(0, 0, 0, 0.08)',
+                  position: 'relative',
+                  fontFamily: '"Architects Daughter", "Comic Sans MS", cursive, sans-serif',
+                  border: '1px solid #cbd5e1',
+                  overflow: 'hidden',
+                }}
+              >
+                {/* Paper line markers */}
+                <Box
+                  sx={{
+                    position: 'absolute',
+                    top: 0,
+                    left: '40px',
+                    width: '1px',
+                    height: '100%',
+                    background: 'rgba(239, 68, 68, 0.15)',
+                    pointerEvents: 'none',
+                  }}
+                />
 
               {/* Student Header details */}
               <Box
@@ -513,6 +621,7 @@ export default function CorrectWorkspace() {
                 </Box>
               ))}
             </Box>
+            )}
           </Box>
 
           {/* Right panel: AI Grading & Feedback Workspace */}
@@ -872,8 +981,7 @@ export default function CorrectWorkspace() {
               </Typography>
               <Button
                 onClick={() => {
-                  sessionStorage.setItem('gradingResult', JSON.stringify(data));
-                  setShowSaveToast(true);
+                  saveToDatabase(data, true);
                 }}
                 className="glow-button"
                 variant="contained"

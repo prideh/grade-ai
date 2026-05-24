@@ -18,13 +18,19 @@
     "@mui/icons-material": "^9.0.1",
     "@mui/material": "^9.0.1",
     "@mui/material-nextjs": "^9.0.1",
+    "@mui/x-charts": "^9.3.0",
+    "@prisma/adapter-pg": "^7.8.0",
+    "@prisma/client": "^7.8.0",
+    "jose": "^6.2.3",
     "next": "16.2.6",
+    "pg": "^8.21.0",
     "react": "^19.2.6",
     "react-dom": "^19.2.6"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
+    "@types/pg": "^8.20.0",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "eslint": "^9",
@@ -33,7 +39,9 @@
     "husky": "^9.1.7",
     "lint-staged": "^17.0.5",
     "prettier": "^3.8.3",
+    "prisma": "^7.8.0",
     "tailwindcss": "^4",
+    "tsx": "^4.22.3",
     "typescript": "^5"
   },
   "lint-staged": {
@@ -44,5 +52,8 @@
     "*.{json,css,md}": [
       "prettier --write"
     ]
+  },
+  "prisma": {
+    "seed": "tsx prisma/seed.ts"
   }
 }
