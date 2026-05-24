@@ -1,3 +1,4 @@
+/* eslint-disable no-console */
 import { PrismaClient } from '../lib/generated/prisma/client';
 import { PrismaPg } from '@prisma/adapter-pg';
 import { Pool } from 'pg';
@@ -45,7 +46,7 @@ async function main() {
   const existingClasses = await prisma.class.findMany({
     where: { teacherId: teacher.id },
   });
-  
+
   for (const c of existingClasses) {
     await prisma.class.delete({ where: { id: c.id } });
   }
@@ -53,7 +54,7 @@ async function main() {
 
   // 2. Create Classes
   const classNames = ['Klasse 9a', 'Klasse 9b', 'Klasse 10a'];
-  const createdClasses: Record<string, any> = {};
+  const createdClasses: Record<string, { id: string; name: string }> = {};
 
   for (const name of classNames) {
     const schoolClass = await prisma.class.create({
@@ -75,20 +76,11 @@ async function main() {
       'Anna Bieri',
       'David Müller',
     ],
-    'Klasse 9b': [
-      'Peter Keller',
-      'Julia Kaufmann',
-      'Simon Meier',
-      'Laura Schweizer',
-    ],
-    'Klasse 10a': [
-      'Marc Steiner',
-      'Elena Roth',
-      'Nico Graf',
-    ],
+    'Klasse 9b': ['Peter Keller', 'Julia Kaufmann', 'Simon Meier', 'Laura Schweizer'],
+    'Klasse 10a': ['Marc Steiner', 'Elena Roth', 'Nico Graf'],
   };
 
-  const createdStudents: Record<string, any[]> = {
+  const createdStudents: Record<string, { id: string; name: string }[]> = {
     'Klasse 9a': [],
     'Klasse 9b': [],
     'Klasse 10a': [],
@@ -114,7 +106,8 @@ async function main() {
     data: {
       title: 'Mathematik Klassenarbeit 1: Lineare Gleichungen',
       subject: 'Mathematik',
-      rubricText: 'Aufgabe 1: 3x - 5 = 10 -> x = 5. (5 Punkte)\nAufgabe 2: 2(x+3) = 14 -> x = 4. (5 Punkte)\nAufgabe 3: Lineares System x+y=5, x-y=1 -> x=3, y=2. (10 Punkte)',
+      rubricText:
+        'Aufgabe 1: 3x - 5 = 10 -> x = 5. (5 Punkte)\nAufgabe 2: 2(x+3) = 14 -> x = 4. (5 Punkte)\nAufgabe 3: Lineares System x+y=5, x-y=1 -> x=3, y=2. (10 Punkte)',
       maxPoints: 20,
       classId: createdClasses['Klasse 9a'].id,
     },
@@ -125,14 +118,15 @@ async function main() {
     data: {
       title: 'Mathematik Klassenarbeit 2: Quadratische Funktionen',
       subject: 'Mathematik',
-      rubricText: 'Aufgabe 1: x^2 - 4 = 0 -> x = ±2. (5 Punkte)\nAufgabe 2: Scheitelpunkt bestimmen f(x)=(x-3)^2 + 1 -> S(3,1). (10 Punkte)',
+      rubricText:
+        'Aufgabe 1: x^2 - 4 = 0 -> x = ±2. (5 Punkte)\nAufgabe 2: Scheitelpunkt bestimmen f(x)=(x-3)^2 + 1 -> S(3,1). (10 Punkte)',
       maxPoints: 15,
       classId: createdClasses['Klasse 9a'].id,
     },
   });
 
   // Exam 3: Klasse 9a Physik 1
-  const exam9aPhysik1 = await prisma.exam.create({
+  await prisma.exam.create({
     data: {
       title: 'Physik Test 1: Mechanik & Beschleunigung',
       subject: 'Physik',
@@ -147,7 +141,8 @@ async function main() {
     data: {
       title: 'Mathematik Klassenarbeit 1: Lineare Gleichungen',
       subject: 'Mathematik',
-      rubricText: 'Aufgabe 1: 3x - 5 = 10 -> x = 5. (5 Punkte)\nAufgabe 2: 2(x+3) = 14 -> x = 4. (5 Punkte)\nAufgabe 3: Lineares System x+y=5, x-y=1 -> x=3, y=2. (10 Punkte)',
+      rubricText:
+        'Aufgabe 1: 3x - 5 = 10 -> x = 5. (5 Punkte)\nAufgabe 2: 2(x+3) = 14 -> x = 4. (5 Punkte)\nAufgabe 3: Lineares System x+y=5, x-y=1 -> x=3, y=2. (10 Punkte)',
       maxPoints: 20,
       classId: createdClasses['Klasse 9b'].id,
     },
@@ -158,7 +153,8 @@ async function main() {
     data: {
       title: 'Chemie Prüfung 1: Periodensystem & Atome',
       subject: 'Chemie',
-      rubricText: 'Aufgabe 1: Elektronenkonfiguration zeichnen. Max 10 Punkte.\nAufgabe 2: Chemische Bindung erklären. Max 10 Punkte.\nAufgabe 3: Stöchiometrische Berechnungen. Max 10 Punkte.',
+      rubricText:
+        'Aufgabe 1: Elektronenkonfiguration zeichnen. Max 10 Punkte.\nAufgabe 2: Chemische Bindung erklären. Max 10 Punkte.\nAufgabe 3: Stöchiometrische Berechnungen. Max 10 Punkte.',
       maxPoints: 30,
       classId: createdClasses['Klasse 10a'].id,
     },
@@ -178,8 +174,8 @@ async function main() {
     helpfulTip = '',
     exerciseRecommendation = '',
   }: {
-    student: any;
-    exam: any;
+    student: { id: string; name: string };
+    exam: { id: string; maxPoints: number };
     earnedPoints: number;
     grade: string;
     status?: 'DRAFT' | 'COMPLETED';
@@ -220,12 +216,13 @@ async function main() {
         erzieltePunkte: task1Earned,
         maximalPunkte: task1Max,
         status: task1Earned === task1Max ? 'Korrekt' : task1Earned > 0 ? 'Folgefehler' : 'Fehler',
-        lehrerKommentar: task1Earned === task1Max ? 'Hervorragend gelöst!' : 'Ein kleiner Rechenfehler.',
+        lehrerKommentar:
+          task1Earned === task1Max ? 'Hervorragend gelöst!' : 'Ein kleiner Rechenfehler.',
         orderIndex: 0,
       },
     });
 
-    const tc2 = await prisma.taskCorrection.create({
+    await prisma.taskCorrection.create({
       data: {
         submissionId: sub.id,
         taskId: '2',
@@ -234,7 +231,8 @@ async function main() {
         erzieltePunkte: task2Earned,
         maximalPunkte: task2Max,
         status: task2Earned === task2Max ? 'Korrekt' : task2Earned > 0 ? 'Folgefehler' : 'Fehler',
-        lehrerKommentar: task2Earned === task2Max ? 'Perfekt.' : 'Folgeschritte korrekt durchgeführt.',
+        lehrerKommentar:
+          task2Earned === task2Max ? 'Perfekt.' : 'Folgeschritte korrekt durchgeführt.',
         orderIndex: 1,
       },
     });
@@ -260,7 +258,7 @@ async function main() {
         schrittText: '3x = 15 -> x = 5',
         istKorrekt: task1Earned > task1Max * 0.5,
         fehlerTyp: task1Earned === task1Max ? 'KeinFehler' : 'Rechenfehler',
-        erreichtePunkte: Math.max(0, task1Earned - (task1Max * 0.5)),
+        erreichtePunkte: Math.max(0, task1Earned - task1Max * 0.5),
         maximalPunkte: task1Max * 0.5,
         begruendung: task1Earned === task1Max ? 'Korrekt berechnet.' : 'Rechenfehler bei Division.',
       },

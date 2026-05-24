@@ -6,7 +6,6 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import {
   Box,
-  Container,
   Typography,
   Button,
   Grid,
@@ -18,7 +17,6 @@ import {
   RadioGroup,
   CircularProgress,
   Alert,
-  IconButton,
   Divider,
   MenuItem,
   Select,
@@ -39,10 +37,8 @@ import {
 } from '@mui/material';
 import CloudUploadIcon from '@mui/icons-material/CloudUpload';
 import DescriptionIcon from '@mui/icons-material/Description';
-import SchoolIcon from '@mui/icons-material/School';
 import SettingsIcon from '@mui/icons-material/Settings';
 import FlashOnIcon from '@mui/icons-material/FlashOn';
-import LogoutIcon from '@mui/icons-material/Logout';
 import PersonIcon from '@mui/icons-material/Person';
 import HistoryIcon from '@mui/icons-material/History';
 import AddCircleIcon from '@mui/icons-material/AddCircle';
@@ -52,25 +48,56 @@ import TrendingUpIcon from '@mui/icons-material/TrendingUp';
 import DashboardLayout from '@/components/DashboardLayout';
 import { getCachedTeacher, setCachedTeacher } from '@/lib/sessionCache';
 
+interface DashboardClass {
+  id: string;
+  name: string;
+  _count?: {
+    students: number;
+  };
+}
+
+interface DashboardStudent {
+  id: string;
+  name: string;
+}
+
+interface DashboardExam {
+  id: string;
+  title: string;
+  subject: string;
+  maxPoints: number;
+}
+
+interface DashboardSubmission {
+  id: string;
+  studentName: string;
+  examTitle: string;
+  subject: string;
+  points: string;
+  grade: string;
+  date: string;
+}
 
 export default function Dashboard() {
   const router = useRouter();
-  
+
   // Auth and Session state
-  const [teacher, setTeacher] = useState<{ id: string; name: string; email: string } | null>(getCachedTeacher());
+  const [_teacher, setTeacher] = useState<{ id: string; name: string; email: string } | null>(
+    getCachedTeacher()
+  );
   const [authChecking, setAuthChecking] = useState(!getCachedTeacher());
 
   // Database lists
-  const [classes, setClasses] = useState<any[]>([]);
-  const [students, setStudents] = useState<any[]>([]);
-  const [exams, setExams] = useState<any[]>([]);
-  const [recentSubmissions, setRecentSubmissions] = useState<any[]>([]);
+  const [classes, setClasses] = useState<DashboardClass[]>([]);
+  const [students, setStudents] = useState<DashboardStudent[]>([]);
+  const [exams, setExams] = useState<DashboardExam[]>([]);
+  const [recentSubmissions, setRecentSubmissions] = useState<DashboardSubmission[]>([]);
 
   // Selection states
   const [selectedClassId, setSelectedClassId] = useState<string>('');
   const [selectedStudentId, setSelectedStudentId] = useState<string>('');
   const [selectedExamId, setSelectedExamId] = useState<string>('NEW'); // 'NEW' or specific exam UUID
-  
+
   // New exam states
   const [examTitle, setExamTitle] = useState<string>('');
   const [examSubject, setExamSubject] = useState<string>('Mathematik');
@@ -87,78 +114,8 @@ export default function Dashboard() {
   const [error, setError] = useState<string>('');
   const [openConfirmOverwrite, setOpenConfirmOverwrite] = useState<boolean>(false);
 
-  // 1. Verify Authentication & Load Initial Data
-  useEffect(() => {
-    let active = true;
-    async function checkAuth() {
-      try {
-        const res = await fetch('/api/auth/me');
-        if (!res.ok) {
-          router.replace('/login');
-          return;
-        }
-        const data = await res.json();
-        if (active) {
-          setTeacher(data.teacher);
-          setCachedTeacher(data.teacher);
-          setAuthChecking(false);
-          
-          if (!cached) {
-            fetchClasses();
-            fetchRecentSubmissions();
-          }
-        }
-      } catch (err) {
-        console.error('Session verification failed:', err);
-        router.replace('/login');
-      }
-    }
-    
-    const cached = getCachedTeacher();
-    if (cached) {
-      fetchClasses();
-      fetchRecentSubmissions();
-    }
-    
-    checkAuth();
-    
-    return () => {
-      active = false;
-    };
-  }, [router]);
-
-  // 2. Fetch classes from DB
-  const fetchClasses = async () => {
-    try {
-      const res = await fetch('/api/classes');
-      if (res.ok) {
-        const data = await res.json();
-        setClasses(data.classes || []);
-        // Pre-select first class if available
-        if (data.classes && data.classes.length > 0) {
-          handleClassChange(data.classes[0].id);
-        }
-      }
-    } catch (err) {
-      console.error('Error fetching classes:', err);
-    }
-  };
-
-  // 3. Fetch recent submissions history from DB
-  const fetchRecentSubmissions = async () => {
-    try {
-      const res = await fetch('/api/submissions');
-      if (res.ok) {
-        const data = await res.json();
-        setRecentSubmissions(data.submissions || []);
-      }
-    } catch (err) {
-      console.error('Error fetching recent submissions:', err);
-    }
-  };
-
   // 4. Handle Class Change (Fetch Students & Exams for selected class)
-  const handleClassChange = async (classId: string) => {
+  const handleClassChange = React.useCallback(async (classId: string) => {
     setSelectedClassId(classId);
     setSelectedStudentId('');
     setExams([]);
@@ -185,10 +142,83 @@ export default function Dashboard() {
     } catch (err) {
       console.error('Error fetching class details:', err);
     }
-  };
+  }, []);
+
+  // 2. Fetch classes from DB
+  const fetchClasses = React.useCallback(async () => {
+    try {
+      const res = await fetch('/api/classes');
+      if (res.ok) {
+        const data = await res.json();
+        setClasses(data.classes || []);
+        // Pre-select first class if available
+        if (data.classes && data.classes.length > 0) {
+          handleClassChange(data.classes[0].id);
+        }
+      }
+    } catch (err) {
+      console.error('Error fetching classes:', err);
+    }
+  }, [handleClassChange]);
+
+  // 3. Fetch recent submissions history from DB
+  const fetchRecentSubmissions = React.useCallback(async () => {
+    try {
+      const res = await fetch('/api/submissions');
+      if (res.ok) {
+        const data = await res.json();
+        setRecentSubmissions(data.submissions || []);
+      }
+    } catch (err) {
+      console.error('Error fetching recent submissions:', err);
+    }
+  }, []);
+
+  // 1. Verify Authentication & Load Initial Data
+  useEffect(() => {
+    let active = true;
+    const cached = getCachedTeacher();
+
+    async function checkAuth() {
+      try {
+        const res = await fetch('/api/auth/me');
+        if (!res.ok) {
+          router.replace('/login');
+          return;
+        }
+        const data = await res.json();
+        if (active) {
+          setTeacher(data.teacher);
+          setCachedTeacher(data.teacher);
+          setAuthChecking(false);
+
+          if (!cached) {
+            fetchClasses();
+            fetchRecentSubmissions();
+          }
+        }
+      } catch (err) {
+        console.error('Session verification failed:', err);
+        router.replace('/login');
+      }
+    }
+
+    if (cached) {
+      Promise.resolve().then(() => {
+        fetchClasses();
+        fetchRecentSubmissions();
+      });
+    }
+
+    checkAuth();
+
+    return () => {
+      active = false;
+    };
+  }, [router, fetchClasses, fetchRecentSubmissions]);
 
   // 5. Handle Logout
-  const handleLogout = async () => {
+  const _handleLogout = async () => {
     try {
       const res = await fetch('/api/auth/logout', { method: 'POST' });
       if (res.ok) {
@@ -329,14 +359,12 @@ export default function Dashboard() {
 
   const totalClasses = classes.length;
   const totalStudents = classes.reduce((sum, cls) => sum + (cls._count?.students || 0), 0);
-  const totalCompleted = recentSubmissions.length > 0 ? 12 : 0;
+  const _totalCompleted = recentSubmissions.length > 0 ? 12 : 0;
   const overallAverage = recentSubmissions.length > 0 ? '4.86' : 'N/A';
-
 
   return (
     <DashboardLayout>
       <Box sx={{ display: 'flex', flexDirection: 'column', gap: '32px', position: 'relative' }}>
-        
         {/* High Level Stats Grid */}
         <Grid container spacing={3}>
           {/* Card 1: Classes */}
@@ -465,7 +493,12 @@ export default function Dashboard() {
           <Typography
             variant="h4"
             component="h2"
-            sx={{ fontWeight: 800, color: '#0f172a', marginBottom: '8px', letterSpacing: '-0.02em' }}
+            sx={{
+              fontWeight: 800,
+              color: '#0f172a',
+              marginBottom: '8px',
+              letterSpacing: '-0.02em',
+            }}
           >
             Prüfungskorrektur starten
           </Typography>
@@ -485,7 +518,6 @@ export default function Dashboard() {
           {/* Left Column: Form Setup */}
           <Grid size={{ xs: 12, md: 8 }}>
             <Stack spacing={4}>
-              
               {/* Step 1: Select Class & Student */}
               <Card sx={{ borderRadius: '12px', border: '1px solid #e2e8f0', boxShadow: 'none' }}>
                 <CardContent sx={{ padding: '24px' }}>
@@ -521,7 +553,7 @@ export default function Dashboard() {
                         >
                           {classes.map((cls) => (
                             <MenuItem key={cls.id} value={cls.id}>
-                              {cls.name} ({cls._count.students} Schüler)
+                              {cls.name} ({cls._count?.students || 0} Schüler)
                             </MenuItem>
                           ))}
                         </Select>
@@ -531,11 +563,17 @@ export default function Dashboard() {
                     {/* Student Selector Cards */}
                     {selectedClassId && (
                       <Grid size={{ xs: 12 }}>
-                        <Typography variant="subtitle2" sx={{ fontWeight: 650, color: 'text.primary', mb: 1.5 }}>
+                        <Typography
+                          variant="subtitle2"
+                          sx={{ fontWeight: 650, color: 'text.primary', mb: 1.5 }}
+                        >
                           Schüler/in auswählen:
                         </Typography>
                         {students.length === 0 ? (
-                          <Typography variant="body2" sx={{ color: 'text.secondary', fontStyle: 'italic' }}>
+                          <Typography
+                            variant="body2"
+                            sx={{ color: 'text.secondary', fontStyle: 'italic' }}
+                          >
                             Keine Schüler in dieser Klasse gefunden.
                           </Typography>
                         ) : (
@@ -550,7 +588,9 @@ export default function Dashboard() {
                                       setError('');
                                     }}
                                     sx={{
-                                      border: isSelected ? '2.5px solid #1b77d1' : '1px solid #e2e8f0',
+                                      border: isSelected
+                                        ? '2.5px solid #1b77d1'
+                                        : '1px solid #e2e8f0',
                                       borderRadius: '8px',
                                       padding: '16px',
                                       textAlign: 'center',
@@ -630,7 +670,10 @@ export default function Dashboard() {
                           <MenuItem value="NEW">
                             <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
                               <AddCircleIcon sx={{ color: 'success.main', fontSize: '1.2rem' }} />
-                              <Typography variant="body2" sx={{ fontWeight: 'bold', color: 'success.main' }}>
+                              <Typography
+                                variant="body2"
+                                sx={{ fontWeight: 'bold', color: 'success.main' }}
+                              >
                                 [Neue Prüfung erstellen]
                               </Typography>
                             </Stack>
@@ -646,10 +689,13 @@ export default function Dashboard() {
                       {/* Input fields for NEW Exam */}
                       {selectedExamId === 'NEW' && (
                         <Stack spacing={2.5} sx={{ borderLeft: '3px solid #1b77d1', pl: 2, py: 1 }}>
-                          <Typography variant="subtitle2" sx={{ fontWeight: 650, color: 'primary.main' }}>
+                          <Typography
+                            variant="subtitle2"
+                            sx={{ fontWeight: 650, color: 'primary.main' }}
+                          >
                             Prüfungsdetails für die neue Prüfung:
                           </Typography>
-                          
+
                           <Grid container spacing={2}>
                             <Grid size={{ xs: 12, sm: 8 }}>
                               <TextField
@@ -680,7 +726,10 @@ export default function Dashboard() {
                           </Grid>
 
                           <Stack spacing={1.5}>
-                            <Typography variant="caption" sx={{ fontWeight: 600, color: 'text.secondary' }}>
+                            <Typography
+                              variant="caption"
+                              sx={{ fontWeight: 600, color: 'text.secondary' }}
+                            >
                               Vorgaben für Erwartungshorizont / Musterlösung:
                             </Typography>
                             {rubricFile ? (
@@ -697,11 +746,18 @@ export default function Dashboard() {
                               >
                                 <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
                                   <DescriptionIcon sx={{ color: 'text.secondary' }} />
-                                  <Typography variant="body2" sx={{ color: 'text.primary', fontWeight: 600 }}>
+                                  <Typography
+                                    variant="body2"
+                                    sx={{ color: 'text.primary', fontWeight: 600 }}
+                                  >
                                     {rubricFile.name}
                                   </Typography>
                                 </Stack>
-                                <Button size="small" color="error" onClick={() => setRubricFile(null)}>
+                                <Button
+                                  size="small"
+                                  color="error"
+                                  onClick={() => setRubricFile(null)}
+                                >
                                   Löschen
                                 </Button>
                               </Box>
@@ -735,7 +791,11 @@ export default function Dashboard() {
                                     htmlFor="rubricFile"
                                     variant="outlined"
                                     size="small"
-                                    sx={{ color: 'text.primary', borderColor: '#e2e8f0', fontWeight: 600 }}
+                                    sx={{
+                                      color: 'text.primary',
+                                      borderColor: '#e2e8f0',
+                                      fontWeight: 600,
+                                    }}
                                   >
                                     Datei auswählen
                                   </Button>
@@ -805,7 +865,10 @@ export default function Dashboard() {
                       {studentFile ? (
                         <Stack spacing={1.5} sx={{ alignItems: 'center' }}>
                           <DescriptionIcon sx={{ fontSize: '3rem', color: 'success.main' }} />
-                          <Typography variant="subtitle1" sx={{ fontWeight: 650, color: 'success.main' }}>
+                          <Typography
+                            variant="subtitle1"
+                            sx={{ fontWeight: 650, color: 'success.main' }}
+                          >
                             {studentFile.name}
                           </Typography>
                           <Typography variant="caption" sx={{ color: 'text.secondary' }}>
@@ -815,7 +878,10 @@ export default function Dashboard() {
                       ) : (
                         <Stack spacing={1.5} sx={{ alignItems: 'center' }}>
                           <CloudUploadIcon sx={{ fontSize: '3rem', color: 'text.secondary' }} />
-                          <Typography variant="subtitle1" sx={{ fontWeight: 650, color: 'text.primary' }}>
+                          <Typography
+                            variant="subtitle1"
+                            sx={{ fontWeight: 650, color: 'text.primary' }}
+                          >
                             Zieh die Arbeit hierher oder klicke zum Auswählen
                           </Typography>
                           <Typography variant="body2" sx={{ color: 'text.secondary' }}>
@@ -832,8 +898,17 @@ export default function Dashboard() {
 
           {/* Right Column: Settings Panel */}
           <Grid size={{ xs: 12, md: 4 }}>
-            <Card sx={{ borderRadius: '12px', border: '1px solid #e2e8f0', boxShadow: 'none', height: '100%' }}>
-              <CardContent sx={{ padding: '24px', display: 'flex', flexDirection: 'column', gap: '20px' }}>
+            <Card
+              sx={{
+                borderRadius: '12px',
+                border: '1px solid #e2e8f0',
+                boxShadow: 'none',
+                height: '100%',
+              }}
+            >
+              <CardContent
+                sx={{ padding: '24px', display: 'flex', flexDirection: 'column', gap: '20px' }}
+              >
                 <Typography
                   variant="h6"
                   component="h3"
@@ -845,8 +920,7 @@ export default function Dashboard() {
                     gap: '10px',
                   }}
                 >
-                  <SettingsIcon sx={{ color: 'primary.main', fontSize: '1.25rem' }} />{' '}
-                  Optionen
+                  <SettingsIcon sx={{ color: 'primary.main', fontSize: '1.25rem' }} /> Optionen
                 </Typography>
                 <Divider />
 
@@ -869,7 +943,10 @@ export default function Dashboard() {
                           gap: '10px',
                           padding: '12px',
                           borderRadius: '8px',
-                          border: model === 'gemini-3.5-flash' ? '1.5px solid #1b77d1' : '1px solid #e2e8f0',
+                          border:
+                            model === 'gemini-3.5-flash'
+                              ? '1.5px solid #1b77d1'
+                              : '1px solid #e2e8f0',
                           background: model === 'gemini-3.5-flash' ? '#f0f7ff' : '#ffffff',
                           cursor: 'pointer',
                           '&:hover': { borderColor: '#1b77d1' },
@@ -880,7 +957,10 @@ export default function Dashboard() {
                           <Typography variant="body2" sx={{ fontWeight: 700 }}>
                             Gemini 3.5 Flash
                           </Typography>
-                          <Typography variant="caption" sx={{ color: 'text.secondary', display: 'block' }}>
+                          <Typography
+                            variant="caption"
+                            sx={{ color: 'text.secondary', display: 'block' }}
+                          >
                             Schnell & Exzellente OCR
                           </Typography>
                         </Box>
@@ -893,7 +973,10 @@ export default function Dashboard() {
                           gap: '10px',
                           padding: '12px',
                           borderRadius: '8px',
-                          border: model === 'gemini-3.1-pro' ? '1.5px solid #1b77d1' : '1px solid #e2e8f0',
+                          border:
+                            model === 'gemini-3.1-pro'
+                              ? '1.5px solid #1b77d1'
+                              : '1px solid #e2e8f0',
                           background: model === 'gemini-3.1-pro' ? '#f0f7ff' : '#ffffff',
                           cursor: 'pointer',
                           '&:hover': { borderColor: '#1b77d1' },
@@ -904,7 +987,10 @@ export default function Dashboard() {
                           <Typography variant="body2" sx={{ fontWeight: 700 }}>
                             Gemini 3.1 Pro
                           </Typography>
-                          <Typography variant="caption" sx={{ color: 'text.secondary', display: 'block' }}>
+                          <Typography
+                            variant="caption"
+                            sx={{ color: 'text.secondary', display: 'block' }}
+                          >
                             Tiefes Folgefehler-Tracking
                           </Typography>
                         </Box>
@@ -943,11 +1029,17 @@ export default function Dashboard() {
           <Box sx={{ mt: 4 }}>
             <Stack direction="row" spacing={1.5} sx={{ alignItems: 'center', mb: 2 }}>
               <HistoryIcon sx={{ color: '#0f172a' }} />
-              <Typography variant="h5" sx={{ fontWeight: 800, color: '#0f172a', letterSpacing: '-0.02em' }}>
+              <Typography
+                variant="h5"
+                sx={{ fontWeight: 800, color: '#0f172a', letterSpacing: '-0.02em' }}
+              >
                 Letzte Korrekturen (Historie)
               </Typography>
             </Stack>
-            <TableContainer component={Paper} sx={{ borderRadius: '12px', border: '1px solid #e2e8f0', boxShadow: 'none' }}>
+            <TableContainer
+              component={Paper}
+              sx={{ borderRadius: '12px', border: '1px solid #e2e8f0', boxShadow: 'none' }}
+            >
               <Table>
                 <TableHead sx={{ backgroundColor: '#f8fafc' }}>
                   <TableRow>
@@ -962,11 +1054,18 @@ export default function Dashboard() {
                 </TableHead>
                 <TableBody>
                   {recentSubmissions.map((sub) => (
-                    <TableRow key={sub.id} sx={{ '&:last-child td, &:last-child th': { border: 0 } }}>
+                    <TableRow
+                      key={sub.id}
+                      sx={{ '&:last-child td, &:last-child th': { border: 0 } }}
+                    >
                       <TableCell sx={{ fontWeight: 600 }}>{sub.studentName}</TableCell>
                       <TableCell>{sub.examTitle}</TableCell>
                       <TableCell>
-                        <Chip label={sub.subject} size="small" sx={{ backgroundColor: '#e3f2fd', color: '#1b77d1', fontWeight: 600 }} />
+                        <Chip
+                          label={sub.subject}
+                          size="small"
+                          sx={{ backgroundColor: '#e3f2fd', color: '#1b77d1', fontWeight: 600 }}
+                        />
                       </TableCell>
                       <TableCell sx={{ fontWeight: 600 }}>{sub.points}</TableCell>
                       <TableCell>
@@ -983,8 +1082,16 @@ export default function Dashboard() {
                       </TableCell>
                       <TableCell>{sub.date}</TableCell>
                       <TableCell sx={{ textAlign: 'right' }}>
-                        <Link href={`/correct/${sub.id}`} passHref style={{ textDecoration: 'none' }}>
-                          <Button variant="outlined" size="small" sx={{ textTransform: 'none', fontWeight: 600 }}>
+                        <Link
+                          href={`/correct/${sub.id}`}
+                          passHref
+                          style={{ textDecoration: 'none' }}
+                        >
+                          <Button
+                            variant="outlined"
+                            size="small"
+                            sx={{ textTransform: 'none', fontWeight: 600 }}
+                          >
                             Workspace öffnen
                           </Button>
                         </Link>
@@ -1057,18 +1164,18 @@ export default function Dashboard() {
       )}
 
       {/* Dialog for Overwrite Confirmation */}
-      <Dialog 
-        open={openConfirmOverwrite} 
-        onClose={() => setOpenConfirmOverwrite(false)} 
-        maxWidth="xs" 
+      <Dialog
+        open={openConfirmOverwrite}
+        onClose={() => setOpenConfirmOverwrite(false)}
+        maxWidth="xs"
         fullWidth
         slotProps={{
           paper: {
             sx: {
               borderRadius: '12px',
-              padding: '8px'
-            }
-          }
+              padding: '8px',
+            },
+          },
         }}
       >
         <DialogTitle sx={{ fontWeight: 800, color: '#0f172a', letterSpacing: '-0.01em' }}>
@@ -1076,14 +1183,14 @@ export default function Dashboard() {
         </DialogTitle>
         <DialogContent>
           <Typography variant="body2" sx={{ color: 'text.secondary', lineHeight: 1.5 }}>
-            Für diese/n Schüler/in existiert bereits eine Korrektur für diese Prüfung. 
-            Wenn du fortfährst, wird die **bestehende Korrektur komplett überschrieben**. 
-            Alle manuellen Änderungen und Lehrer-Kommentare gehen dabei unwiderruflich verloren.
+            Für diese/n Schüler/in existiert bereits eine Korrektur für diese Prüfung. Wenn du
+            fortfährst, wird die **bestehende Korrektur komplett überschrieben**. Alle manuellen
+            Änderungen und Lehrer-Kommentare gehen dabei unwiderruflich verloren.
           </Typography>
         </DialogContent>
         <DialogActions sx={{ p: 2, pt: 1 }}>
-          <Button 
-            onClick={() => setOpenConfirmOverwrite(false)} 
+          <Button
+            onClick={() => setOpenConfirmOverwrite(false)}
             sx={{ textTransform: 'none', fontWeight: 650 }}
           >
             Abbrechen
@@ -1101,8 +1208,8 @@ export default function Dashboard() {
               borderRadius: '8px',
               backgroundColor: '#d32f2f',
               '&:hover': {
-                backgroundColor: '#c62828'
-              }
+                backgroundColor: '#c62828',
+              },
             }}
           >
             Ja, überschreiben
@@ -1112,4 +1219,3 @@ export default function Dashboard() {
     </DashboardLayout>
   );
 }
-

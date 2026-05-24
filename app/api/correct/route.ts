@@ -19,12 +19,12 @@ export async function POST(request: Request) {
     const classId = formData.get('classId') as string | null;
     const examId = formData.get('examId') as string | null; // For existing exams
     const overwrite = formData.get('overwrite') === 'true';
-    
+
     // For new exams
     const examTitle = formData.get('examTitle') as string | null;
     const examSubject = formData.get('examSubject') as string | null;
     const rubric = formData.get('rubric') as File | string | null;
-    
+
     // Core parameters
     const studentExam = formData.get('studentExam') as File | null;
     const model = (formData.get('model') as string) || 'gemini-3.5-flash';
@@ -86,7 +86,10 @@ export async function POST(request: Request) {
         where: { id: examId },
       });
       if (!existingExam) {
-        return NextResponse.json({ error: 'Ausgewählte Prüfung existiert nicht.' }, { status: 404 });
+        return NextResponse.json(
+          { error: 'Ausgewählte Prüfung existiert nicht.' },
+          { status: 404 }
+        );
       }
       rubricParam = existingExam.rubricText;
       rubricTextString = existingExam.rubricText;
@@ -94,7 +97,10 @@ export async function POST(request: Request) {
       // Process uploaded new rubric
       if (!examTitle || !examSubject || !rubric) {
         return NextResponse.json(
-          { error: 'Prüfungstitel, Fach und Musterlösung müssen für eine neue Prüfung angegeben werden.' },
+          {
+            error:
+              'Prüfungstitel, Fach und Musterlösung müssen für eine neue Prüfung angegeben werden.',
+          },
           { status: 400 }
         );
       }
@@ -132,7 +138,7 @@ export async function POST(request: Request) {
     // 5. Save the exam sheet document to the local filesystem (Option A)
     // NOTE FOR PRODUCTION DEPLOYMENTS:
     // currently we are using Option A (local filesystem upload under public/uploads/).
-    // TODO: Migrate this local storage logic to an S3-compatible cloud storage solution 
+    // TODO: Migrate this local storage logic to an S3-compatible cloud storage solution
     // (e.g. AWS S3, Supabase Storage, or Vercel Blob) when deploying to production.
     const uploadsDir = path.join(process.cwd(), 'public', 'uploads');
     await fs.mkdir(uploadsDir, { recursive: true });
@@ -146,12 +152,14 @@ export async function POST(request: Request) {
 
     // 6. Execute a transactional write to commit all tables atomically
     const submission = await db.$transaction(async (tx) => {
-      // If overwrite is true, delete existing submission (cleans cascading tasks & steps)
       if (examId && studentId && overwrite) {
-        await tx.submission.deleteMany({
+        // Point-lookup deletion using unique compound index for maximum speed
+        await tx.submission.delete({
           where: {
-            examId: examId,
-            studentId: studentId,
+            examId_studentId: {
+              examId: examId,
+              studentId: studentId,
+            },
           },
         });
       }
@@ -232,7 +240,8 @@ export async function POST(request: Request) {
 
         // Insert Teilschritte
         for (const step of task.schritte) {
-          let errorType: 'KeinFehler' | 'Rechenfehler' | 'Folgefehler' | 'SonstigerFehler' = 'KeinFehler';
+          let errorType: 'KeinFehler' | 'Rechenfehler' | 'Folgefehler' | 'SonstigerFehler' =
+            'KeinFehler';
           if (step.fehlerTyp === 'Rechenfehler') errorType = 'Rechenfehler';
           else if (step.fehlerTyp === 'Folgefehler') errorType = 'Folgefehler';
           else if (step.fehlerTyp === 'SonstigerFehler') errorType = 'SonstigerFehler';

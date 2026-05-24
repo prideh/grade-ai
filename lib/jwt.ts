@@ -2,10 +2,13 @@ import { SignJWT, jwtVerify } from 'jose';
 
 function getSecretKey(): Uint8Array {
   const secret = process.env.JWT_SECRET;
-  if (!secret && process.env.NODE_ENV === 'production') {
-    throw new Error('FATAL: JWT_SECRET environment variable must be set in production!');
+  if (!secret) {
+    if (process.env.NODE_ENV === 'production') {
+      throw new Error('FATAL: JWT_SECRET environment variable must be set in production!');
+    }
+    return new TextEncoder().encode('grade-ai-dev-secret-key-safe-fallback');
   }
-  return new TextEncoder().encode(secret || 'grade-ai-super-jwt-secret-key-998877665544332211');
+  return new TextEncoder().encode(secret);
 }
 
 /**

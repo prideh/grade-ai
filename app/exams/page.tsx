@@ -31,12 +31,30 @@ import AssignmentIcon from '@mui/icons-material/Assignment';
 import ArrowForwardIcon from '@mui/icons-material/ArrowForward';
 import DashboardLayout from '@/components/DashboardLayout';
 
+interface SimpleClass {
+  id: string;
+  name: string;
+}
+
+interface PrismaExamItem {
+  id: string;
+  title: string;
+  subject: string;
+  maxPoints: number;
+  className: string;
+  submissionsCount: number;
+}
+
+interface ExamListItem extends PrismaExamItem {
+  averageGrade: string;
+}
+
 export default function ExamsPage() {
-  const [exams, setExams] = useState<any[]>([]);
-  const [classes, setClasses] = useState<any[]>([]);
+  const [exams, setExams] = useState<ExamListItem[]>([]);
+  const [classes, setClasses] = useState<SimpleClass[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  
+
   // Dialog State
   const [openCreate, setOpenCreate] = useState(false);
   const [examTitle, setExamTitle] = useState('');
@@ -48,13 +66,12 @@ export default function ExamsPage() {
   const [createError, setCreateError] = useState('');
 
   // Fetch all exams & classes
-  const fetchData = async () => {
+  const fetchData = React.useCallback(async () => {
     try {
-      setLoading(true);
-      setError('');
-      
       // Fetch classes
       const classesRes = await fetch('/api/classes');
+      setError('');
+
       if (classesRes.ok) {
         const classesData = await classesRes.json();
         setClasses(classesData.classes || []);
@@ -67,10 +84,10 @@ export default function ExamsPage() {
       const examsRes = await fetch('/api/exams');
       if (!examsRes.ok) throw new Error('Fehler beim Laden der Prüfungen.');
       const examsData = await examsRes.json();
-      
+
       // Fetch details for each exam to calculate and display class averages
       const detailedExams = await Promise.all(
-        (examsData.exams || []).map(async (ex: any) => {
+        (examsData.exams || []).map(async (ex: PrismaExamItem) => {
           try {
             const detailRes = await fetch(`/api/exams/${ex.id}`);
             if (detailRes.ok) {
@@ -93,11 +110,13 @@ export default function ExamsPage() {
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
   useEffect(() => {
-    fetchData();
-  }, []);
+    Promise.resolve().then(() => {
+      fetchData();
+    });
+  }, [fetchData]);
 
   const handleCreateExam = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -141,11 +160,21 @@ export default function ExamsPage() {
   return (
     <DashboardLayout>
       <Box sx={{ display: 'flex', flexDirection: 'column', gap: '32px' }}>
-        
         {/* Header Section */}
-        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 2 }}>
+        <Box
+          sx={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            flexWrap: 'wrap',
+            gap: 2,
+          }}
+        >
           <Box>
-            <Typography variant="h4" sx={{ fontWeight: 800, color: '#0f172a', letterSpacing: '-0.02em', mb: 1 }}>
+            <Typography
+              variant="h4"
+              sx={{ fontWeight: 800, color: '#0f172a', letterSpacing: '-0.02em', mb: 1 }}
+            >
               Prüfungsverwaltung
             </Typography>
             <Typography variant="body1" sx={{ color: 'text.secondary', fontWeight: 550 }}>
@@ -196,8 +225,12 @@ export default function ExamsPage() {
             <Typography variant="h6" sx={{ fontWeight: 700, color: '#475569', mb: 1 }}>
               Keine Prüfungen gefunden
             </Typography>
-            <Typography variant="body2" sx={{ color: 'text.secondary', maxWidth: '400px', mx: 'auto', mb: 3 }}>
-              Erstelle deine erste Prüfung, um einen Erwartungshorizont für die automatische Folgefehler-Korrektur zu hinterlegen.
+            <Typography
+              variant="body2"
+              sx={{ color: 'text.secondary', maxWidth: '400px', mx: 'auto', mb: 3 }}
+            >
+              Erstelle deine erste Prüfung, um einen Erwartungshorizont für die automatische
+              Folgefehler-Korrektur zu hinterlegen.
             </Typography>
             <Button
               variant="outlined"
@@ -231,15 +264,27 @@ export default function ExamsPage() {
                   }}
                 >
                   <CardContent sx={{ p: 3, pb: 1 }}>
-                    <Stack direction="row" sx={{ justifyContent: 'space-between', alignItems: 'flex-start', mb: 2 }}>
+                    <Stack
+                      direction="row"
+                      sx={{ justifyContent: 'space-between', alignItems: 'flex-start', mb: 2 }}
+                    >
                       <Box>
-                        <Typography variant="h6" sx={{ fontWeight: 800, color: '#0f172a', mb: 0.5, lineClamp: 2 }}>
+                        <Typography
+                          variant="h6"
+                          sx={{ fontWeight: 800, color: '#0f172a', mb: 0.5, lineClamp: 2 }}
+                        >
                           {ex.title}
                         </Typography>
                         <Chip
                           label={ex.subject}
                           size="small"
-                          sx={{ backgroundColor: '#e3f2fd', color: '#1b77d1', fontWeight: 700, fontSize: '0.75rem', mb: 1 }}
+                          sx={{
+                            backgroundColor: '#e3f2fd',
+                            color: '#1b77d1',
+                            fontWeight: 700,
+                            fontSize: '0.75rem',
+                            mb: 1,
+                          }}
                         />
                       </Box>
                       <Box
@@ -264,7 +309,10 @@ export default function ExamsPage() {
                     <Grid container spacing={2}>
                       <Grid size={{ xs: 6 }}>
                         <Stack spacing={0.25}>
-                          <Typography variant="caption" sx={{ color: 'text.secondary', fontWeight: 600 }}>
+                          <Typography
+                            variant="caption"
+                            sx={{ color: 'text.secondary', fontWeight: 600 }}
+                          >
                             Klasse
                           </Typography>
                           <Typography variant="body2" sx={{ fontWeight: 700, color: '#334155' }}>
@@ -274,7 +322,10 @@ export default function ExamsPage() {
                       </Grid>
                       <Grid size={{ xs: 6 }}>
                         <Stack spacing={0.25}>
-                          <Typography variant="caption" sx={{ color: 'text.secondary', fontWeight: 600 }}>
+                          <Typography
+                            variant="caption"
+                            sx={{ color: 'text.secondary', fontWeight: 600 }}
+                          >
                             Max. Punkte
                           </Typography>
                           <Typography variant="body2" sx={{ fontWeight: 700, color: '#334155' }}>
@@ -284,7 +335,10 @@ export default function ExamsPage() {
                       </Grid>
                       <Grid size={{ xs: 6 }} sx={{ mt: 1 }}>
                         <Stack spacing={0.25}>
-                          <Typography variant="caption" sx={{ color: 'text.secondary', fontWeight: 600 }}>
+                          <Typography
+                            variant="caption"
+                            sx={{ color: 'text.secondary', fontWeight: 600 }}
+                          >
                             Korrekturen
                           </Typography>
                           <Typography variant="body2" sx={{ fontWeight: 700, color: '#334155' }}>
@@ -294,7 +348,10 @@ export default function ExamsPage() {
                       </Grid>
                       <Grid size={{ xs: 6 }} sx={{ mt: 1 }}>
                         <Stack direction="row" spacing={0.75} sx={{ alignItems: 'center' }}>
-                          <Typography variant="caption" sx={{ color: 'text.secondary', fontWeight: 600 }}>
+                          <Typography
+                            variant="caption"
+                            sx={{ color: 'text.secondary', fontWeight: 600 }}
+                          >
                             Schnitt (Ø):
                           </Typography>
                           {ex.averageGrade !== 'N/A' ? (
@@ -302,7 +359,8 @@ export default function ExamsPage() {
                               label={ex.averageGrade}
                               size="small"
                               sx={{
-                                backgroundColor: parseFloat(ex.averageGrade) >= 4.0 ? '#dcfce7' : '#fee2e2',
+                                backgroundColor:
+                                  parseFloat(ex.averageGrade) >= 4.0 ? '#dcfce7' : '#fee2e2',
                                 color: parseFloat(ex.averageGrade) >= 4.0 ? '#15803d' : '#b91c1c',
                                 fontWeight: 'bold',
                                 borderRadius: '6px',
@@ -310,7 +368,10 @@ export default function ExamsPage() {
                               }}
                             />
                           ) : (
-                            <Typography variant="body2" sx={{ fontWeight: 600, color: 'text.secondary', fontSize: '0.8rem' }}>
+                            <Typography
+                              variant="body2"
+                              sx={{ fontWeight: 600, color: 'text.secondary', fontSize: '0.8rem' }}
+                            >
                               Keine Noten
                             </Typography>
                           )}
@@ -350,7 +411,7 @@ export default function ExamsPage() {
             <DialogContent>
               <Stack spacing={2.5} sx={{ mt: 1 }}>
                 {createError && <Alert severity="error">{createError}</Alert>}
-                
+
                 <Grid container spacing={2}>
                   <Grid size={{ xs: 12, sm: 8 }}>
                     <TextField
@@ -431,7 +492,10 @@ export default function ExamsPage() {
               </Stack>
             </DialogContent>
             <DialogActions sx={{ p: 2, pt: 0 }}>
-              <Button onClick={() => setOpenCreate(false)} sx={{ textTransform: 'none', fontWeight: 650 }}>
+              <Button
+                onClick={() => setOpenCreate(false)}
+                sx={{ textTransform: 'none', fontWeight: 650 }}
+              >
                 Abbrechen
               </Button>
               <Button
@@ -450,7 +514,6 @@ export default function ExamsPage() {
             </DialogActions>
           </form>
         </Dialog>
-
       </Box>
     </DashboardLayout>
   );

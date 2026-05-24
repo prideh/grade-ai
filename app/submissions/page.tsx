@@ -15,7 +15,6 @@ import {
   TableHead,
   TableRow,
   Paper,
-  Stack,
   CircularProgress,
   Alert,
   Chip,
@@ -31,12 +30,39 @@ import HistoryIcon from '@mui/icons-material/History';
 import SearchIcon from '@mui/icons-material/Search';
 import DashboardLayout from '@/components/DashboardLayout';
 
+interface ClassData {
+  id: string;
+  name: string;
+}
+
+interface ExamData {
+  id: string;
+  title: string;
+  classId: string;
+  className: string;
+}
+
+interface SubmissionData {
+  id: string;
+  studentId: string;
+  studentName: string;
+  className: string;
+  examTitle: string;
+  subject: string;
+  points: string;
+  grade: string;
+  status: string;
+  date: string;
+  classId: string;
+  examId: string;
+}
+
 export default function SubmissionsPage() {
   // Data States
-  const [submissions, setSubmissions] = useState<any[]>([]);
-  const [classes, setClasses] = useState<any[]>([]);
-  const [exams, setExams] = useState<any[]>([]);
-  
+  const [submissions, setSubmissions] = useState<SubmissionData[]>([]);
+  const [classes, setClasses] = useState<ClassData[]>([]);
+  const [exams, setExams] = useState<ExamData[]>([]);
+
   // Loading & Error States
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -48,13 +74,12 @@ export default function SubmissionsPage() {
   const [selectedStatus, setSelectedStatus] = useState('ALL');
 
   // Fetch all data
-  const fetchData = async () => {
+  const fetchData = React.useCallback(async () => {
     try {
-      setLoading(true);
-      setError('');
-
       // Fetch classes
       const classesRes = await fetch('/api/classes');
+      setError('');
+
       if (classesRes.ok) {
         const classesData = await classesRes.json();
         setClasses(classesData.classes || []);
@@ -71,33 +96,20 @@ export default function SubmissionsPage() {
       const res = await fetch('/api/submissions');
       if (!res.ok) throw new Error('Fehler beim Laden der Korrekturen.');
       const data = await res.json();
-      
-      // Load detailed submissions to get original structures if needed
-      // (The dashboard maps recent submissions. For the full submissions page, let's fetch and map them dynamically).
-      // Since `/api/submissions` returns mapped summaries, we can use that list or fetch details if we need to filter on relational fields.
-      // Let's inspect the `/api/submissions` response: it has studentName, examTitle, subject, grade, points, date, and id.
-      // To filter by classId and examId, we can add these fields to our mapped response or we can fetch a larger subset.
-      // Actually, since this is a global list, let's make sure our local state has the class and exam associations, or we can filter them by string matching since it is extremely reliable in a POC!
-      // Let's check: the mapped structures returned by `/api/submissions` contain examTitle, studentName, subject, etc.
-      // We can enrich the API response or perform string matches. Or wait, let's look at `/api/submissions` route again.
-      // In `/api/submissions/route.ts`, it fetches submissions and maps:
-      // `id`, `studentName`, `examTitle`, `subject`, `grade`, `points`, `date`.
-      // Let's modify the local submissions state or call details. In this page, let's fetch the list, and since they are mapped summaries, we can match string titles or we can fetch all submissions via Prisma directly if we want!
-      // Better yet, we can fetch all submissions directly, or since the API is fast, we can use the submissions summary returned and map them nicely.
-      // Let's see: we want to filter by Class and Exam. In the database, every submission has `student.class.name` and `exam.title`.
-      // We can easily filter the returned submissions using string matching, e.g., matching the `examTitle` or `studentName`!
-      // Let's fetch the list first.
+
       setSubmissions(data.submissions || []);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Ein unerwarteter Fehler ist aufgetreten.');
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
   useEffect(() => {
-    fetchData();
-  }, []);
+    Promise.resolve().then(() => {
+      fetchData();
+    });
+  }, [fetchData]);
 
   // Filter Logic
   const filteredSubmissions = submissions.filter((sub) => {
@@ -105,24 +117,7 @@ export default function SubmissionsPage() {
     const matchSearch =
       sub.studentName.toLowerCase().includes(searchQuery.toLowerCase()) ||
       sub.examTitle.toLowerCase().includes(searchQuery.toLowerCase());
-    
-    // 2. Class Filter (string matching)
-    let matchClass = true;
-    if (selectedClassId !== 'ALL') {
-      const cls = classes.find((c) => c.id === selectedClassId);
-      // Wait, since we mapped submissions, does the sub have class name?
-      // Our seeded submissions have class names implicitly, or we can query.
-      // Let's see: if we look at the class selected, we can see if student name or exam fits.
-      // Wait, let's look at how we can filter. A much cleaner way to ensure absolute relational correctness is to fetch submissions directly or match by Class ID.
-      // Wait, in `app/api/submissions/route.ts`, the submissions fetched can include the `classId` and `examId` to make filtering 100% robust!
-      // Let's check: let's modify `/api/submissions/route.ts` slightly to include `classId`, `examId`, and `status` in the JSON response!
-      // This is a brilliant and robust way. Let's look at `app/api/submissions/route.ts` again.
-      // It returns:
-      // id: sub.id, studentName: sub.student.name, examTitle: sub.exam.title, subject: sub.exam.subject, grade: sub.gradeRounded, points: ..., date: ...
-      // If we add: `classId: sub.exam.classId, examId: sub.examId, status: sub.status`, we can filter perfectly!
-      // Let's do that in a bit! For now, let's write the frontend filtering logic assuming we have `classId`, `examId`, and `status` in our list items.
-    }
-    
+
     // For now, let's write the filters in a flexible way:
     const matchClassId = selectedClassId === 'ALL' || sub.classId === selectedClassId;
     const matchExamId = selectedExamId === 'ALL' || sub.examId === selectedExamId;
@@ -134,14 +129,17 @@ export default function SubmissionsPage() {
   return (
     <DashboardLayout>
       <Box sx={{ display: 'flex', flexDirection: 'column', gap: '32px' }}>
-        
         {/* Header Section */}
         <Box>
-          <Typography variant="h4" sx={{ fontWeight: 800, color: '#0f172a', letterSpacing: '-0.02em', mb: 1 }}>
+          <Typography
+            variant="h4"
+            sx={{ fontWeight: 800, color: '#0f172a', letterSpacing: '-0.02em', mb: 1 }}
+          >
             Korrekturen-Historie
           </Typography>
           <Typography variant="body1" sx={{ color: 'text.secondary', fontWeight: 550 }}>
-            Übersicht über alle handschriftlich korrigierten Arbeiten, deren Ergebnisse und AI-Feedbacks.
+            Übersicht über alle handschriftlich korrigierten Arbeiten, deren Ergebnisse und
+            AI-Feedbacks.
           </Typography>
         </Box>
 
@@ -155,7 +153,6 @@ export default function SubmissionsPage() {
         <Card sx={{ borderRadius: '12px', border: '1px solid #e2e8f0', boxShadow: 'none' }}>
           <CardContent sx={{ p: 3 }}>
             <Grid container spacing={2} sx={{ alignItems: 'center' }}>
-              
               {/* Search Bar */}
               <Grid size={{ xs: 12, md: 4 }}>
                 <TextField
@@ -167,7 +164,9 @@ export default function SubmissionsPage() {
                   size="small"
                   slotProps={{
                     input: {
-                      startAdornment: <SearchIcon sx={{ color: 'text.secondary', mr: 1, fontSize: '1.2rem' }} />,
+                      startAdornment: (
+                        <SearchIcon sx={{ color: 'text.secondary', mr: 1, fontSize: '1.2rem' }} />
+                      ),
                     },
                   }}
                   sx={{ '& .MuiOutlinedInput-root': { borderRadius: '8px' } }}
@@ -238,7 +237,6 @@ export default function SubmissionsPage() {
                   </Select>
                 </FormControl>
               </Grid>
-
             </Grid>
           </CardContent>
         </Card>
@@ -249,7 +247,15 @@ export default function SubmissionsPage() {
             <CircularProgress />
           </Box>
         ) : filteredSubmissions.length === 0 ? (
-          <Card sx={{ borderRadius: '12px', border: '1px solid #e2e8f0', boxShadow: 'none', p: 5, textAlign: 'center' }}>
+          <Card
+            sx={{
+              borderRadius: '12px',
+              border: '1px solid #e2e8f0',
+              boxShadow: 'none',
+              p: 5,
+              textAlign: 'center',
+            }}
+          >
             <HistoryIcon sx={{ fontSize: '3rem', color: '#94a3b8', mb: 1.5 }} />
             <Typography variant="h6" sx={{ fontWeight: 700, color: '#475569', mb: 0.5 }}>
               Keine Korrekturen gefunden
@@ -259,7 +265,10 @@ export default function SubmissionsPage() {
             </Typography>
           </Card>
         ) : (
-          <TableContainer component={Paper} sx={{ borderRadius: '12px', border: '1px solid #e2e8f0', boxShadow: 'none' }}>
+          <TableContainer
+            component={Paper}
+            sx={{ borderRadius: '12px', border: '1px solid #e2e8f0', boxShadow: 'none' }}
+          >
             <Table>
               <TableHead sx={{ backgroundColor: '#f8fafc' }}>
                 <TableRow>
@@ -278,14 +287,21 @@ export default function SubmissionsPage() {
                 {filteredSubmissions.map((sub) => (
                   <TableRow key={sub.id} sx={{ '&:last-child td, &:last-child th': { border: 0 } }}>
                     <TableCell sx={{ fontWeight: 700 }}>
-                      <Link href={`/students/${sub.studentId}`} style={{ textDecoration: 'none', color: '#1b77d1' }}>
+                      <Link
+                        href={`/students/${sub.studentId}`}
+                        style={{ textDecoration: 'none', color: '#1b77d1' }}
+                      >
                         {sub.studentName}
                       </Link>
                     </TableCell>
                     <TableCell sx={{ fontWeight: 600 }}>{sub.className}</TableCell>
                     <TableCell>{sub.examTitle}</TableCell>
                     <TableCell>
-                      <Chip label={sub.subject} size="small" sx={{ backgroundColor: '#e3f2fd', color: '#1b77d1', fontWeight: 650 }} />
+                      <Chip
+                        label={sub.subject}
+                        size="small"
+                        sx={{ backgroundColor: '#e3f2fd', color: '#1b77d1', fontWeight: 650 }}
+                      />
                     </TableCell>
                     <TableCell sx={{ fontWeight: 600 }}>{sub.points}</TableCell>
                     <TableCell>
@@ -301,7 +317,9 @@ export default function SubmissionsPage() {
                           }}
                         />
                       ) : (
-                        <Typography variant="body2" sx={{ color: 'text.secondary' }}>—</Typography>
+                        <Typography variant="body2" sx={{ color: 'text.secondary' }}>
+                          —
+                        </Typography>
                       )}
                     </TableCell>
                     <TableCell>
@@ -316,7 +334,11 @@ export default function SubmissionsPage() {
                     <TableCell>{sub.date}</TableCell>
                     <TableCell sx={{ textAlign: 'right' }}>
                       <Link href={`/correct/${sub.id}`} passHref style={{ textDecoration: 'none' }}>
-                        <Button variant="outlined" size="small" sx={{ textTransform: 'none', fontWeight: 600 }}>
+                        <Button
+                          variant="outlined"
+                          size="small"
+                          sx={{ textTransform: 'none', fontWeight: 600 }}
+                        >
                           Workspace öffnen
                         </Button>
                       </Link>
@@ -327,7 +349,6 @@ export default function SubmissionsPage() {
             </Table>
           </TableContainer>
         )}
-
       </Box>
     </DashboardLayout>
   );

@@ -26,14 +26,27 @@ import AddIcon from '@mui/icons-material/Add';
 import GroupIcon from '@mui/icons-material/Group';
 import SchoolIcon from '@mui/icons-material/School';
 import ArrowForwardIcon from '@mui/icons-material/ArrowForward';
-import AssignmentIcon from '@mui/icons-material/Assignment';
 import DashboardLayout from '@/components/DashboardLayout';
 
+interface PrismaClassInfo {
+  id: string;
+  name: string;
+  createdAt: string;
+  _count: {
+    students: number;
+  };
+}
+
+interface ClassListItem extends PrismaClassInfo {
+  totalExams: number;
+  averageGrade: string;
+}
+
 export default function ClassesPage() {
-  const [classes, setClasses] = useState<any[]>([]);
+  const [classes, setClasses] = useState<ClassListItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  
+
   // Dialog State
   const [openCreate, setOpenCreate] = useState(false);
   const [newClassName, setNewClassName] = useState('');
@@ -41,17 +54,16 @@ export default function ClassesPage() {
   const [createError, setCreateError] = useState('');
 
   // Fetch all classes
-  const fetchClasses = async () => {
+  const fetchClasses = React.useCallback(async () => {
     try {
-      setLoading(true);
-      setError('');
       const res = await fetch('/api/classes');
+      setError('');
       if (!res.ok) throw new Error('Fehler beim Laden der Klassen.');
       const data = await res.json();
-      
+
       // For each class, fetch details to show total exams and class averages
       const detailedClasses = await Promise.all(
-        (data.classes || []).map(async (cls: any) => {
+        (data.classes || []).map(async (cls: PrismaClassInfo) => {
           try {
             const detailRes = await fetch(`/api/classes/${cls.id}`);
             if (detailRes.ok) {
@@ -75,11 +87,13 @@ export default function ClassesPage() {
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
   useEffect(() => {
-    fetchClasses();
-  }, []);
+    Promise.resolve().then(() => {
+      fetchClasses();
+    });
+  }, [fetchClasses]);
 
   const handleCreateClass = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -117,11 +131,21 @@ export default function ClassesPage() {
   return (
     <DashboardLayout>
       <Box sx={{ display: 'flex', flexDirection: 'column', gap: '32px' }}>
-        
         {/* Header Action Block */}
-        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 2 }}>
+        <Box
+          sx={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            flexWrap: 'wrap',
+            gap: 2,
+          }}
+        >
           <Box>
-            <Typography variant="h4" sx={{ fontWeight: 800, color: '#0f172a', letterSpacing: '-0.02em', mb: 1 }}>
+            <Typography
+              variant="h4"
+              sx={{ fontWeight: 800, color: '#0f172a', letterSpacing: '-0.02em', mb: 1 }}
+            >
               Klassenverwaltung
             </Typography>
             <Typography variant="body1" sx={{ color: 'text.secondary', fontWeight: 550 }}>
@@ -171,8 +195,12 @@ export default function ClassesPage() {
             <Typography variant="h6" sx={{ fontWeight: 700, color: '#475569', mb: 1 }}>
               Keine Klassen gefunden
             </Typography>
-            <Typography variant="body2" sx={{ color: 'text.secondary', maxWidth: '400px', mx: 'auto', mb: 3 }}>
-              Erstelle deine erste Schulklasse, um Schüler hinzuzufügen und handschriftliche Prüfungen korrigieren zu können.
+            <Typography
+              variant="body2"
+              sx={{ color: 'text.secondary', maxWidth: '400px', mx: 'auto', mb: 3 }}
+            >
+              Erstelle deine erste Schulklasse, um Schüler hinzuzufügen und handschriftliche
+              Prüfungen korrigieren zu können.
             </Typography>
             <Button
               variant="outlined"
@@ -205,12 +233,21 @@ export default function ClassesPage() {
                   }}
                 >
                   <CardContent sx={{ p: 3, pb: 1 }}>
-                    <Stack direction="row" sx={{ justifyContent: 'space-between', alignItems: 'flex-start', mb: 2.5 }}>
+                    <Stack
+                      direction="row"
+                      sx={{ justifyContent: 'space-between', alignItems: 'flex-start', mb: 2.5 }}
+                    >
                       <Box>
-                        <Typography variant="h6" sx={{ fontWeight: 800, color: '#0f172a', mb: 0.5 }}>
+                        <Typography
+                          variant="h6"
+                          sx={{ fontWeight: 800, color: '#0f172a', mb: 0.5 }}
+                        >
                           {cls.name}
                         </Typography>
-                        <Typography variant="caption" sx={{ color: 'text.secondary', fontWeight: 600 }}>
+                        <Typography
+                          variant="caption"
+                          sx={{ color: 'text.secondary', fontWeight: 600 }}
+                        >
                           Erstellt am {new Date(cls.createdAt).toLocaleDateString('de-CH')}
                         </Typography>
                       </Box>
@@ -235,7 +272,10 @@ export default function ClassesPage() {
                     <Grid container spacing={2}>
                       <Grid size={{ xs: 6 }}>
                         <Stack spacing={0.25}>
-                          <Typography variant="caption" sx={{ color: 'text.secondary', fontWeight: 600 }}>
+                          <Typography
+                            variant="caption"
+                            sx={{ color: 'text.secondary', fontWeight: 600 }}
+                          >
                             Schüler/innen
                           </Typography>
                           <Typography variant="body2" sx={{ fontWeight: 700, color: '#334155' }}>
@@ -245,7 +285,10 @@ export default function ClassesPage() {
                       </Grid>
                       <Grid size={{ xs: 6 }}>
                         <Stack spacing={0.25}>
-                          <Typography variant="caption" sx={{ color: 'text.secondary', fontWeight: 600 }}>
+                          <Typography
+                            variant="caption"
+                            sx={{ color: 'text.secondary', fontWeight: 600 }}
+                          >
                             Prüfungen
                           </Typography>
                           <Typography variant="body2" sx={{ fontWeight: 700, color: '#334155' }}>
@@ -255,7 +298,10 @@ export default function ClassesPage() {
                       </Grid>
                       <Grid size={{ xs: 12 }} sx={{ mt: 1 }}>
                         <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
-                          <Typography variant="caption" sx={{ color: 'text.secondary', fontWeight: 600 }}>
+                          <Typography
+                            variant="caption"
+                            sx={{ color: 'text.secondary', fontWeight: 600 }}
+                          >
                             Notenschnitt (Ø):
                           </Typography>
                           {cls.averageGrade !== 'N/A' ? (
@@ -263,7 +309,8 @@ export default function ClassesPage() {
                               label={cls.averageGrade}
                               size="small"
                               sx={{
-                                backgroundColor: parseFloat(cls.averageGrade) >= 4.0 ? '#dcfce7' : '#fee2e2',
+                                backgroundColor:
+                                  parseFloat(cls.averageGrade) >= 4.0 ? '#dcfce7' : '#fee2e2',
                                 color: parseFloat(cls.averageGrade) >= 4.0 ? '#15803d' : '#b91c1c',
                                 fontWeight: 'bold',
                                 borderRadius: '6px',
@@ -271,7 +318,10 @@ export default function ClassesPage() {
                               }}
                             />
                           ) : (
-                            <Typography variant="body2" sx={{ fontWeight: 600, color: 'text.secondary', fontSize: '0.85rem' }}>
+                            <Typography
+                              variant="body2"
+                              sx={{ fontWeight: 600, color: 'text.secondary', fontSize: '0.85rem' }}
+                            >
                               Keine Noten
                             </Typography>
                           )}
@@ -328,7 +378,10 @@ export default function ClassesPage() {
               </Stack>
             </DialogContent>
             <DialogActions sx={{ p: 2, pt: 0 }}>
-              <Button onClick={() => setOpenCreate(false)} sx={{ textTransform: 'none', fontWeight: 650 }}>
+              <Button
+                onClick={() => setOpenCreate(false)}
+                sx={{ textTransform: 'none', fontWeight: 650 }}
+              >
                 Abbrechen
               </Button>
               <Button
@@ -347,7 +400,6 @@ export default function ClassesPage() {
             </DialogActions>
           </form>
         </Dialog>
-
       </Box>
     </DashboardLayout>
   );

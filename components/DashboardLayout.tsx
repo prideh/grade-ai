@@ -29,7 +29,6 @@ import GroupIcon from '@mui/icons-material/Group';
 import AssignmentIcon from '@mui/icons-material/Assignment';
 import HistoryIcon from '@mui/icons-material/History';
 import LogoutIcon from '@mui/icons-material/Logout';
-import PersonIcon from '@mui/icons-material/Person';
 import { getCachedTeacher, setCachedTeacher, clearSessionCache } from '@/lib/sessionCache';
 
 const drawerWidth = 260;
@@ -42,7 +41,9 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
   const router = useRouter();
   const pathname = usePathname();
   const [mobileOpen, setMobileOpen] = useState(false);
-  const [teacher, setTeacher] = useState<{ name: string; email: string } | null>(getCachedTeacher());
+  const [teacher, setTeacher] = useState<{ name: string; email: string } | null>(
+    getCachedTeacher()
+  );
   const [loading, setLoading] = useState(!getCachedTeacher());
 
   // Proactively check auth and fetch profile
@@ -142,7 +143,7 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
           const isActive =
             pathname === item.path ||
             (item.path !== '/dashboard' && pathname.startsWith(item.path));
-          
+
           return (
             <ListItem key={item.text} disablePadding sx={{ mb: 0.5 }}>
               <Link href={item.path} passHref style={{ textDecoration: 'none', width: '100%' }}>
@@ -212,7 +213,11 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
                 <Typography variant="body2" noWrap sx={{ fontWeight: 700, color: '#0f172a' }}>
                   {teacher.name}
                 </Typography>
-                <Typography variant="caption" noWrap sx={{ color: 'text.secondary', display: 'block' }}>
+                <Typography
+                  variant="caption"
+                  noWrap
+                  sx={{ color: 'text.secondary', display: 'block' }}
+                >
                   {teacher.email}
                 </Typography>
               </Box>
@@ -298,8 +303,15 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
             >
               <SchoolIcon sx={{ color: 'white', fontSize: '0.9rem' }} />
             </Box>
-            <Typography variant="h6" component="span" sx={{ fontWeight: 800, color: '#0f172a', fontSize: '1.1rem' }}>
-              Grade<Box component="span" sx={{ color: '#1b77d1' }}>Ai</Box>
+            <Typography
+              variant="h6"
+              component="span"
+              sx={{ fontWeight: 800, color: '#0f172a', fontSize: '1.1rem' }}
+            >
+              Grade
+              <Box component="span" sx={{ color: '#1b77d1' }}>
+                Ai
+              </Box>
             </Typography>
           </Stack>
           <IconButton

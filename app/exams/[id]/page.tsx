@@ -17,7 +17,6 @@ import {
   TableContainer,
   TableHead,
   TableRow,
-  Paper,
   Dialog,
   DialogTitle,
   DialogContent,
@@ -28,7 +27,6 @@ import {
   Alert,
   Divider,
   Chip,
-  IconButton,
 } from '@mui/material';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import DeleteIcon from '@mui/icons-material/Delete';
@@ -43,16 +41,46 @@ import PlayArrowIcon from '@mui/icons-material/PlayArrow';
 import { BarChart } from '@mui/x-charts/BarChart';
 import DashboardLayout from '@/components/DashboardLayout';
 
+interface ExamData {
+  id: string;
+  title: string;
+  classId: string;
+  className: string;
+  subject: string;
+  maxPoints: number;
+  rubricText?: string;
+}
+
+interface ExamStats {
+  averageGrade: string;
+  passRate: string;
+  highestGrade: string;
+  lowestGrade: string;
+  stdDev: string;
+  totalCompleted: number;
+  gradeDistribution: Record<string, number>;
+}
+
+interface ExamRosterStudent {
+  studentId: string;
+  studentName: string;
+  status: 'COMPLETED' | 'DRAFT' | 'UNSTARTED';
+  earnedPoints: number | string;
+  grade: string;
+  date: string;
+  submissionId?: string;
+}
+
 export default function ExamDetailsPage() {
   const router = useRouter();
   const params = useParams();
   const examId = params.id as string;
 
   // Data States
-  const [exam, setExam] = useState<any>(null);
-  const [stats, setStats] = useState<any>(null);
-  const [roster, setRoster] = useState<any[]>([]);
-  
+  const [exam, setExam] = useState<ExamData | null>(null);
+  const [stats, setStats] = useState<ExamStats | null>(null);
+  const [roster, setRoster] = useState<ExamRosterStudent[]>([]);
+
   // Loading & Error States
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -61,17 +89,16 @@ export default function ExamDetailsPage() {
   const [rubricText, setRubricText] = useState('');
   const [editingRubric, setEditingRubric] = useState(false);
   const [saveLoading, setSaveLoading] = useState(false);
-  
+
   // Dialogs
   const [openDelete, setOpenDelete] = useState(false);
 
   // Fetch Exam details
-  const fetchData = async () => {
+  const fetchData = React.useCallback(async () => {
     try {
-      setLoading(true);
-      setError('');
-      
       const res = await fetch(`/api/exams/${examId}`);
+      setError('');
+
       if (!res.ok) {
         if (res.status === 404) {
           router.replace('/exams');
@@ -79,7 +106,7 @@ export default function ExamDetailsPage() {
         }
         throw new Error('Prüfungsdetails konnten nicht geladen werden.');
       }
-      
+
       const data = await res.json();
       setExam(data.exam);
       setStats(data.stats);
@@ -90,13 +117,15 @@ export default function ExamDetailsPage() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [examId, router]);
 
   useEffect(() => {
     if (examId) {
-      fetchData();
+      Promise.resolve().then(() => {
+        fetchData();
+      });
     }
-  }, [examId]);
+  }, [examId, fetchData]);
 
   // SAVE updated rubric text
   const handleSaveRubric = async () => {
@@ -149,25 +178,45 @@ export default function ExamDetailsPage() {
   return (
     <DashboardLayout>
       <Box sx={{ display: 'flex', flexDirection: 'column', gap: '32px' }}>
-        
         {/* Navigation & Header */}
         <Stack spacing={2}>
           <Link href="/exams" passHref style={{ textDecoration: 'none' }}>
-            <Button startIcon={<ArrowBackIcon />} sx={{ textTransform: 'none', fontWeight: 650, color: 'text.secondary' }}>
+            <Button
+              startIcon={<ArrowBackIcon />}
+              sx={{ textTransform: 'none', fontWeight: 650, color: 'text.secondary' }}
+            >
               Zurück zur Prüfungsübersicht
             </Button>
           </Link>
 
-          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 2 }}>
+          <Box
+            sx={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              flexWrap: 'wrap',
+              gap: 2,
+            }}
+          >
             <Box>
-              <Typography variant="h4" sx={{ fontWeight: 800, color: '#0f172a', letterSpacing: '-0.02em', mb: 0.5 }}>
+              <Typography
+                variant="h4"
+                sx={{ fontWeight: 800, color: '#0f172a', letterSpacing: '-0.02em', mb: 0.5 }}
+              >
                 {exam?.title}
               </Typography>
               <Typography variant="body2" sx={{ color: 'text.secondary', fontWeight: 600 }}>
-                Klasse: <Link href={`/classes/${exam?.classId}`} style={{ color: '#1b77d1', fontWeight: 700, textDecoration: 'none' }}>{exam?.className}</Link> • Fach: {exam?.subject} • Max. Punkte: {exam?.maxPoints} P.
+                Klasse:{' '}
+                <Link
+                  href={`/classes/${exam?.classId}`}
+                  style={{ color: '#1b77d1', fontWeight: 700, textDecoration: 'none' }}
+                >
+                  {exam?.className}
+                </Link>{' '}
+                • Fach: {exam?.subject} • Max. Punkte: {exam?.maxPoints} P.
               </Typography>
             </Box>
-            
+
             <Button
               variant="outlined"
               color="error"
@@ -267,7 +316,10 @@ export default function ExamDetailsPage() {
                   <AssessmentIcon />
                 </Box>
                 <Box sx={{ flex: 1 }}>
-                  <Typography variant="caption" sx={{ color: 'text.secondary', fontWeight: 600, display: 'block' }}>
+                  <Typography
+                    variant="caption"
+                    sx={{ color: 'text.secondary', fontWeight: 600, display: 'block' }}
+                  >
                     Spannweite (Max - Min)
                   </Typography>
                   <Typography variant="body2" sx={{ fontWeight: 750, color: '#1e293b' }}>
@@ -313,19 +365,39 @@ export default function ExamDetailsPage() {
         <Grid container spacing={4}>
           {/* Histogram Chart */}
           <Grid size={{ xs: 12, md: 6 }}>
-            <Card sx={{ borderRadius: '12px', border: '1px solid #e2e8f0', boxShadow: 'none', height: '100%' }}>
+            <Card
+              sx={{
+                borderRadius: '12px',
+                border: '1px solid #e2e8f0',
+                boxShadow: 'none',
+                height: '100%',
+              }}
+            >
               <CardContent sx={{ p: 3 }}>
                 <Typography variant="h6" sx={{ fontWeight: 800, color: '#0f172a', mb: 2 }}>
                   Notenverteilung der Prüfung
                 </Typography>
                 {stats?.totalCompleted === 0 ? (
-                  <Typography variant="body2" sx={{ color: 'text.secondary', fontStyle: 'italic', py: 6, textAlign: 'center' }}>
+                  <Typography
+                    variant="body2"
+                    sx={{
+                      color: 'text.secondary',
+                      fontStyle: 'italic',
+                      py: 6,
+                      textAlign: 'center',
+                    }}
+                  >
                     Bisher wurden keine Arbeiten für diese Prüfung korrigiert.
                   </Typography>
                 ) : (
                   <Box sx={{ display: 'flex', justifyContent: 'center' }}>
                     <BarChart
-                      xAxis={[{ scaleType: 'band', data: ['1.0-2.0', '2.0-3.0', '3.0-4.0', '4.0-5.0', '5.0-6.0'] }]}
+                      xAxis={[
+                        {
+                          scaleType: 'band',
+                          data: ['1.0-2.0', '2.0-3.0', '3.0-4.0', '4.0-5.0', '5.0-6.0'],
+                        },
+                      ]}
                       series={[{ data: chartData, label: 'Korrekturen', color: '#1b77d1' }]}
                       width={480}
                       height={260}
@@ -339,26 +411,54 @@ export default function ExamDetailsPage() {
 
           {/* Rubric config block */}
           <Grid size={{ xs: 12, md: 6 }}>
-            <Card sx={{ borderRadius: '12px', border: '1px solid #e2e8f0', boxShadow: 'none', height: '100%', display: 'flex', flexDirection: 'column' }}>
+            <Card
+              sx={{
+                borderRadius: '12px',
+                border: '1px solid #e2e8f0',
+                boxShadow: 'none',
+                height: '100%',
+                display: 'flex',
+                flexDirection: 'column',
+              }}
+            >
               <CardContent sx={{ p: 3, flexGrow: 1, display: 'flex', flexDirection: 'column' }}>
-                <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+                <Box
+                  sx={{
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                    mb: 2,
+                  }}
+                >
                   <Typography variant="h6" sx={{ fontWeight: 800, color: '#0f172a' }}>
                     Musterlösung & Erwartungshorizont
                   </Typography>
                   {!editingRubric ? (
-                    <Button size="small" startIcon={<EditIcon />} onClick={() => setEditingRubric(true)}>
+                    <Button
+                      size="small"
+                      startIcon={<EditIcon />}
+                      onClick={() => setEditingRubric(true)}
+                    >
                       Bearbeiten
                     </Button>
                   ) : (
                     <Stack direction="row" spacing={1}>
-                      <Button size="small" variant="text" onClick={() => setEditingRubric(false)}>Abbrechen</Button>
-                      <Button size="small" variant="contained" startIcon={<SaveIcon />} onClick={handleSaveRubric} disabled={saveLoading}>
+                      <Button size="small" variant="text" onClick={() => setEditingRubric(false)}>
+                        Abbrechen
+                      </Button>
+                      <Button
+                        size="small"
+                        variant="contained"
+                        startIcon={<SaveIcon />}
+                        onClick={handleSaveRubric}
+                        disabled={saveLoading}
+                      >
                         Speichern
                       </Button>
                     </Stack>
                   )}
                 </Box>
-                
+
                 <Divider sx={{ mb: 2 }} />
 
                 {editingRubric ? (
@@ -400,12 +500,18 @@ export default function ExamDetailsPage() {
           <CardContent sx={{ p: 3 }}>
             <Stack direction="row" spacing={1.5} sx={{ alignItems: 'center', mb: 2.5 }}>
               <AssignmentIcon sx={{ color: '#0f172a' }} />
-              <Typography variant="h6" sx={{ fontWeight: 850, color: '#0f172a', letterSpacing: '-0.01em' }}>
+              <Typography
+                variant="h6"
+                sx={{ fontWeight: 850, color: '#0f172a', letterSpacing: '-0.01em' }}
+              >
                 Korrektur-Status (Klassenliste)
               </Typography>
             </Stack>
 
-            <TableContainer component={Box} sx={{ border: '1px solid #f1f5f9', borderRadius: '8px' }}>
+            <TableContainer
+              component={Box}
+              sx={{ border: '1px solid #f1f5f9', borderRadius: '8px' }}
+            >
               <Table>
                 <TableHead sx={{ backgroundColor: '#f8fafc' }}>
                   <TableRow>
@@ -414,7 +520,9 @@ export default function ExamDetailsPage() {
                     <TableCell sx={{ fontWeight: 'bold' }}>Punkte</TableCell>
                     <TableCell sx={{ fontWeight: 'bold' }}>Note</TableCell>
                     <TableCell sx={{ fontWeight: 'bold' }}>Korrekturdatum</TableCell>
-                    <TableCell sx={{ fontWeight: 'bold', textAlign: 'right' }}>Korrektur-Aktion</TableCell>
+                    <TableCell sx={{ fontWeight: 'bold', textAlign: 'right' }}>
+                      Korrektur-Aktion
+                    </TableCell>
                   </TableRow>
                 </TableHead>
                 <TableBody>
@@ -430,9 +538,15 @@ export default function ExamDetailsPage() {
                     }
 
                     return (
-                      <TableRow key={student.studentId} sx={{ '&:last-child td, &:last-child th': { border: 0 } }}>
+                      <TableRow
+                        key={student.studentId}
+                        sx={{ '&:last-child td, &:last-child th': { border: 0 } }}
+                      >
                         <TableCell sx={{ fontWeight: 600 }}>
-                          <Link href={`/students/${student.studentId}`} style={{ textDecoration: 'none', color: '#1b77d1', fontWeight: 700 }}>
+                          <Link
+                            href={`/students/${student.studentId}`}
+                            style={{ textDecoration: 'none', color: '#1b77d1', fontWeight: 700 }}
+                          >
                             {student.studentName}
                           </Link>
                         </TableCell>
@@ -446,7 +560,9 @@ export default function ExamDetailsPage() {
                           />
                         </TableCell>
                         <TableCell sx={{ fontWeight: 600 }}>
-                          {student.earnedPoints !== 'N/A' ? `${student.earnedPoints} / ${exam?.maxPoints}` : '—'}
+                          {student.earnedPoints !== 'N/A'
+                            ? `${student.earnedPoints} / ${exam?.maxPoints}`
+                            : '—'}
                         </TableCell>
                         <TableCell>
                           {student.status === 'COMPLETED' ? (
@@ -454,7 +570,8 @@ export default function ExamDetailsPage() {
                               label={student.grade}
                               size="small"
                               sx={{
-                                backgroundColor: parseFloat(student.grade) >= 4.0 ? '#1b77d1' : '#dc2626',
+                                backgroundColor:
+                                  parseFloat(student.grade) >= 4.0 ? '#1b77d1' : '#dc2626',
                                 color: '#ffffff',
                                 fontWeight: 'bold',
                                 borderRadius: '6px',
@@ -467,8 +584,16 @@ export default function ExamDetailsPage() {
                         <TableCell>{student.date}</TableCell>
                         <TableCell sx={{ textAlign: 'right' }}>
                           {student.status !== 'UNSTARTED' ? (
-                            <Link href={`/correct/${student.submissionId}`} passHref style={{ textDecoration: 'none' }}>
-                              <Button variant="outlined" size="small" sx={{ textTransform: 'none', fontWeight: 600 }}>
+                            <Link
+                              href={`/correct/${student.submissionId}`}
+                              passHref
+                              style={{ textDecoration: 'none' }}
+                            >
+                              <Button
+                                variant="outlined"
+                                size="small"
+                                sx={{ textTransform: 'none', fontWeight: 600 }}
+                              >
                                 Korrektur bearbeiten
                               </Button>
                             </Link>
@@ -503,11 +628,17 @@ export default function ExamDetailsPage() {
               Möchtest du die Prüfung <strong>{exam?.title}</strong> wirklich löschen?
             </Typography>
             <Typography variant="caption" sx={{ color: 'error.main', fontWeight: 600 }}>
-              Dabei werden all ihre bereits durchgeführten Korrekturen und AI-Feedbacks unwiderruflich entfernt!
+              Dabei werden all ihre bereits durchgeführten Korrekturen und AI-Feedbacks
+              unwiderruflich entfernt!
             </Typography>
           </DialogContent>
           <DialogActions sx={{ p: 2, pt: 0 }}>
-            <Button onClick={() => setOpenDelete(false)} sx={{ textTransform: 'none', fontWeight: 650 }}>Abbrechen</Button>
+            <Button
+              onClick={() => setOpenDelete(false)}
+              sx={{ textTransform: 'none', fontWeight: 650 }}
+            >
+              Abbrechen
+            </Button>
             <Button
               onClick={handleDeleteExam}
               variant="contained"
@@ -519,7 +650,6 @@ export default function ExamDetailsPage() {
             </Button>
           </DialogActions>
         </Dialog>
-
       </Box>
     </DashboardLayout>
   );
