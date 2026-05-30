@@ -355,18 +355,21 @@ export default function CorrectWorkspace() {
     const steps = [...task.schritte];
     const step = { ...steps[stepIndex] };
 
-    // Ensure points are clamped between 0 and max
-    const clamped = Math.max(0, Math.min(step.maximalPunkte, newPoints));
+    // Ensure points are clamped between 0 and max and rounded to 1 decimal place
+    const roundedPoints = Math.round(newPoints * 10) / 10;
+    const clamped = Math.max(0, Math.min(step.maximalPunkte, roundedPoints));
     step.erreichtePunkte = clamped;
     steps[stepIndex] = step;
 
-    // Recalculate task total
+    // Recalculate task total with rounding
     task.schritte = steps;
-    task.erzieltePunkte = steps.reduce((sum, s) => sum + s.erreichtePunkte, 0);
+    task.erzieltePunkte =
+      Math.round(steps.reduce((sum, s) => sum + s.erreichtePunkte, 0) * 10) / 10;
     updatedTasks[taskIndex] = task;
 
-    // Recalculate total score
-    const totalScore = updatedTasks.reduce((sum, t) => sum + t.erzieltePunkte, 0);
+    // Recalculate total score with rounding
+    const totalScore =
+      Math.round(updatedTasks.reduce((sum, t) => sum + t.erzieltePunkte, 0) * 10) / 10;
 
     // Recalculate school grade dynamically based on Swiss linear grading scale (6 is best, 4 is passing, rounded to nearest 0.1)
     const maxScore = data.gesamtmaximalPunkte;
@@ -762,7 +765,9 @@ export default function CorrectWorkspace() {
                                 }}
                               >
                                 Schritt {step.schrittIndex}: {step.begruendung} ❌ (-
-                                {step.maximalPunkte - step.erreichtePunkte} P.)
+                                {Math.round((step.maximalPunkte - step.erreichtePunkte) * 10) /
+                                  10}{' '}
+                                P.)
                               </Box>
                             );
                           } else if (step.fehlerTyp === 'Folgefehler') {
@@ -783,7 +788,8 @@ export default function CorrectWorkspace() {
                                 }}
                               >
                                 Schritt {step.schrittIndex}: Folgefehler berücksichtigt! ✔️ (
-                                {step.erreichtePunkte}/{step.maximalPunkte} P.)
+                                {Math.round(step.erreichtePunkte * 10) / 10}/
+                                {Math.round(step.maximalPunkte * 10) / 10} P.)
                               </Box>
                             );
                           }

@@ -133,16 +133,18 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       let totalEarnedPoints = 0;
 
       for (const updatedTask of aufgaben) {
-        let taskPoints = updatedTask.erzieltePunkte || 0;
+        let taskPoints = Math.round((updatedTask.erzieltePunkte || 0) * 10) / 10;
 
         // 1. Update individual steps
         if (Array.isArray(updatedTask.schritte) && updatedTask.schritte.length > 0) {
           let stepSum = 0;
           for (const updatedStep of updatedTask.schritte) {
+            // Round input points to 1 decimal place to handle JS precision errors
+            const roundedInputPoints = Math.round(updatedStep.erreichtePunkte * 10) / 10;
             // Clamp points between 0 and max
             const clampedPoints = Math.max(
               0,
-              Math.min(updatedStep.maximalPunkte, updatedStep.erreichtePunkte)
+              Math.min(updatedStep.maximalPunkte, roundedInputPoints)
             );
             stepSum += clampedPoints;
 
@@ -156,10 +158,10 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
               });
             }
           }
-          taskPoints = stepSum;
+          taskPoints = Math.round(stepSum * 10) / 10;
         }
 
-        totalEarnedPoints += taskPoints;
+        totalEarnedPoints = Math.round((totalEarnedPoints + taskPoints) * 10) / 10;
 
         // 2. Update parent TaskCorrection
         await tx.taskCorrection.updateMany({
