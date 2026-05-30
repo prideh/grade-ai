@@ -245,7 +245,8 @@ export async function POST(request: Request) {
           studentBase64,
           rubricParam,
           model as 'gemini-3.5-flash' | 'gemini-3.1-pro',
-          apiKey
+          apiKey,
+          studentExam.type || 'image/jpeg'
         );
 
         // 3. Perform AI Auto-Matching if studentId was not provided synchronously

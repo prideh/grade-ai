@@ -110,7 +110,8 @@ export async function runLiveGeminiCorrection(
   studentExamImageBase64: string,
   rubric: string | { mimeType: string; data: string },
   modelName: 'gemini-3.5-flash' | 'gemini-3.1-pro' = 'gemini-3.5-flash',
-  customApiKey?: string
+  customApiKey?: string,
+  studentMimeType: string = 'image/jpeg'
 ): Promise<ExamCorrectionResult> {
   const apiKey = customApiKey || process.env.GEMINI_API_KEY;
   if (!apiKey) {
@@ -123,10 +124,10 @@ export async function runLiveGeminiCorrection(
   try {
     const contents: (string | { inlineData: { mimeType: string; data: string } })[] = [];
 
-    // Add student's written response (Base64 Image)
+    // Add student's written response (Base64 Image/PDF)
     contents.push({
       inlineData: {
-        mimeType: 'image/jpeg',
+        mimeType: studentMimeType,
         data: studentExamImageBase64,
       },
     });
