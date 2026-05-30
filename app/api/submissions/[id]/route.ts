@@ -154,6 +154,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
                 where: { id: updatedStep.id },
                 data: {
                   erreichtePunkte: clampedPoints,
+                  begruendung: updatedStep.begruendung,
                 },
               });
             }

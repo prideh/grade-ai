@@ -388,6 +388,34 @@ export default function CorrectWorkspace() {
     saveToDatabase(updatedResult);
   };
 
+  // Handle inline description adjustments by the teacher
+  const handleDescriptionChange = (
+    taskIndex: number,
+    stepIndex: number,
+    newDescription: string
+  ) => {
+    if (!data) return;
+
+    const updatedTasks = [...data.aufgaben];
+    const task = { ...updatedTasks[taskIndex] };
+    const steps = [...task.schritte];
+    const step = { ...steps[stepIndex] };
+
+    step.begruendung = newDescription;
+    steps[stepIndex] = step;
+    task.schritte = steps;
+    updatedTasks[taskIndex] = task;
+
+    const updatedResult = {
+      ...data,
+      aufgaben: updatedTasks,
+    };
+
+    setData(updatedResult);
+    // Auto-save Description adjustments directly to PostgreSQL (debounced)
+    saveToDatabase(updatedResult);
+  };
+
   // Handle inline comments adjustments by the teacher
   const handleCommentChange = (taskIndex: number, newComment: string) => {
     if (!data) return;
@@ -1048,12 +1076,35 @@ export default function CorrectWorkspace() {
                           </Stack>
                         </Stack>
 
-                        <Typography
-                          variant="body2"
-                          sx={{ color: 'text.secondary', lineHeight: 1.5 }}
-                        >
-                          {s.begruendung}
-                        </Typography>
+                        <TextField
+                          variant="outlined"
+                          size="small"
+                          fullWidth
+                          multiline
+                          value={s.begruendung}
+                          onChange={(e) =>
+                            handleDescriptionChange(activeTaskIndex, sIdx, e.target.value)
+                          }
+                          placeholder="Begründung oder Erklärung für diesen Schritt..."
+                          sx={{
+                            '& .MuiOutlinedInput-root': {
+                              fontSize: '0.875rem',
+                              color: 'text.secondary',
+                              lineHeight: 1.5,
+                              padding: '6px 10px',
+                              backgroundColor: '#f8fafc',
+                              '& fieldset': {
+                                border: '1px dashed #cbd5e1',
+                              },
+                              '&:hover fieldset': {
+                                border: '1px solid #1b77d1',
+                              },
+                              '&.Mui-focused fieldset': {
+                                border: '1.5px solid #1b77d1',
+                              },
+                            },
+                          }}
+                        />
 
                         <Box>
                           <Chip
