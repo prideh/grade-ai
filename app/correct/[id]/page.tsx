@@ -49,11 +49,13 @@ export default function CorrectWorkspace() {
   const [showSaveToast, setShowSaveToast] = useState<boolean>(false);
   const [noSession, setNoSession] = useState<boolean>(false);
   const [leftPanelTab, setLeftPanelTab] = useState<'transcript' | 'scan'>('transcript');
+  const [saveStatus, setSaveStatus] = useState<'saved' | 'saving' | 'error'>('saved');
 
   // Debounced auto-save function to prevent network storms
   const saveTimeoutRef = React.useRef<NodeJS.Timeout | null>(null);
 
   const saveToDatabase = (updatedData: ExamCorrectionResult, immediate = false) => {
+    setSaveStatus('saving');
     if (saveTimeoutRef.current) {
       clearTimeout(saveTimeoutRef.current);
     }
@@ -70,9 +72,13 @@ export default function CorrectWorkspace() {
         });
         if (res.ok) {
           setShowSaveToast(true);
+          setSaveStatus('saved');
+        } else {
+          setSaveStatus('error');
         }
       } catch (e) {
         console.error('Failed to auto-save:', e);
+        setSaveStatus('error');
       }
     };
 
@@ -1172,11 +1178,17 @@ export default function CorrectWorkspace() {
               <Typography
                 variant="caption"
                 sx={{
-                  color: 'success.main',
+                  color:
+                    saveStatus === 'saved'
+                      ? 'success.main'
+                      : saveStatus === 'saving'
+                        ? 'warning.main'
+                        : 'error.main',
                   display: 'flex',
                   alignItems: 'center',
                   gap: '6px',
                   fontWeight: 600,
+                  transition: 'color 0.3s ease',
                 }}
               >
                 <Box
@@ -1185,23 +1197,69 @@ export default function CorrectWorkspace() {
                     width: 8,
                     height: 8,
                     borderRadius: '50%',
-                    backgroundColor: 'success.main',
+                    backgroundColor:
+                      saveStatus === 'saved'
+                        ? 'success.main'
+                        : saveStatus === 'saving'
+                          ? 'warning.main'
+                          : 'error.main',
                     display: 'inline-block',
+                    transition: 'background-color 0.3s ease',
+                    animation:
+                      saveStatus === 'saving'
+                        ? 'pulse 1.2s infinite ease-in-out'
+                        : saveStatus === 'error'
+                          ? 'blink 1s infinite ease-in-out'
+                          : 'none',
+                    '@keyframes pulse': {
+                      '0%, 100%': { opacity: 0.5, transform: 'scale(0.8)' },
+                      '50%': { opacity: 1, transform: 'scale(1.2)' },
+                    },
+                    '@keyframes blink': {
+                      '0%, 100%': { opacity: 0.4 },
+                      '50%': { opacity: 1 },
+                    },
                   }}
                 />
-                Änderungen automatisch gesichert
+                {saveStatus === 'saved' && 'Änderungen automatisch gesichert'}
+                {saveStatus === 'saving' && 'Änderungen werden gespeichert...'}
+                {saveStatus === 'error' && 'Fehler beim Speichern – Verbindung prüfen'}
               </Typography>
               <Button
                 onClick={() => {
                   saveToDatabase(data, true);
                 }}
+                disabled={saveStatus === 'saving'}
                 className="glow-button"
                 variant="contained"
                 size="small"
-                startIcon={<SaveIcon />}
-                sx={{ borderRadius: '8px', padding: '8px 16px' }}
+                startIcon={
+                  saveStatus === 'saving' ? (
+                    <CircularProgress size={16} sx={{ color: 'inherit' }} />
+                  ) : (
+                    <SaveIcon />
+                  )
+                }
+                sx={{
+                  borderRadius: '8px',
+                  padding: '8px 16px',
+                  backgroundColor:
+                    saveStatus === 'error'
+                      ? 'error.main'
+                      : saveStatus === 'saving'
+                        ? 'warning.main'
+                        : 'primary.main',
+                  '&:hover': {
+                    backgroundColor:
+                      saveStatus === 'error'
+                        ? 'error.dark'
+                        : saveStatus === 'saving'
+                          ? 'warning.dark'
+                          : 'primary.dark',
+                  },
+                }}
               >
-                Änderungen speichern
+                {saveStatus === 'error' ? 'Erneut versuchen' : 'Änderungen speichern'}
               </Button>
             </Box>
           </Box>
