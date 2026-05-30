@@ -1517,7 +1517,7 @@ export default function Dashboard() {
                             label={sub.grade}
                             size="small"
                             sx={{
-                              backgroundColor: '#1b77d1',
+                              backgroundColor: parseFloat(sub.grade) >= 4.0 ? '#1b77d1' : '#dc2626',
                               color: '#ffffff',
                               fontWeight: 'bold',
                               borderRadius: '6px',

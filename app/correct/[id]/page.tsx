@@ -512,7 +512,7 @@ export default function CorrectWorkspace() {
                   borderRadius: '8px',
                   fontSize: '1rem',
                   padding: '4px 8px',
-                  backgroundColor: '#1b77d1',
+                  backgroundColor: parseFloat(data.note) >= 4.0 ? '#1b77d1' : '#dc2626',
                   color: '#ffffff',
                 }}
               />
