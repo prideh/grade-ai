@@ -50,6 +50,7 @@ model Exam {
   classId     String
   class       Class        @relation(fields: [classId], references: [id], onDelete: Cascade)
   submissions Submission[]
+  tasks       ExamTask[]
   createdAt   DateTime     @default(now())
   updatedAt   DateTime     @updatedAt
 }
@@ -67,6 +68,7 @@ model Submission {
   exam                   Exam             @relation(fields: [examId], references: [id], onDelete: Cascade)
   studentId              String?
   student                Student?         @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  targetStudentId        String?
   status                 SubmissionStatus @default(PENDING)
   
   // Grading metrics
@@ -141,4 +143,39 @@ model StepCorrection {
   begruendung      String
   createdAt        DateTime       @default(now())
   updatedAt        DateTime       @updatedAt
+}
+
+model ExamTask {
+  id          String   @id @default(uuid())
+  examId      String
+  exam        Exam     @relation(fields: [examId], references: [id], onDelete: Cascade)
+  taskId      String   // e.g. "1"
+  title       String   // e.g. "Aufgabe 1"
+  maxPoints   Float
+  orderIndex  Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([examId, taskId])
+}
+
+model CorrectionLog {
+  id            String   @id @default(uuid())
+  createdAt     DateTime @default(now())
+  submissionId  String?  // Links to active submission (nullified or kept upon deletion)
+  teacherId     String   // Owner of this log (retained even if parent records are deleted)
+  
+  // Decoupled context fields (preserved even if parent records are deleted)
+  className     String
+  examTitle     String
+  studentName   String   @default("Automatische Zuordnung")
+  
+  // Execution statistics
+  modelUsed     String   @default("gemini-3.5-flash")
+  durationMs    Int?     // Processing time in milliseconds
+  status        String   // "PENDING", "PROCESSING", "COMPLETED", "FAILED", "CANCELLED"
+  actionType    String   // "ERSTELLT" (new correction), "ERSETZT" (replaced conflict), "NEUSTART" (re-run from failure)
+  
+  // Auditing payloads
+  errorMessage  String?
 }

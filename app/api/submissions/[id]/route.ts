@@ -332,6 +332,24 @@ export async function DELETE(request: Request, { params }: { params: Promise<{ i
       return NextResponse.json({ error: 'Nicht autorisiert.' }, { status: 403 });
     }
 
+    // If the submission is active, mark the corresponding decoupled logs as CANCELLED
+    if (submission.status === 'PENDING' || submission.status === 'PROCESSING') {
+      const durationMs = Date.now() - new Date(submission.createdAt).getTime();
+      await db.correctionLog.updateMany({
+        where: { submissionId: submission.id },
+        data: {
+          status: 'CANCELLED',
+          durationMs,
+        },
+      });
+    }
+
+    // Nullify submissionId on associated logs to safely decoupling them before deletion
+    await db.correctionLog.updateMany({
+      where: { submissionId: submission.id },
+      data: { submissionId: null },
+    });
+
     // Delete the submission (cascade will delete task and step corrections)
     await db.submission.delete({
       where: { id: submissionId },

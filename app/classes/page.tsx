@@ -21,11 +21,15 @@ import {
   Alert,
   Divider,
   Chip,
+  IconButton,
+  Tooltip,
 } from '@mui/material';
 import AddIcon from '@mui/icons-material/Add';
 import GroupIcon from '@mui/icons-material/Group';
 import SchoolIcon from '@mui/icons-material/School';
 import ArrowForwardIcon from '@mui/icons-material/ArrowForward';
+import StarIcon from '@mui/icons-material/Star';
+import StarBorderIcon from '@mui/icons-material/StarBorder';
 import DashboardLayout from '@/components/DashboardLayout';
 
 interface PrismaClassInfo {
@@ -46,6 +50,22 @@ export default function ClassesPage() {
   const [classes, setClasses] = useState<ClassListItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [defaultClassId, setDefaultClassId] = useState<string | null>(() => {
+    if (typeof window !== 'undefined') {
+      return localStorage.getItem('gradeai_default_class_id');
+    }
+    return null;
+  });
+
+  const handleToggleDefaultClass = (classId: string) => {
+    if (defaultClassId === classId) {
+      localStorage.removeItem('gradeai_default_class_id');
+      setDefaultClassId(null);
+    } else {
+      localStorage.setItem('gradeai_default_class_id', classId);
+      setDefaultClassId(classId);
+    }
+  };
 
   // Dialog State
   const [openCreate, setOpenCreate] = useState(false);
@@ -218,7 +238,7 @@ export default function ClassesPage() {
                 <Card
                   sx={{
                     borderRadius: '12px',
-                    border: '1px solid #e2e8f0',
+                    border: cls.id === defaultClassId ? '2px solid #1b77d1' : '1px solid #e2e8f0',
                     boxShadow: 'none',
                     transition: 'all 0.25s ease',
                     height: '100%',
@@ -238,12 +258,25 @@ export default function ClassesPage() {
                       sx={{ justifyContent: 'space-between', alignItems: 'flex-start', mb: 2.5 }}
                     >
                       <Box>
-                        <Typography
-                          variant="h6"
-                          sx={{ fontWeight: 800, color: '#0f172a', mb: 0.5 }}
-                        >
-                          {cls.name}
-                        </Typography>
+                        <Stack direction="row" spacing={1} sx={{ alignItems: 'center', mb: 0.5 }}>
+                          <Typography variant="h6" sx={{ fontWeight: 800, color: '#0f172a' }}>
+                            {cls.name}
+                          </Typography>
+                          {cls.id === defaultClassId && (
+                            <Chip
+                              label="Standard"
+                              size="small"
+                              sx={{
+                                height: '20px',
+                                fontSize: '0.65rem',
+                                fontWeight: 700,
+                                backgroundColor: '#1b77d1',
+                                color: '#ffffff',
+                                borderRadius: '4px',
+                              }}
+                            />
+                          )}
+                        </Stack>
                         <Typography
                           variant="caption"
                           sx={{ color: 'text.secondary', fontWeight: 600 }}
@@ -251,19 +284,48 @@ export default function ClassesPage() {
                           Erstellt am {new Date(cls.createdAt).toLocaleDateString('de-CH')}
                         </Typography>
                       </Box>
-                      <Box
-                        sx={{
-                          width: '40px',
-                          height: '40px',
-                          borderRadius: '8px',
-                          backgroundColor: '#f0f7ff',
-                          color: '#1b77d1',
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                        }}
-                      >
-                        <SchoolIcon sx={{ fontSize: '1.25rem' }} />
+                      <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
+                        <Tooltip
+                          title={
+                            cls.id === defaultClassId
+                              ? 'Standardklasse entfernen'
+                              : 'Als Standardklasse festlegen'
+                          }
+                        >
+                          <IconButton
+                            size="small"
+                            onClick={() => handleToggleDefaultClass(cls.id)}
+                            sx={{
+                              color: cls.id === defaultClassId ? '#eab308' : '#94a3b8',
+                              padding: '4px',
+                              '&:hover': {
+                                color: cls.id === defaultClassId ? '#ca8a04' : '#64748b',
+                                backgroundColor: '#f1f5f9',
+                              },
+                            }}
+                          >
+                            {cls.id === defaultClassId ? (
+                              <StarIcon sx={{ fontSize: '1.5rem' }} />
+                            ) : (
+                              <StarBorderIcon sx={{ fontSize: '1.5rem' }} />
+                            )}
+                          </IconButton>
+                        </Tooltip>
+                        <Box
+                          sx={{
+                            width: '40px',
+                            height: '40px',
+                            borderRadius: '8px',
+                            backgroundColor: cls.id === defaultClassId ? '#fef9c3' : '#f0f7ff',
+                            color: cls.id === defaultClassId ? '#ca8a04' : '#1b77d1',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            flexShrink: 0,
+                          }}
+                        >
+                          <SchoolIcon sx={{ fontSize: '1.25rem' }} />
+                        </Box>
                       </Box>
                     </Stack>
 

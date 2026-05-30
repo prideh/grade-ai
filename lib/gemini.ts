@@ -56,6 +56,7 @@ WICHTIGSTE REGELN FÜR DIE BEWERTUNG:
    Note = 5 * (gesamterzieltePunkte / gesamtmaximalPunkte) + 1.
    Runde das Ergebnis kaufmännisch auf die nächste Zehntelnote (z.B. 6.0, 5.7, 5.6, 5.0, 4.3, 4.0 etc.).
    Die beste Note ist 6.0 (hervorragend), die genügende Note (Bestehensgrenze) ist 4.0, und die schlechteste Note ist 1.0.
+5. Vollständigkeit (Jede Aufgabe bewerten): Analysiere das gesamte eingereichte Blatt vollständig von oben nach unten. Identifiziere, transkribiere und korrigiere JEDE einzelne Aufgabe (z.B. Aufgabe 1, Aufgabe 2, Aufgabe 3 etc.), die auf dem Prüfungsblatt gelöst wurde. Lass niemals Aufgaben aus! Das "aufgaben" Array in deiner JSON-Rückgabe MUSS für jede auf dem Blatt vorhandene Aufgabe ein eigenes Objekt enthalten.
 
 Deine Rückgabe MUSS ein valides, geparstes JSON-Objekt sein, das exakt dem folgenden TypeScript-Interface entspricht. Gib KEINEN Markdown-Wrapper (wie \`\`\`json) und keinen zusätzlichen Text aus. Nur das nackte JSON.
 
@@ -71,7 +72,7 @@ Schnittstellenstruktur:
     {
       "aufgabeId": "1",
       "titel": "Aufgabe 1",
-      "schuelerAntwort": "Transkription der Schülerantwort",
+      "schuelerAntwort": "Transkription der Schülerantwort für Aufgabe 1",
       "erzieltePunkte": 4,
       "maximalPunkte": 5,
       "status": "Folgefehler", // "Korrekt" | "Folgefehler" | "Fehler"
@@ -96,6 +97,35 @@ Schnittstellenstruktur:
         }
       ],
       "lehrerKommentar": "Guter Rechenweg, leider ein kleiner Vorzeichenfehler zu Beginn, danach sauber weitergerechnet."
+    },
+    {
+      "aufgabeId": "2",
+      "titel": "Aufgabe 2",
+      "schuelerAntwort": "Transkription der Schülerantwort für Aufgabe 2",
+      "erzieltePunkte": 5,
+      "maximalPunkte": 5,
+      "status": "Korrekt",
+      "schritte": [
+        {
+          "schrittIndex": 1,
+          "schrittText": "2x = 10",
+          "istKorrekt": true,
+          "fehlerTyp": "KeinFehler",
+          "erreichtePunkte": 2.5,
+          "maximalPunkte": 2.5,
+          "begruendung": "Sehr gut vereinfacht."
+        },
+        {
+          "schrittIndex": 2,
+          "schrittText": "x = 5",
+          "istKorrekt": true,
+          "fehlerTyp": "KeinFehler",
+          "erreichtePunkte": 2.5,
+          "maximalPunkte": 2.5,
+          "begruendung": "Korrekt nach x aufgelöst."
+        }
+      ],
+      "lehrerKommentar": "Aufgabe fehlerfrei gelöst. Weiter so!"
     }
   ],
   "schuelerFeedback": {
@@ -106,12 +136,19 @@ Schnittstellenstruktur:
   }
 }
 `;
+export interface PredefinedTask {
+  taskId: string;
+  title: string;
+  maxPoints: number;
+}
+
 export async function runLiveGeminiCorrection(
   studentExamImageBase64: string,
   rubric: string | { mimeType: string; data: string },
-  modelName: 'gemini-3.5-flash' | 'gemini-3.1-pro' = 'gemini-3.5-flash',
+  modelName: 'gemini-3.5-flash' | 'gemini-3.1-pro-preview' = 'gemini-3.5-flash',
   customApiKey?: string,
-  studentMimeType: string = 'image/jpeg'
+  studentMimeType: string = 'image/jpeg',
+  predefinedTasks?: PredefinedTask[]
 ): Promise<ExamCorrectionResult> {
   const apiKey = customApiKey || process.env.GEMINI_API_KEY;
   if (!apiKey) {
@@ -149,23 +186,62 @@ export async function runLiveGeminiCorrection(
       );
     }
 
+    let finalPrompt = SYSTEM_PROMPT;
+    if (predefinedTasks && predefinedTasks.length > 0) {
+      finalPrompt = `${SYSTEM_PROMPT}
+
+WICHTIGE ZUSATZVORGABE (STRIKTES TEMPLATE):
+Die zu korrigierende Prüfung hat ein vordefiniertes Aufgaben-Template. Du MUSST die Schülerantworten exakt nach diesem Aufgaben-Template bewerten und strukturieren.
+Erstelle im "aufgaben" Array in deiner JSON-Rückgabe exakt ein Objekt pro vordefinierter Aufgabe mit der entsprechenden "aufgabeId", dem "titel" und der exakten "maximalPunkte".
+Verwende exakt folgende Aufgaben und deren Punktelimits:
+${predefinedTasks.map((t) => `- Aufgabe ID: "${t.taskId}", Titel: "${t.title}", Maximalpunkte: ${t.maxPoints}`).join('\n')}
+
+Regeln für dieses Template:
+1. Erstelle KEINE Aufgaben in deiner JSON-Rückgabe, die nicht in dieser Liste aufgeführt sind.
+2. Weiche NICHT von der vorgegebenen "aufgabeId", dem "titel" und der "maximalPunkte" ab.
+3. Die Summe aller "maximalPunkte" im JSON MUSS exakt ${predefinedTasks.reduce((sum, t) => sum + t.maxPoints, 0)} entsprechen.
+4. Die erreichte Punktzahl ("erzieltePunkte") darf für jede Aufgabe niemals grösser sein als die vorgegebene "maximalPunkte" für diese Aufgabe.
+5. Die erreichten Punkte der Teilschritte ("schritte.erreichtePunkte") in einer Aufgabe müssen in der Summe exakt den "erzieltePunkte" der Aufgabe entsprechen und dürfen deren "maximalPunkte" nicht überschreiten.
+`;
+    }
+
     const response = await ai.models.generateContent({
       model: modelName,
       contents: contents,
       config: {
-        systemInstruction: SYSTEM_PROMPT,
+        systemInstruction: finalPrompt,
         responseMimeType: 'application/json',
-        temperature: 0.1, // Low temperature for consistent grading
+        temperature: 0.0, // Set to 0.0 for maximum determinism and consistency
+        seed: 42, // Static seed to ensure highly reproducible sampling paths
       },
     });
 
     const responseText = response.text || '';
 
-    // Clean any potential wrapper elements
-    const cleanJson = responseText
-      .replace(/```json/g, '')
-      .replace(/```/g, '')
-      .trim();
+    // Extract only the matching JSON object payload using balanced brace counting
+    const startIdx = responseText.indexOf('{');
+    let cleanJson = responseText;
+
+    if (startIdx !== -1) {
+      let braceCount = 0;
+      for (let i = startIdx; i < responseText.length; i++) {
+        const char = responseText[i];
+        if (char === '{') {
+          braceCount++;
+        } else if (char === '}') {
+          braceCount--;
+          if (braceCount === 0) {
+            cleanJson = responseText.substring(startIdx, i + 1);
+            break;
+          }
+        }
+      }
+    } else {
+      cleanJson = responseText
+        .replace(/```json/g, '')
+        .replace(/```/g, '')
+        .trim();
+    }
     return JSON.parse(cleanJson) as ExamCorrectionResult;
   } catch (error) {
     console.error('Error during live Gemini correction call:', error);

@@ -31,23 +31,42 @@ export async function GET() {
       },
     });
 
+    // Fetch all students for the teacher's classes to resolve targetStudentId names without N+1 queries
+    const teacherStudents = await db.student.findMany({
+      where: {
+        class: {
+          teacherId: session.userId,
+        },
+      },
+    });
+    const studentMap = new Map(teacherStudents.map((s) => [s.id, s.name]));
+
     // Map database structures for client consumption
-    const mapped = submissions.map((sub) => ({
-      id: sub.id,
-      studentId: sub.studentId,
-      studentName: sub.student?.name || 'Nicht zugeordnet',
-      examId: sub.examId,
-      examTitle: sub.exam.title,
-      classId: sub.exam.classId,
-      className: sub.exam.class.name,
-      subject: sub.exam.subject,
-      grade: sub.status === 'COMPLETED' ? sub.gradeRounded : '—',
-      points:
-        sub.status === 'COMPLETED' ? `${sub.earnedPoints.toFixed(1)} / ${sub.exam.maxPoints}` : '—',
-      status: sub.status,
-      date: sub.createdAt.toLocaleDateString('de-CH'),
-      errorMessage: sub.errorMessage,
-    }));
+    const mapped = submissions.map((sub) => {
+      const studentName =
+        sub.student?.name ||
+        (sub.targetStudentId ? studentMap.get(sub.targetStudentId) : null) ||
+        'Nicht zugeordnet';
+
+      return {
+        id: sub.id,
+        studentId: sub.studentId || sub.targetStudentId || null,
+        studentName,
+        examId: sub.examId,
+        examTitle: sub.exam.title,
+        classId: sub.exam.classId,
+        className: sub.exam.class.name,
+        subject: sub.exam.subject,
+        grade: sub.status === 'COMPLETED' ? sub.gradeRounded : '—',
+        points:
+          sub.status === 'COMPLETED'
+            ? `${sub.earnedPoints.toFixed(1)} / ${sub.exam.maxPoints}`
+            : '—',
+        status: sub.status,
+        date: sub.createdAt.toLocaleDateString('de-CH'),
+        errorMessage: sub.errorMessage,
+      };
+    });
 
     return NextResponse.json({ submissions: mapped });
   } catch (error) {

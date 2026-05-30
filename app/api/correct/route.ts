@@ -89,8 +89,8 @@ export async function POST(request: Request) {
       );
     }
 
-    // Pre-flight check: If studentId and examId are selected and overwrite is false
-    if (examId && studentId && !overwrite) {
+    // Pre-flight check: If studentId and examId are selected
+    if (examId && studentId) {
       const existingSubmission = await db.submission.findUnique({
         where: {
           examId_studentId: {
@@ -100,7 +100,7 @@ export async function POST(request: Request) {
         },
       });
 
-      if (existingSubmission) {
+      if (existingSubmission && !overwrite) {
         return NextResponse.json(
           {
             error: 'Für diesen Schüler existiert bereits eine Korrektur für diese Prüfung.',
@@ -213,12 +213,30 @@ export async function POST(request: Request) {
     await fs.writeFile(filePath, Buffer.from(studentBytes));
     const savedFilePath = `/uploads/${fileName}`;
 
+    // Fetch names synchronously for decouple logging
+    const [classRecord, examRecordSync] = await Promise.all([
+      db.class.findUnique({ where: { id: classId } }),
+      db.exam.findUnique({ where: { id: finalExamId } }),
+    ]);
+
+    const resolvedClassName = classRecord?.name || 'Unbekannte Klasse';
+    const resolvedExamTitle = examRecordSync?.title || 'Unbekannte Prüfung';
+
+    let resolvedStudentName = 'Automatische Zuordnung';
+    if (studentId) {
+      const studentRecord = await db.student.findUnique({ where: { id: studentId } });
+      if (studentRecord) {
+        resolvedStudentName = studentRecord.name;
+      }
+    }
+
     // 5. Create PENDING placeholder Submission record in the DB
     const submission = await db.submission.create({
       data: {
         id: submissionId,
         examId: finalExamId,
-        studentId: studentId || null, // Optional. Matched in background if null.
+        studentId: null, // Always null initially to avoid unique constraint violations
+        targetStudentId: studentId || null, // Track targeted student if provided
         status: 'PENDING',
         earnedPoints: 0.0,
         gradeRaw: 1.0,
@@ -231,8 +249,25 @@ export async function POST(request: Request) {
       },
     });
 
+    // Create decoupling CorrectionLog record synchronously
+    const logRecord = await db.correctionLog.create({
+      data: {
+        submissionId: submissionId,
+        teacherId: session.userId,
+        className: resolvedClassName,
+        examTitle: resolvedExamTitle,
+        studentName: resolvedStudentName,
+        modelUsed: model,
+        status: 'PENDING',
+        actionType: overwrite ? 'ERSETZT' : 'ERSTELLT',
+      },
+    });
+
     // 6. Schedule heavy live Gemini OCR and correction in the background using stable Next.js after()
     after(async () => {
+      const startTime = Date.now();
+      let finalStudentName = resolvedStudentName;
+
       try {
         // 1. Update status to PROCESSING
         await db.submission.update({
@@ -240,52 +275,59 @@ export async function POST(request: Request) {
           data: { status: 'PROCESSING' },
         });
 
-        // 2. Run live Gemini OCR and correction analysis
+        await db.correctionLog.update({
+          where: { id: logRecord.id },
+          data: { status: 'PROCESSING' },
+        });
+
+        // 2. Fetch the predefined tasks of this exam if available
+        const examRecord = await db.exam.findUnique({
+          where: { id: finalExamId },
+          include: { tasks: true },
+        });
+
+        const predefinedTasks =
+          examRecord?.tasks && examRecord.tasks.length > 0
+            ? examRecord.tasks.map((t) => ({
+                taskId: t.taskId,
+                title: t.title,
+                maxPoints: t.maxPoints,
+              }))
+            : undefined;
+
+        // 3. Run live Gemini OCR and correction analysis
         const result = await runLiveGeminiCorrection(
           studentBase64,
           rubricParam,
-          model as 'gemini-3.5-flash' | 'gemini-3.1-pro',
+          model as 'gemini-3.5-flash' | 'gemini-3.1-pro-preview',
           apiKey,
-          studentExam.type || 'image/jpeg'
+          studentExam.type || 'image/jpeg',
+          predefinedTasks
         );
 
-        // 3. Perform AI Auto-Matching if studentId was not provided synchronously
+        // 4. Perform AI Auto-Matching if studentId was not provided synchronously
         let matchedStudentId = studentId || null;
         if (!matchedStudentId && result.schuelerName) {
           const classStudents = await db.student.findMany({
             where: { classId },
           });
           matchedStudentId = matchStudentByName(result.schuelerName, classStudents);
-        }
-
-        // 4. Check for duplicate submissions before committing (if student was resolved)
-        if (matchedStudentId) {
-          const existingSubmission = await db.submission.findFirst({
-            where: {
-              examId: finalExamId,
-              studentId: matchedStudentId,
-              id: { not: submissionId }, // Exclude current record
-            },
-          });
-
-          if (existingSubmission) {
-            if (overwrite) {
-              // Delete existing submission to overwrite
-              await db.submission.delete({
-                where: { id: existingSubmission.id },
-              });
-            } else {
-              throw new Error(
-                `Für Schüler/in "${result.schuelerName}" existiert bereits eine Korrektur. Aktiviere 'Überschreiben', um sie zu ersetzen.`
-              );
+          if (matchedStudentId) {
+            const matchedRec = classStudents.find((s) => s.id === matchedStudentId);
+            if (matchedRec) {
+              finalStudentName = matchedRec.name;
             }
+          } else {
+            finalStudentName = `${result.schuelerName} (Nicht zugeordnet)`;
           }
         }
 
         // 5. Update Exam maxPoints based on the resolved points of the first finished grading
-        const examRecord = await db.exam.findUnique({ where: { id: finalExamId } });
+        // ONLY if the exam has NO predefined tasks yet!
+        const hasPredefinedTasks = examRecord && examRecord.tasks && examRecord.tasks.length > 0;
         if (
           examRecord &&
+          !hasPredefinedTasks &&
           (examRecord.maxPoints === 0 || examRecord.maxPoints !== result.gesamtmaximalPunkte)
         ) {
           await db.exam.update({
@@ -296,10 +338,35 @@ export async function POST(request: Request) {
 
         // 6. Execute transaction to write AI grading results
         await db.$transaction(async (tx) => {
+          // Check for duplicate submissions and delete inside the transaction if overwrite is enabled
+          if (matchedStudentId) {
+            const existingSubmission = await tx.submission.findFirst({
+              where: {
+                examId: finalExamId,
+                studentId: matchedStudentId,
+                id: { not: submissionId }, // Exclude current record
+              },
+            });
+
+            if (existingSubmission) {
+              if (overwrite) {
+                // Delete existing completed submission to overwrite it in the same transaction
+                await tx.submission.delete({
+                  where: { id: existingSubmission.id },
+                });
+              } else {
+                throw new Error(
+                  `Für Schüler/in "${result.schuelerName}" existiert bereits eine Korrektur. Klicke auf 'Korrektur ersetzen', um sie zu überschreiben.`
+                );
+              }
+            }
+          }
+
           await tx.submission.update({
             where: { id: submissionId },
             data: {
               studentId: matchedStudentId, // Can be null if unmatched (unassigned)
+              targetStudentId: null, // Clear the temporary target field on completion
               status: 'COMPLETED',
               earnedPoints: result.gesamterzieltePunkte,
               gradeRaw: parseFloat(result.note),
@@ -324,39 +391,57 @@ export async function POST(request: Request) {
 
             const taskCorrectionId = crypto.randomUUID();
 
+            let calculatedTaskPoints = 0;
+            const hasSteps = Array.isArray(task.schritte) && task.schritte.length > 0;
+
+            // Insert Teilschritte
+            if (hasSteps) {
+              for (const step of task.schritte) {
+                let errorType: 'KeinFehler' | 'Rechenfehler' | 'Folgefehler' | 'SonstigerFehler' =
+                  'KeinFehler';
+                if (step.fehlerTyp === 'Rechenfehler') errorType = 'Rechenfehler';
+                else if (step.fehlerTyp === 'Folgefehler') errorType = 'Folgefehler';
+                else if (step.fehlerTyp === 'SonstigerFehler') errorType = 'SonstigerFehler';
+
+                const clampedStepMax = Math.max(0, Number(step.maximalPunkte || 0));
+                const clampedStepEarned = Math.max(
+                  0,
+                  Math.min(clampedStepMax, Number(step.erreichtePunkte || 0))
+                );
+
+                calculatedTaskPoints += clampedStepEarned;
+
+                stepCorrectionsData.push({
+                  id: crypto.randomUUID(),
+                  taskCorrectionId: taskCorrectionId,
+                  schrittIndex: step.schrittIndex,
+                  schrittText: step.schrittText,
+                  istKorrekt: step.istKorrekt,
+                  fehlerTyp: errorType,
+                  erreichtePunkte: clampedStepEarned,
+                  maximalPunkte: clampedStepMax,
+                  begruendung: step.begruendung || '',
+                });
+              }
+            }
+
+            const clampedTaskMax = Math.max(0, Number(task.maximalPunkte || 0));
+            const finalTaskPoints = hasSteps
+              ? Math.round(calculatedTaskPoints * 10) / 10
+              : Math.max(0, Math.min(clampedTaskMax, Number(task.erzieltePunkte || 0)));
+
             taskCorrectionsData.push({
               id: taskCorrectionId,
               submissionId: submissionId,
               taskId: task.aufgabeId,
               title: task.titel,
               studentAnswer: task.schuelerAntwort,
-              erzieltePunkte: task.erzieltePunkte,
-              maximalPunkte: task.maximalPunkte,
+              erzieltePunkte: finalTaskPoints,
+              maximalPunkte: clampedTaskMax,
               status: taskStatus,
               lehrerKommentar: task.lehrerKommentar || '',
               orderIndex: tIdx,
             });
-
-            // Insert Teilschritte
-            for (const step of task.schritte) {
-              let errorType: 'KeinFehler' | 'Rechenfehler' | 'Folgefehler' | 'SonstigerFehler' =
-                'KeinFehler';
-              if (step.fehlerTyp === 'Rechenfehler') errorType = 'Rechenfehler';
-              else if (step.fehlerTyp === 'Folgefehler') errorType = 'Folgefehler';
-              else if (step.fehlerTyp === 'SonstigerFehler') errorType = 'SonstigerFehler';
-
-              stepCorrectionsData.push({
-                id: crypto.randomUUID(),
-                taskCorrectionId: taskCorrectionId,
-                schrittIndex: step.schrittIndex,
-                schrittText: step.schrittText,
-                istKorrekt: step.istKorrekt,
-                fehlerTyp: errorType,
-                erreichtePunkte: step.erreichtePunkte,
-                maximalPunkte: step.maximalPunkte,
-                begruendung: step.begruendung || '',
-              });
-            }
           }
 
           if (taskCorrectionsData.length > 0) {
@@ -371,9 +456,61 @@ export async function POST(request: Request) {
             });
           }
         });
+
+        // 7. Update decouple CorrectionLog to COMPLETED
+        const durationMs = Date.now() - startTime;
+        await db.correctionLog.update({
+          where: { id: logRecord.id },
+          data: {
+            status: 'COMPLETED',
+            studentName: finalStudentName,
+            durationMs,
+          },
+        });
       } catch (error) {
+        const durationMs = Date.now() - startTime;
+
+        // Check if this error is due to the submission being deleted (e.g. cancelled by the user)
+        const isCancelled =
+          error && typeof error === 'object' && 'code' in error && error.code === 'P2025';
+
+        if (isCancelled) {
+          console.log(
+            `Background grading for submission ${submissionId} was cancelled by the user (record deleted).`
+          );
+
+          // Update decoupled CorrectionLog to CANCELLED
+          try {
+            await db.correctionLog.update({
+              where: { id: logRecord.id },
+              data: {
+                status: 'CANCELLED',
+                durationMs,
+              },
+            });
+          } catch (logErr) {
+            console.error('Failed to set CANCELLED state on CorrectionLog:', logErr);
+          }
+          return;
+        }
+
         console.error(`Background grading error for submission ${submissionId}:`, error);
         const errMsg = error instanceof Error ? error.message : String(error);
+
+        // Update decoupled CorrectionLog to FAILED
+        try {
+          await db.correctionLog.update({
+            where: { id: logRecord.id },
+            data: {
+              status: 'FAILED',
+              studentName: finalStudentName,
+              durationMs,
+              errorMessage: errMsg,
+            },
+          });
+        } catch (logErr) {
+          console.error('Failed to set FAILED state on CorrectionLog:', logErr);
+        }
 
         // Mark as FAILED in DB and store error details
         try {
@@ -385,7 +522,16 @@ export async function POST(request: Request) {
             },
           });
         } catch (dbErr) {
-          console.error(`Failed to set FAILED state on submission ${submissionId}:`, dbErr);
+          const isDbErrCancelled =
+            dbErr && typeof dbErr === 'object' && 'code' in dbErr && dbErr.code === 'P2025';
+
+          if (!isDbErrCancelled) {
+            console.error(`Failed to set FAILED state on submission ${submissionId}:`, dbErr);
+          } else {
+            console.log(
+              `Failed to set FAILED state: submission ${submissionId} was already deleted (cancelled).`
+            );
+          }
         }
       }
     });

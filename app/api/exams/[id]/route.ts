@@ -12,7 +12,6 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
 
     const { id: examId } = await params;
 
-    // Fetch exam details and verify class/teacher ownership
     const exam = await db.exam.findUnique({
       where: { id: examId },
       include: {
@@ -24,6 +23,11 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
         submissions: {
           include: {
             student: true,
+          },
+        },
+        tasks: {
+          orderBy: {
+            orderIndex: 'asc',
           },
         },
       },
@@ -118,6 +122,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
         classId: exam.classId,
         className: exam.class.name,
         createdAt: exam.createdAt.toLocaleDateString('de-CH'),
+        tasks: exam.tasks,
       },
       stats,
       roster: submissionsTracker,
@@ -138,7 +143,7 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
 
     const { id: examId } = await params;
     const body = await request.json();
-    const { title, subject, rubricText, maxPoints } = body;
+    const { title, subject, rubricText, maxPoints, tasks } = body;
 
     // Fetch existing exam
     const exam = await db.exam.findUnique({
@@ -155,18 +160,47 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
       return NextResponse.json({ error: 'Nicht autorisiert.' }, { status: 403 });
     }
 
-    if (maxPoints !== undefined && (typeof maxPoints !== 'number' || maxPoints <= 0)) {
+    let finalMaxPoints = Number(maxPoints) !== undefined ? Number(maxPoints) : exam.maxPoints;
+    if (Array.isArray(tasks)) {
+      finalMaxPoints = tasks.reduce((sum, t) => sum + (Number(t.maxPoints) || 0), 0);
+    }
+
+    if (finalMaxPoints <= 0) {
       return NextResponse.json({ error: 'Maximale Punktzahl muss positiv sein.' }, { status: 400 });
     }
 
-    const updatedExam = await db.exam.update({
-      where: { id: examId },
-      data: {
-        title: title !== undefined ? title.trim() : undefined,
-        subject: subject !== undefined ? subject.trim() : undefined,
-        rubricText: rubricText !== undefined ? rubricText : undefined,
-        maxPoints: maxPoints !== undefined ? maxPoints : undefined,
-      },
+    const updatedExam = await db.$transaction(async (tx) => {
+      const updated = await tx.exam.update({
+        where: { id: examId },
+        data: {
+          title: title !== undefined ? title.trim() : undefined,
+          subject: subject !== undefined ? subject.trim() : undefined,
+          rubricText: rubricText !== undefined ? rubricText : undefined,
+          maxPoints: finalMaxPoints,
+        },
+      });
+
+      if (Array.isArray(tasks)) {
+        // Delete all old tasks
+        await tx.examTask.deleteMany({
+          where: { examId },
+        });
+
+        // Recreate new tasks
+        if (tasks.length > 0) {
+          await tx.examTask.createMany({
+            data: tasks.map((t, index) => ({
+              examId,
+              taskId: String(t.taskId),
+              title: t.title || `Aufgabe ${t.taskId}`,
+              maxPoints: Number(t.maxPoints),
+              orderIndex: index,
+            })),
+          });
+        }
+      }
+
+      return updated;
     });
 
     return NextResponse.json({ success: true, exam: updatedExam });

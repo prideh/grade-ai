@@ -57,7 +57,7 @@ export async function POST(request: Request) {
     }
 
     const body = await request.json();
-    const { title, subject, rubricText, maxPoints, classId } = body;
+    const { title, subject, rubricText, maxPoints, classId, tasks } = body;
 
     if (!title || typeof title !== 'string' || title.trim() === '') {
       return NextResponse.json({ error: 'Prüfungstitel ist erforderlich.' }, { status: 400 });
@@ -65,13 +65,6 @@ export async function POST(request: Request) {
 
     if (!subject || typeof subject !== 'string' || subject.trim() === '') {
       return NextResponse.json({ error: 'Fach ist erforderlich.' }, { status: 400 });
-    }
-
-    if (maxPoints === undefined || typeof maxPoints !== 'number' || maxPoints <= 0) {
-      return NextResponse.json(
-        { error: 'Maximale Punktzahl muss eine positive Zahl sein.' },
-        { status: 400 }
-      );
     }
 
     if (!classId || typeof classId !== 'string') {
@@ -87,14 +80,43 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Klasse nicht gefunden.' }, { status: 404 });
     }
 
-    const exam = await db.exam.create({
-      data: {
-        title: title.trim(),
-        subject: subject.trim(),
-        rubricText: rubricText || 'Standard Musterlösung',
-        maxPoints,
-        classId,
-      },
+    // Determine final max points
+    let finalMaxPoints = Number(maxPoints) || 0;
+    if (Array.isArray(tasks) && tasks.length > 0) {
+      finalMaxPoints = tasks.reduce((sum, t) => sum + (Number(t.maxPoints) || 0), 0);
+    }
+
+    if (finalMaxPoints <= 0) {
+      return NextResponse.json(
+        { error: 'Maximale Punktzahl muss eine positive Zahl sein.' },
+        { status: 400 }
+      );
+    }
+
+    const exam = await db.$transaction(async (tx) => {
+      const newExam = await tx.exam.create({
+        data: {
+          title: title.trim(),
+          subject: subject.trim(),
+          rubricText: rubricText || 'Standard Musterlösung',
+          maxPoints: finalMaxPoints,
+          classId,
+        },
+      });
+
+      if (Array.isArray(tasks) && tasks.length > 0) {
+        await tx.examTask.createMany({
+          data: tasks.map((t, index) => ({
+            examId: newExam.id,
+            taskId: String(t.taskId),
+            title: t.title || `Aufgabe ${t.taskId}`,
+            maxPoints: Number(t.maxPoints),
+            orderIndex: index,
+          })),
+        });
+      }
+
+      return newExam;
     });
 
     return NextResponse.json({ success: true, exam });

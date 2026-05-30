@@ -25,12 +25,16 @@ import {
   InputLabel,
   Select,
   MenuItem,
+  IconButton,
 } from '@mui/material';
 import AddIcon from '@mui/icons-material/Add';
 import AssignmentIcon from '@mui/icons-material/Assignment';
 import ArrowForwardIcon from '@mui/icons-material/ArrowForward';
 import StarsIcon from '@mui/icons-material/Stars';
+import StarIcon from '@mui/icons-material/Star';
 import ContentCopyIcon from '@mui/icons-material/ContentCopy';
+import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome';
+import CloseIcon from '@mui/icons-material/Close';
 import DashboardLayout from '@/components/DashboardLayout';
 
 interface SimpleClass {
@@ -62,6 +66,12 @@ export default function ExamsPage() {
   const [activeClassId, setActiveClassId] = useState<string>('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [defaultClassId] = useState<string | null>(() => {
+    if (typeof window !== 'undefined') {
+      return localStorage.getItem('gradeai_default_class_id');
+    }
+    return null;
+  });
 
   // Dialog State
   const [openCreate, setOpenCreate] = useState(false);
@@ -81,6 +91,39 @@ export default function ExamsPage() {
   const [examMaxPoints, setExamMaxPoints] = useState<number>(20);
   const [examRubric, setExamRubric] = useState('');
   const [uploadedFileName, setUploadedFileName] = useState('');
+  const [parsingRubric, setParsingRubric] = useState(false);
+  const [parsedTasks, setParsedTasks] = useState<
+    { taskId: string; title: string; maxPoints: number }[]
+  >([]);
+
+  const autoParseRubric = async (rubricValue: string) => {
+    if (!rubricValue || rubricValue.trim() === '') return;
+    setParsingRubric(true);
+    setCreateError('');
+    try {
+      const res = await fetch('/api/exams/parse-rubric', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ rubricText: rubricValue }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Fehler beim Parsen.');
+      setParsedTasks(data.tasks || []);
+      const totalPoints = (data.tasks || []).reduce(
+        (sum: number, t: { maxPoints?: number | string }) => sum + (Number(t.maxPoints) || 0),
+        0
+      );
+      setExamMaxPoints(totalPoints);
+    } catch (err) {
+      setCreateError(err instanceof Error ? err.message : 'Fehler bei der Analyse.');
+    } finally {
+      setParsingRubric(false);
+    }
+  };
+
+  const handleParseRubric = () => {
+    autoParseRubric(examRubric);
+  };
 
   const handleRubricFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
@@ -93,12 +136,12 @@ export default function ExamsPage() {
           const dataUrl = event.target?.result as string;
           if (dataUrl) {
             const base64Data = dataUrl.split(',')[1];
-            setExamRubric(
-              JSON.stringify({
-                mimeType: file.type,
-                data: base64Data,
-              })
-            );
+            const rubricPayload = JSON.stringify({
+              mimeType: file.type,
+              data: base64Data,
+            });
+            setExamRubric(rubricPayload);
+            autoParseRubric(rubricPayload);
           }
         };
         reader.readAsDataURL(file);
@@ -107,6 +150,7 @@ export default function ExamsPage() {
           const text = event.target?.result as string;
           if (text) {
             setExamRubric(text);
+            autoParseRubric(text);
           }
         };
         reader.readAsText(file);
@@ -117,6 +161,8 @@ export default function ExamsPage() {
   const handleResetRubric = () => {
     setExamRubric('');
     setUploadedFileName('');
+    setParsedTasks([]);
+    setExamMaxPoints(20);
   };
 
   const [selectedClassId, setSelectedClassId] = useState('');
@@ -191,17 +237,23 @@ export default function ExamsPage() {
       setExams(detailedExams);
 
       if (loadedClasses.length > 0) {
+        // Pre-select default class if available, else first class
+        const defaultId =
+          typeof window !== 'undefined' ? localStorage.getItem('gradeai_default_class_id') : null;
+        const hasDefault = defaultId && loadedClasses.some((c) => c.id === defaultId);
+        const initialSelectionId = hasDefault ? defaultId : loadedClasses[0].id;
+
         setActiveClassId((prev) => {
           if (prev && loadedClasses.some((c) => c.id === prev)) {
             return prev;
           }
-          return loadedClasses[0].id;
+          return initialSelectionId || '';
         });
         setSelectedClassId((prev) => {
           if (prev && loadedClasses.some((c) => c.id === prev)) {
             return prev;
           }
-          return loadedClasses[0].id;
+          return initialSelectionId || '';
         });
       }
     } catch (err) {
@@ -209,7 +261,7 @@ export default function ExamsPage() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [setSelectedClassId]);
 
   useEffect(() => {
     Promise.resolve().then(() => {
@@ -237,6 +289,7 @@ export default function ExamsPage() {
           maxPoints: Number(examMaxPoints),
           rubricText: examRubric || 'Standard Musterlösung',
           classId: selectedClassId,
+          tasks: parsedTasks.length > 0 ? parsedTasks : undefined,
         }),
       });
 
@@ -249,6 +302,7 @@ export default function ExamsPage() {
       setExamTitle('');
       setExamRubric('');
       setUploadedFileName('');
+      setParsedTasks([]);
       setActiveClassId(selectedClassId); // Automatically select the tab of the class for the new exam
       fetchData(); // Refresh list
     } catch (err) {
@@ -415,18 +469,23 @@ export default function ExamsPage() {
                   >
                     <CardContent sx={{ p: 2, '&:last-child': { pb: 2 } }}>
                       <Stack spacing={0.75}>
-                        <Typography
-                          variant="subtitle1"
-                          sx={{
-                            fontWeight: 800,
-                            color: isActive ? '#1b77d1' : '#0f172a',
-                            whiteSpace: 'nowrap',
-                            overflow: 'hidden',
-                            textOverflow: 'ellipsis',
-                          }}
-                        >
-                          {cls.name}
-                        </Typography>
+                        <Stack direction="row" spacing={0.75} sx={{ alignItems: 'center' }}>
+                          <Typography
+                            variant="subtitle1"
+                            sx={{
+                              fontWeight: 800,
+                              color: isActive ? '#1b77d1' : '#0f172a',
+                              whiteSpace: 'nowrap',
+                              overflow: 'hidden',
+                              textOverflow: 'ellipsis',
+                            }}
+                          >
+                            {cls.name}
+                          </Typography>
+                          {cls.id === defaultClassId && (
+                            <StarIcon sx={{ color: '#eab308', fontSize: '1rem', flexShrink: 0 }} />
+                          )}
+                        </Stack>
                         <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
                           <Typography
                             variant="caption"
@@ -792,6 +851,7 @@ export default function ExamsPage() {
                       value={examMaxPoints}
                       onChange={(e) => setExamMaxPoints(Number(e.target.value))}
                       required
+                      disabled={parsedTasks.length > 0}
                       sx={{ '& .MuiOutlinedInput-root': { borderRadius: '8px' } }}
                     />
                   </Grid>
@@ -830,6 +890,7 @@ export default function ExamsPage() {
                       variant="outlined"
                       value={examRubric}
                       onChange={(e) => setExamRubric(e.target.value)}
+                      onBlur={() => autoParseRubric(examRubric)}
                       sx={{ '& .MuiOutlinedInput-root': { borderRadius: '8px' } }}
                     />
                     <Stack direction="row" spacing={1.5} sx={{ alignItems: 'center' }}>
@@ -862,6 +923,145 @@ export default function ExamsPage() {
                       </Button>
                     </Stack>
                   </Stack>
+                )}
+
+                {examRubric && parsedTasks.length === 0 && !parsingRubric && (
+                  <Button
+                    variant="outlined"
+                    color="primary"
+                    startIcon={<AutoAwesomeIcon />}
+                    onClick={handleParseRubric}
+                    sx={{
+                      textTransform: 'none',
+                      fontWeight: 700,
+                      borderRadius: '8px',
+                      borderColor: 'primary.main',
+                      alignSelf: 'flex-start',
+                    }}
+                  >
+                    Aufgabenstruktur mit KI analysieren
+                  </Button>
+                )}
+
+                {parsingRubric && (
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                    <CircularProgress size={20} thickness={4} />
+                    <Typography variant="body2" sx={{ color: 'text.secondary', fontWeight: 650 }}>
+                      Aufgaben werden aus der Musterlösung extrahiert...
+                    </Typography>
+                  </Box>
+                )}
+
+                {parsedTasks.length > 0 && (
+                  <Box
+                    sx={{
+                      border: '1px solid #e2e8f0',
+                      borderRadius: '8px',
+                      padding: '16px',
+                      backgroundColor: '#f8fafc',
+                    }}
+                  >
+                    <Typography
+                      variant="subtitle2"
+                      sx={{ fontWeight: 'bold', mb: 1.5, color: '#0f172a' }}
+                    >
+                      Vordefinierte Aufgaben-Struktur (Template)
+                    </Typography>
+                    <Stack spacing={1.5}>
+                      {parsedTasks.map((task, index) => (
+                        <Grid container spacing={1.5} key={index} sx={{ alignItems: 'center' }}>
+                          <Grid size={{ xs: 3 }}>
+                            <TextField
+                              size="small"
+                              label="ID"
+                              value={task.taskId}
+                              onChange={(e) => {
+                                const newTasks = [...parsedTasks];
+                                newTasks[index].taskId = e.target.value;
+                                setParsedTasks(newTasks);
+                              }}
+                              sx={{ '& .MuiOutlinedInput-root': { borderRadius: '6px' } }}
+                            />
+                          </Grid>
+                          <Grid size={{ xs: 5 }}>
+                            <TextField
+                              size="small"
+                              label="Titel"
+                              value={task.title}
+                              onChange={(e) => {
+                                const newTasks = [...parsedTasks];
+                                newTasks[index].title = e.target.value;
+                                setParsedTasks(newTasks);
+                              }}
+                              sx={{ '& .MuiOutlinedInput-root': { borderRadius: '6px' } }}
+                            />
+                          </Grid>
+                          <Grid size={{ xs: 3 }}>
+                            <TextField
+                              size="small"
+                              label="Punkte"
+                              type="number"
+                              value={task.maxPoints}
+                              onChange={(e) => {
+                                const newTasks = [...parsedTasks];
+                                newTasks[index].maxPoints = Number(e.target.value);
+                                setParsedTasks(newTasks);
+                                const totalPoints = newTasks.reduce(
+                                  (sum, t) => sum + (t.maxPoints || 0),
+                                  0
+                                );
+                                setExamMaxPoints(totalPoints);
+                              }}
+                              sx={{ '& .MuiOutlinedInput-root': { borderRadius: '6px' } }}
+                            />
+                          </Grid>
+                          <Grid size={{ xs: 1 }} sx={{ display: 'flex', justifyContent: 'center' }}>
+                            <IconButton
+                              size="small"
+                              color="error"
+                              onClick={() => {
+                                const newTasks = parsedTasks.filter((_, i) => i !== index);
+                                setParsedTasks(newTasks);
+                                const totalPoints = newTasks.reduce(
+                                  (sum, t) => sum + (t.maxPoints || 0),
+                                  0
+                                );
+                                setExamMaxPoints(totalPoints);
+                              }}
+                            >
+                              <CloseIcon sx={{ fontSize: '1.2rem' }} />
+                            </IconButton>
+                          </Grid>
+                        </Grid>
+                      ))}
+
+                      <Button
+                        size="small"
+                        startIcon={<AddIcon />}
+                        onClick={() => {
+                          const nextId = String(parsedTasks.length + 1);
+                          const newTasks = [
+                            ...parsedTasks,
+                            { taskId: nextId, title: `Aufgabe ${nextId}`, maxPoints: 5.0 },
+                          ];
+                          setParsedTasks(newTasks);
+                          const totalPoints = newTasks.reduce(
+                            (sum, t) => sum + (t.maxPoints || 0),
+                            0
+                          );
+                          setExamMaxPoints(totalPoints);
+                        }}
+                        sx={{
+                          alignSelf: 'flex-start',
+                          textTransform: 'none',
+                          fontWeight: 650,
+                          color: 'primary.main',
+                        }}
+                      >
+                        Aufgabe hinzufügen
+                      </Button>
+                    </Stack>
+                  </Box>
                 )}
               </Stack>
             </DialogContent>

@@ -34,10 +34,14 @@ import {
   DialogTitle,
   DialogContent,
   DialogActions,
+  IconButton,
+  Tooltip,
 } from '@mui/material';
 import CloudUploadIcon from '@mui/icons-material/CloudUpload';
 import DescriptionIcon from '@mui/icons-material/Description';
 import SettingsIcon from '@mui/icons-material/Settings';
+import CloseIcon from '@mui/icons-material/Close';
+import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import FlashOnIcon from '@mui/icons-material/FlashOn';
 import PersonIcon from '@mui/icons-material/Person';
 import HistoryIcon from '@mui/icons-material/History';
@@ -99,6 +103,52 @@ export default function Dashboard() {
   const [students, setStudents] = useState<DashboardStudent[]>([]);
   const [exams, setExams] = useState<DashboardExam[]>([]);
   const [recentSubmissions, setRecentSubmissions] = useState<DashboardSubmission[]>([]);
+  const [dismissedSubmissionIds, setDismissedSubmissionIds] = useState<string[]>(() => {
+    if (typeof window !== 'undefined') {
+      const stored = localStorage.getItem('gradeai_dismissed_submission_ids');
+      if (stored) {
+        try {
+          return JSON.parse(stored);
+        } catch (e) {
+          console.error(e);
+        }
+      }
+    }
+    return [];
+  });
+
+  const handleDismissSubmission = async (subId: string) => {
+    const sub = recentSubmissions.find((s) => s.id === subId);
+
+    const isCancelOrFailure =
+      sub && (sub.status === 'FAILED' || sub.status === 'PENDING' || sub.status === 'PROCESSING');
+
+    if (isCancelOrFailure) {
+      if (sub.status === 'PENDING' || sub.status === 'PROCESSING') {
+        if (!confirm('Möchtest du diese aktive Korrektur wirklich abbrechen und löschen?')) {
+          return;
+        }
+      }
+
+      try {
+        const res = await fetch(`/api/submissions/${subId}`, { method: 'DELETE' });
+        if (!res.ok) {
+          throw new Error('Abbrechen fehlgeschlagen.');
+        }
+        fetchRecentSubmissions(); // Neu laden aus DB, damit der Eintrag verschwindet
+        return;
+      } catch (err) {
+        console.error('Error canceling/deleting submission on dismiss:', err);
+        setError('Fehler beim Abbrechen der Korrektur.');
+        return;
+      }
+    }
+
+    // Für COMPLETED Einträge: Nur lokal ausblenden, in DB belassen
+    const updated = [...dismissedSubmissionIds, subId];
+    setDismissedSubmissionIds(updated);
+    localStorage.setItem('gradeai_dismissed_submission_ids', JSON.stringify(updated));
+  };
 
   // Selection states
   const [selectedClassId, setSelectedClassId] = useState<string>('');
@@ -118,7 +168,9 @@ export default function Dashboard() {
   const [rubricFile, setRubricFile] = useState<File | null>(null);
 
   // Correction configs
-  const [model, setModel] = useState<'gemini-3.5-flash' | 'gemini-3.1-pro'>('gemini-3.5-flash');
+  const [model, setModel] = useState<'gemini-3.5-flash' | 'gemini-3.1-pro-preview'>(
+    'gemini-3.5-flash'
+  );
   const [studentFiles, setStudentFiles] = useState<File[]>([]); // Supports bulk uploads
   const [assignState, setAssignState] = useState<Record<string, string>>({}); // Inline student assignments
 
@@ -127,6 +179,9 @@ export default function Dashboard() {
   const [loadingStep, setLoadingStep] = useState<string>('');
   const [error, setError] = useState<string>('');
   const [openConfirmOverwrite, setOpenConfirmOverwrite] = useState<boolean>(false);
+  const [replacingSubmissionId, setReplacingSubmissionId] = useState<string | null>(null);
+  const [globalExamsCount, setGlobalExamsCount] = useState<number>(0);
+  const [initialDataLoading, setInitialDataLoading] = useState<boolean>(true);
 
   // 4. Handle Class Change (Fetch Students & Exams for selected class)
   const handleClassChange = React.useCallback(async (classId: string) => {
@@ -195,8 +250,15 @@ export default function Dashboard() {
         const data = await res.json();
         setRecentSubmissions(data.submissions || []);
       }
+
+      // Refresh global exams count dynamically
+      const examsRes = await fetch('/api/exams');
+      if (examsRes.ok) {
+        const examsData = await examsRes.json();
+        setGlobalExamsCount(examsData.exams?.length || 0);
+      }
     } catch (err) {
-      console.error('Error fetching recent submissions:', err);
+      console.error('Error fetching recent submissions or global exams count:', err);
     }
   }, []);
 
@@ -219,8 +281,11 @@ export default function Dashboard() {
           setAuthChecking(false);
 
           if (!cached) {
-            fetchClasses();
-            fetchRecentSubmissions();
+            try {
+              await Promise.all([fetchClasses(), fetchRecentSubmissions()]);
+            } finally {
+              setInitialDataLoading(false);
+            }
           }
         }
       } catch (err) {
@@ -230,9 +295,12 @@ export default function Dashboard() {
     }
 
     if (cached) {
-      Promise.resolve().then(() => {
-        fetchClasses();
-        fetchRecentSubmissions();
+      Promise.resolve().then(async () => {
+        try {
+          await Promise.all([fetchClasses(), fetchRecentSubmissions()]);
+        } finally {
+          setInitialDataLoading(false);
+        }
       });
     }
 
@@ -330,6 +398,25 @@ export default function Dashboard() {
     }
   };
 
+  const handleReplaceSubmission = async (submissionId: string) => {
+    setError('');
+    setReplacingSubmissionId(submissionId);
+    try {
+      const res = await fetch(`/api/submissions/${submissionId}/replace`, {
+        method: 'POST',
+      });
+      if (!res.ok) {
+        const errorData = await res.json();
+        throw new Error(errorData.error || 'Ersetzen fehlgeschlagen.');
+      }
+      fetchRecentSubmissions();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Fehler beim Ersetzen.');
+    } finally {
+      setReplacingSubmissionId(null);
+    }
+  };
+
   // 6. Submit Grading job to API
   const startAnalysis = async (forceOverwrite?: boolean | React.MouseEvent) => {
     const shouldOverwrite = forceOverwrite === true;
@@ -424,12 +511,8 @@ export default function Dashboard() {
       setLoading(false);
       fetchRecentSubmissions();
 
-      // For single file, navigate to it, otherwise scroll to top to see queue
-      if (studentFiles.length === 1 && firstResult.submissionId) {
-        router.push(`/correct/${firstResult.submissionId}`);
-      } else {
-        window.scrollTo({ top: 0, behavior: 'smooth' });
-      }
+      // Immer auf dem Dashboard bleiben, damit die aktive Warteschlange direkt sichtbar ist und live mitverfolgt werden kann
+      window.scrollTo({ top: 0, behavior: 'smooth' });
     } catch (err) {
       if (err instanceof Error && err.message === 'DUPLICATE_SUBMISSION') {
         return; // Handled by overwrite modal
@@ -463,8 +546,17 @@ export default function Dashboard() {
 
   const totalClasses = classes.length;
   const totalStudents = classes.reduce((sum, cls) => sum + (cls._count?.students || 0), 0);
-  const _totalCompleted = recentSubmissions.length > 0 ? 12 : 0;
-  const overallAverage = recentSubmissions.length > 0 ? '4.86' : 'N/A';
+
+  // Calculate dynamic overall grade average of all completed submissions
+  let overallAverage = 'N/A';
+  const completedSubmissions = recentSubmissions.filter((sub) => sub.status === 'COMPLETED');
+  if (completedSubmissions.length > 0) {
+    const sumGrades = completedSubmissions.reduce(
+      (sum, sub) => sum + parseFloat(sub.grade || '1.0'),
+      0
+    );
+    overallAverage = (sumGrades / completedSubmissions.length).toFixed(2);
+  }
 
   return (
     <DashboardLayout>
@@ -494,7 +586,7 @@ export default function Dashboard() {
                     Klassen
                   </Typography>
                   <Typography variant="h5" sx={{ fontWeight: 800, color: '#0f172a' }}>
-                    {totalClasses}
+                    {initialDataLoading ? '...' : totalClasses}
                   </Typography>
                 </Box>
               </CardContent>
@@ -524,7 +616,7 @@ export default function Dashboard() {
                     Schüler/innen
                   </Typography>
                   <Typography variant="h5" sx={{ fontWeight: 800, color: '#0f172a' }}>
-                    {totalStudents}
+                    {initialDataLoading ? '...' : totalStudents}
                   </Typography>
                 </Box>
               </CardContent>
@@ -554,7 +646,7 @@ export default function Dashboard() {
                     Prüfungen
                   </Typography>
                   <Typography variant="h5" sx={{ fontWeight: 800, color: '#0f172a' }}>
-                    {totalClasses > 0 ? 5 : 0}
+                    {initialDataLoading ? '...' : globalExamsCount}
                   </Typography>
                 </Box>
               </CardContent>
@@ -584,7 +676,7 @@ export default function Dashboard() {
                     Notenschnitt (Ø)
                   </Typography>
                   <Typography variant="h5" sx={{ fontWeight: 800, color: '#0f172a' }}>
-                    {overallAverage}
+                    {initialDataLoading ? '...' : overallAverage}
                   </Typography>
                 </Box>
               </CardContent>
@@ -595,7 +687,11 @@ export default function Dashboard() {
         {/* Active Corrections Queue Tracker */}
         {recentSubmissions.some(
           (sub) =>
-            sub.status === 'PENDING' || sub.status === 'PROCESSING' || sub.status === 'FAILED'
+            (sub.status === 'PENDING' ||
+              sub.status === 'PROCESSING' ||
+              sub.status === 'FAILED' ||
+              sub.status === 'COMPLETED') &&
+            !dismissedSubmissionIds.includes(sub.id)
         ) && (
           <Card
             sx={{
@@ -607,38 +703,58 @@ export default function Dashboard() {
             }}
           >
             <CardContent sx={{ p: '24px' }}>
-              <Stack
-                direction="row"
-                sx={{ justifyContent: 'space-between', alignItems: 'center', mb: 2.5 }}
-              >
-                <Stack direction="row" spacing={1.5} sx={{ alignItems: 'center' }}>
-                  <CircularProgress size={22} thickness={5} sx={{ color: '#0284c7' }} />
-                  <Typography
-                    variant="h6"
-                    sx={{ fontWeight: 800, color: '#0369a1', letterSpacing: '-0.01em' }}
+              {(() => {
+                const activeCount = recentSubmissions.filter(
+                  (sub) => sub.status === 'PENDING' || sub.status === 'PROCESSING'
+                ).length;
+                return (
+                  <Stack
+                    direction="row"
+                    sx={{ justifyContent: 'space-between', alignItems: 'center', mb: 2.5 }}
                   >
-                    Aktive Korrekturen in der Warteschlange
-                  </Typography>
-                </Stack>
-                <Chip
-                  label={`${recentSubmissions.filter((sub) => sub.status === 'PENDING' || sub.status === 'PROCESSING').length} aktiv`}
-                  size="small"
-                  sx={{ backgroundColor: '#0284c7', color: '#ffffff', fontWeight: 'bold' }}
-                />
-              </Stack>
+                    <Stack direction="row" spacing={1.5} sx={{ alignItems: 'center' }}>
+                      {activeCount > 0 ? (
+                        <CircularProgress size={22} thickness={5} sx={{ color: '#0284c7' }} />
+                      ) : (
+                        <CheckCircleIcon sx={{ color: '#0369a1', fontSize: '1.5rem' }} />
+                      )}
+                      <Typography
+                        variant="h6"
+                        sx={{ fontWeight: 800, color: '#0369a1', letterSpacing: '-0.01em' }}
+                      >
+                        {activeCount > 0
+                          ? 'Aktive Korrekturen in der Warteschlange'
+                          : 'Kürzliche Korrekturen'}
+                      </Typography>
+                    </Stack>
+                    <Chip
+                      label={`${activeCount} aktiv`}
+                      size="small"
+                      sx={{
+                        backgroundColor: activeCount > 0 ? '#0284c7' : '#0369a1',
+                        color: '#ffffff',
+                        fontWeight: 'bold',
+                      }}
+                    />
+                  </Stack>
+                );
+              })()}
 
               <Stack spacing={1.5}>
                 {recentSubmissions
                   .filter(
                     (sub) =>
-                      sub.status === 'PENDING' ||
-                      sub.status === 'PROCESSING' ||
-                      sub.status === 'FAILED'
+                      (sub.status === 'PENDING' ||
+                        sub.status === 'PROCESSING' ||
+                        sub.status === 'FAILED' ||
+                        sub.status === 'COMPLETED') &&
+                      !dismissedSubmissionIds.includes(sub.id)
                   )
                   .slice(0, 5) // Show top 5
                   .map((job) => {
                     const isProcessing = job.status === 'PROCESSING';
                     const isFailed = job.status === 'FAILED';
+                    const isCompleted = job.status === 'COMPLETED';
 
                     return (
                       <Box
@@ -669,6 +785,10 @@ export default function Dashboard() {
                               thickness={5}
                               sx={{ color: 'primary.main' }}
                             />
+                          ) : isCompleted ? (
+                            <Box sx={{ color: 'success.main', display: 'flex' }}>
+                              <CheckCircleIcon />
+                            </Box>
                           ) : (
                             <Box
                               sx={{
@@ -708,7 +828,9 @@ export default function Dashboard() {
                                 ? `Fehlgeschlagen: ${job.errorMessage || 'Unbekannter KI-Fehler'}`
                                 : isProcessing
                                   ? 'KI analysiert Lösungswege auf Folgefehler...'
-                                  : 'In der Warteschlange...'}
+                                  : isCompleted
+                                    ? 'Korrektur abgeschlossen. Resultate im Workspace verfügbar.'
+                                    : 'In der Warteschlange...'}
                             </Typography>
                           </Box>
                         </Stack>
@@ -716,12 +838,53 @@ export default function Dashboard() {
                         <Stack direction="row" spacing={1.5} sx={{ alignItems: 'center' }}>
                           <Chip
                             label={
-                              isFailed ? 'Fehler' : isProcessing ? 'Wird korrigiert' : 'Wartend'
+                              isFailed
+                                ? 'Fehler'
+                                : isProcessing
+                                  ? 'Wird korrigiert'
+                                  : isCompleted
+                                    ? 'Fertig'
+                                    : 'Wartend'
                             }
                             size="small"
-                            color={isFailed ? 'error' : isProcessing ? 'info' : 'warning'}
+                            color={
+                              isFailed
+                                ? 'error'
+                                : isProcessing
+                                  ? 'info'
+                                  : isCompleted
+                                    ? 'success'
+                                    : 'warning'
+                            }
                             sx={{ fontWeight: 'bold' }}
                           />
+                          {isFailed && job.errorMessage?.includes('bereits eine Korrektur') && (
+                            <Button
+                              size="small"
+                              variant="contained"
+                              color="error"
+                              disabled={replacingSubmissionId === job.id}
+                              onClick={() => handleReplaceSubmission(job.id)}
+                              startIcon={
+                                replacingSubmissionId === job.id ? (
+                                  <CircularProgress size={16} color="inherit" />
+                                ) : (
+                                  <AutoAwesomeIcon />
+                                )
+                              }
+                              sx={{
+                                textTransform: 'none',
+                                fontWeight: 700,
+                                borderRadius: '8px',
+                                backgroundColor: '#dc2626',
+                                '&:hover': {
+                                  backgroundColor: '#b91c1c',
+                                },
+                              }}
+                            >
+                              Korrektur ersetzen
+                            </Button>
+                          )}
                           <Link
                             href={`/correct/${job.id}`}
                             passHref
@@ -735,6 +898,29 @@ export default function Dashboard() {
                               Workspace öffnen
                             </Button>
                           </Link>
+                          <Tooltip
+                            title={
+                              isCompleted
+                                ? 'Aus Liste ausblenden'
+                                : isFailed
+                                  ? 'Fehlgeschlagenen Job löschen'
+                                  : 'Korrektur abbrechen & löschen'
+                            }
+                          >
+                            <IconButton
+                              size="small"
+                              onClick={() => handleDismissSubmission(job.id)}
+                              sx={{
+                                color: 'text.secondary',
+                                '&:hover': {
+                                  color: 'error.main',
+                                  backgroundColor: '#fee2e2',
+                                },
+                              }}
+                            >
+                              <CloseIcon sx={{ fontSize: '1.1rem' }} />
+                            </IconButton>
+                          </Tooltip>
                         </Stack>
                       </Box>
                     );
@@ -1391,7 +1577,7 @@ export default function Dashboard() {
                   <RadioGroup
                     value={model}
                     onChange={(e) => {
-                      setModel(e.target.value as 'gemini-3.5-flash' | 'gemini-3.1-pro');
+                      setModel(e.target.value as 'gemini-3.5-flash' | 'gemini-3.1-pro-preview');
                     }}
                   >
                     <Stack spacing={1.5}>
@@ -1433,18 +1619,18 @@ export default function Dashboard() {
                           padding: '12px',
                           borderRadius: '8px',
                           border:
-                            model === 'gemini-3.1-pro'
+                            model === 'gemini-3.1-pro-preview'
                               ? '1.5px solid #1b77d1'
                               : '1px solid #e2e8f0',
-                          background: model === 'gemini-3.1-pro' ? '#f0f7ff' : '#ffffff',
+                          background: model === 'gemini-3.1-pro-preview' ? '#f0f7ff' : '#ffffff',
                           cursor: 'pointer',
                           '&:hover': { borderColor: '#1b77d1' },
                         }}
                       >
-                        <Radio value="gemini-3.1-pro" size="small" />
+                        <Radio value="gemini-3.1-pro-preview" size="small" />
                         <Box>
                           <Typography variant="body2" sx={{ fontWeight: 700 }}>
-                            Gemini 3.1 Pro
+                            Gemini 3.1 Pro (Preview)
                           </Typography>
                           <Typography
                             variant="caption"
@@ -1484,7 +1670,7 @@ export default function Dashboard() {
         </Grid>
 
         {/* Table of Recent Submissions (Gradings) */}
-        {recentSubmissions.length > 0 && (
+        {recentSubmissions.filter((sub) => sub.status === 'COMPLETED').length > 0 && (
           <Box sx={{ mt: 4 }}>
             <Stack direction="row" spacing={1.5} sx={{ alignItems: 'center', mb: 2 }}>
               <HistoryIcon sx={{ color: '#0f172a' }} />
@@ -1512,123 +1698,129 @@ export default function Dashboard() {
                   </TableRow>
                 </TableHead>
                 <TableBody>
-                  {recentSubmissions.map((sub) => (
-                    <TableRow
-                      key={sub.id}
-                      sx={{ '&:last-child td, &:last-child th': { border: 0 } }}
-                    >
-                      <TableCell sx={{ fontWeight: 600 }}>
-                        {sub.studentName !== 'Nicht zugeordnet' ? (
-                          sub.studentName
-                        ) : (
-                          <Box
-                            sx={{ display: 'flex', alignItems: 'center', gap: '8px' }}
-                            onClick={(e) => e.stopPropagation()}
-                          >
-                            <FormControl size="small" sx={{ minWidth: '160px' }}>
-                              <Select
-                                value={assignState[sub.id] || ''}
-                                onChange={(e) =>
-                                  setAssignState((prev) => ({ ...prev, [sub.id]: e.target.value }))
-                                }
-                                displayEmpty
-                                sx={{ height: '32px', fontSize: '0.85rem', borderRadius: '6px' }}
-                              >
-                                <MenuItem value="" disabled>
-                                  <em>Schüler zuordnen...</em>
-                                </MenuItem>
-                                {students.map((st) => (
-                                  <MenuItem key={st.id} value={st.id}>
-                                    {st.name}
-                                  </MenuItem>
-                                ))}
-                              </Select>
-                            </FormControl>
-                            <Button
-                              size="small"
-                              variant="contained"
-                              disabled={!assignState[sub.id]}
-                              onClick={() => handleManualAssign(sub.id)}
-                              sx={{
-                                minWidth: 'auto',
-                                px: 1.5,
-                                py: 0.5,
-                                height: '32px',
-                                textTransform: 'none',
-                                borderRadius: '6px',
-                                fontWeight: 600,
-                              }}
-                            >
-                              Zuordnen
-                            </Button>
-                          </Box>
-                        )}
-                      </TableCell>
-                      <TableCell>{sub.examTitle}</TableCell>
-                      <TableCell>
-                        <Chip
-                          label={sub.subject}
-                          size="small"
-                          sx={{ backgroundColor: '#e3f2fd', color: '#1b77d1', fontWeight: 600 }}
-                        />
-                      </TableCell>
-                      <TableCell sx={{ fontWeight: 600 }}>{sub.points}</TableCell>
-                      <TableCell>
-                        {sub.status === 'COMPLETED' ? (
-                          <Chip
-                            label={sub.grade}
-                            size="small"
-                            sx={{
-                              backgroundColor: parseFloat(sub.grade) >= 4.0 ? '#1b77d1' : '#dc2626',
-                              color: '#ffffff',
-                              fontWeight: 'bold',
-                              borderRadius: '6px',
-                            }}
-                          />
-                        ) : sub.status === 'PROCESSING' ? (
-                          <Chip
-                            label="Läuft..."
-                            size="small"
-                            color="info"
-                            variant="outlined"
-                            sx={{ fontWeight: 'bold' }}
-                          />
-                        ) : sub.status === 'FAILED' ? (
-                          <Chip
-                            label="Fehler"
-                            size="small"
-                            color="error"
-                            variant="outlined"
-                            sx={{ fontWeight: 'bold' }}
-                          />
-                        ) : (
-                          <Chip
-                            label="Wartend"
-                            size="small"
-                            color="warning"
-                            variant="outlined"
-                            sx={{ fontWeight: 'bold' }}
-                          />
-                        )}
-                      </TableCell>
-                      <TableCell>{sub.date}</TableCell>
-                      <TableCell sx={{ textAlign: 'right' }}>
-                        <Link
-                          href={`/correct/${sub.id}`}
-                          passHref
-                          style={{ textDecoration: 'none' }}
+                  {recentSubmissions
+                    .filter((sub) => sub.status === 'COMPLETED')
+                    .map((sub) => {
+                      const isUnassigned = sub.studentName === 'Nicht zugeordnet';
+                      return (
+                        <TableRow
+                          key={sub.id}
+                          sx={{
+                            backgroundColor: isUnassigned ? '#fffbeb' : 'inherit',
+                            '&:hover': {
+                              backgroundColor: isUnassigned ? '#fff7ed' : '#f8fafc',
+                            },
+                            '&:last-child td, &:last-child th': { border: 0 },
+                          }}
                         >
-                          <Button
-                            variant="outlined"
-                            size="small"
-                            sx={{ textTransform: 'none', fontWeight: 600 }}
-                          >
-                            Workspace öffnen
-                          </Button>
-                        </Link>
-                      </TableCell>
-                    </TableRow>
-                  ))}
+                          <TableCell sx={{ fontWeight: 600 }}>
+                            {sub.studentName !== 'Nicht zugeordnet' ? (
+                              sub.studentName
+                            ) : (
+                              <Stack spacing={1} sx={{ py: 1 }}>
+                                <Chip
+                                  label="Zuordnung ausstehend"
+                                  size="small"
+                                  sx={{
+                                    backgroundColor: '#fef3c7',
+                                    color: '#d97706',
+                                    fontWeight: 'bold',
+                                    alignSelf: 'flex-start',
+                                    borderRadius: '6px',
+                                  }}
+                                />
+                                <Box
+                                  sx={{ display: 'flex', alignItems: 'center', gap: '8px' }}
+                                  onClick={(e) => e.stopPropagation()}
+                                >
+                                  <FormControl size="small" sx={{ minWidth: '160px' }}>
+                                    <Select
+                                      value={assignState[sub.id] || ''}
+                                      onChange={(e) =>
+                                        setAssignState((prev) => ({
+                                          ...prev,
+                                          [sub.id]: e.target.value,
+                                        }))
+                                      }
+                                      displayEmpty
+                                      sx={{
+                                        height: '32px',
+                                        fontSize: '0.85rem',
+                                        borderRadius: '6px',
+                                      }}
+                                    >
+                                      <MenuItem value="" disabled>
+                                        <em>Schüler auswählen...</em>
+                                      </MenuItem>
+                                      {students.map((st) => (
+                                        <MenuItem key={st.id} value={st.id}>
+                                          {st.name}
+                                        </MenuItem>
+                                      ))}
+                                    </Select>
+                                  </FormControl>
+                                  <Button
+                                    size="small"
+                                    variant="contained"
+                                    disabled={!assignState[sub.id]}
+                                    onClick={() => handleManualAssign(sub.id)}
+                                    sx={{
+                                      minWidth: 'auto',
+                                      px: 1.5,
+                                      py: 0.5,
+                                      height: '32px',
+                                      textTransform: 'none',
+                                      borderRadius: '6px',
+                                      fontWeight: 600,
+                                    }}
+                                  >
+                                    Zuordnen
+                                  </Button>
+                                </Box>
+                              </Stack>
+                            )}
+                          </TableCell>
+                          <TableCell>{sub.examTitle}</TableCell>
+                          <TableCell>
+                            <Chip
+                              label={sub.subject}
+                              size="small"
+                              sx={{ backgroundColor: '#e3f2fd', color: '#1b77d1', fontWeight: 600 }}
+                            />
+                          </TableCell>
+                          <TableCell sx={{ fontWeight: 600 }}>{sub.points}</TableCell>
+                          <TableCell>
+                            <Chip
+                              label={sub.grade}
+                              size="small"
+                              sx={{
+                                backgroundColor:
+                                  parseFloat(sub.grade) >= 4.0 ? '#1b77d1' : '#dc2626',
+                                color: '#ffffff',
+                                fontWeight: 'bold',
+                                borderRadius: '6px',
+                              }}
+                            />
+                          </TableCell>
+                          <TableCell>{sub.date}</TableCell>
+                          <TableCell sx={{ textAlign: 'right' }}>
+                            <Link
+                              href={`/correct/${sub.id}`}
+                              passHref
+                              style={{ textDecoration: 'none' }}
+                            >
+                              <Button
+                                variant="outlined"
+                                size="small"
+                                sx={{ textTransform: 'none', fontWeight: 600 }}
+                              >
+                                Workspace öffnen
+                              </Button>
+                            </Link>
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })}
                 </TableBody>
               </Table>
             </TableContainer>
@@ -1715,8 +1907,11 @@ export default function Dashboard() {
         <DialogContent>
           <Typography variant="body2" sx={{ color: 'text.secondary', lineHeight: 1.5 }}>
             Für diese/n Schüler/in existiert bereits eine Korrektur für diese Prüfung. Wenn du
-            fortfährst, wird die **bestehende Korrektur komplett überschrieben**. Alle manuellen
-            Änderungen und Lehrer-Kommentare gehen dabei unwiderruflich verloren.
+            fortfährst, wird die{' '}
+            <Box component="span" sx={{ fontWeight: 'bold', color: 'text.primary' }}>
+              bestehende Korrektur komplett überschrieben
+            </Box>
+            . Alle manuellen Änderungen und Lehrer-Kommentare gehen dabei unwiderruflich verloren.
           </Typography>
         </DialogContent>
         <DialogActions sx={{ p: 2, pt: 1 }}>

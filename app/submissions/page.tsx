@@ -26,6 +26,7 @@ import {
   MenuItem,
   Grid,
   IconButton,
+  Stack,
 } from '@mui/material';
 import HistoryIcon from '@mui/icons-material/History';
 import SearchIcon from '@mui/icons-material/Search';
@@ -73,7 +74,6 @@ export default function SubmissionsPage() {
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedClassId, setSelectedClassId] = useState('ALL');
   const [selectedExamId, setSelectedExamId] = useState('ALL');
-  const [selectedStatus, setSelectedStatus] = useState('ALL');
 
   // Fetch all data
   const fetchData = React.useCallback(async () => {
@@ -138,19 +138,19 @@ export default function SubmissionsPage() {
   };
 
   // Filter Logic
-  const filteredSubmissions = submissions.filter((sub) => {
-    // 1. Search Query (name or exam title)
-    const matchSearch =
-      sub.studentName.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      sub.examTitle.toLowerCase().includes(searchQuery.toLowerCase());
+  const filteredSubmissions = submissions
+    .filter((sub) => sub.status === 'COMPLETED')
+    .filter((sub) => {
+      // 1. Search Query (name or exam title)
+      const matchSearch =
+        sub.studentName.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        sub.examTitle.toLowerCase().includes(searchQuery.toLowerCase());
 
-    // For now, let's write the filters in a flexible way:
-    const matchClassId = selectedClassId === 'ALL' || sub.classId === selectedClassId;
-    const matchExamId = selectedExamId === 'ALL' || sub.examId === selectedExamId;
-    const matchStatus = selectedStatus === 'ALL' || sub.status === selectedStatus;
+      const matchClassId = selectedClassId === 'ALL' || sub.classId === selectedClassId;
+      const matchExamId = selectedExamId === 'ALL' || sub.examId === selectedExamId;
 
-    return matchSearch && matchClassId && matchExamId && matchStatus;
-  });
+      return matchSearch && matchClassId && matchExamId;
+    });
 
   return (
     <DashboardLayout>
@@ -200,7 +200,7 @@ export default function SubmissionsPage() {
               </Grid>
 
               {/* Class Filter */}
-              <Grid size={{ xs: 12, sm: 4, md: 3 }}>
+              <Grid size={{ xs: 12, sm: 6, md: 4 }}>
                 <FormControl fullWidth size="small">
                   <InputLabel id="class-filter-label">Klasse</InputLabel>
                   <Select
@@ -224,7 +224,7 @@ export default function SubmissionsPage() {
               </Grid>
 
               {/* Exam Filter */}
-              <Grid size={{ xs: 12, sm: 4, md: 3 }}>
+              <Grid size={{ xs: 12, sm: 6, md: 4 }}>
                 <FormControl fullWidth size="small">
                   <InputLabel id="exam-filter-label">Prüfung</InputLabel>
                   <Select
@@ -242,24 +242,6 @@ export default function SubmissionsPage() {
                           {ex.title.split(':')[0]} ({ex.className})
                         </MenuItem>
                       ))}
-                  </Select>
-                </FormControl>
-              </Grid>
-
-              {/* Status Filter */}
-              <Grid size={{ xs: 12, sm: 4, md: 2 }}>
-                <FormControl fullWidth size="small">
-                  <InputLabel id="status-filter-label">Status</InputLabel>
-                  <Select
-                    labelId="status-filter-label"
-                    value={selectedStatus}
-                    label="Status"
-                    onChange={(e) => setSelectedStatus(e.target.value)}
-                    sx={{ borderRadius: '8px' }}
-                  >
-                    <MenuItem value="ALL">Alle Status</MenuItem>
-                    <MenuItem value="COMPLETED">Abgeschlossen</MenuItem>
-                    <MenuItem value="DRAFT">Entwurf</MenuItem>
                   </Select>
                 </FormControl>
               </Grid>
@@ -304,50 +286,69 @@ export default function SubmissionsPage() {
                   <TableCell sx={{ fontWeight: 'bold' }}>Fach</TableCell>
                   <TableCell sx={{ fontWeight: 'bold' }}>Punkte</TableCell>
                   <TableCell sx={{ fontWeight: 'bold' }}>Note</TableCell>
-                  <TableCell sx={{ fontWeight: 'bold' }}>Status</TableCell>
                   <TableCell sx={{ fontWeight: 'bold' }}>Datum</TableCell>
                   <TableCell sx={{ fontWeight: 'bold', textAlign: 'right' }}>Aktion</TableCell>
                 </TableRow>
               </TableHead>
               <TableBody>
-                {filteredSubmissions.map((sub) => (
-                  <TableRow key={sub.id} sx={{ '&:last-child td, &:last-child th': { border: 0 } }}>
-                    <TableCell sx={{ fontWeight: 700 }}>
-                      {sub.studentId ? (
-                        <Link
-                          href={`/students/${sub.studentId}`}
-                          style={{ textDecoration: 'none', color: '#1b77d1' }}
-                        >
-                          {sub.studentName}
-                        </Link>
-                      ) : (
-                        <Typography
-                          variant="body2"
-                          sx={{
-                            color: '#d97706',
-                            fontStyle: 'italic',
-                            fontWeight: 700,
-                            display: 'flex',
-                            alignItems: 'center',
-                            gap: '4px',
-                          }}
-                        >
-                          ⚠️ Nicht zugeordnet
-                        </Typography>
-                      )}
-                    </TableCell>
-                    <TableCell sx={{ fontWeight: 600 }}>{sub.className}</TableCell>
-                    <TableCell>{sub.examTitle}</TableCell>
-                    <TableCell>
-                      <Chip
-                        label={sub.subject}
-                        size="small"
-                        sx={{ backgroundColor: '#e3f2fd', color: '#1b77d1', fontWeight: 650 }}
-                      />
-                    </TableCell>
-                    <TableCell sx={{ fontWeight: 600 }}>{sub.points}</TableCell>
-                    <TableCell>
-                      {sub.status === 'COMPLETED' ? (
+                {filteredSubmissions.map((sub) => {
+                  const isUnassigned = !sub.studentId;
+                  return (
+                    <TableRow
+                      key={sub.id}
+                      sx={{
+                        backgroundColor: isUnassigned ? '#fffbeb' : 'inherit',
+                        '&:hover': {
+                          backgroundColor: isUnassigned ? '#fff7ed' : '#f8fafc',
+                        },
+                        '&:last-child td, &:last-child th': { border: 0 },
+                      }}
+                    >
+                      <TableCell sx={{ fontWeight: 700 }}>
+                        {sub.studentId ? (
+                          <Link
+                            href={`/students/${sub.studentId}`}
+                            style={{ textDecoration: 'none', color: '#1b77d1' }}
+                          >
+                            {sub.studentName}
+                          </Link>
+                        ) : (
+                          <Stack spacing={0.5} sx={{ py: 0.5 }}>
+                            <Chip
+                              label="Zuordnung ausstehend"
+                              size="small"
+                              sx={{
+                                backgroundColor: '#fef3c7',
+                                color: '#d97706',
+                                fontWeight: 'bold',
+                                alignSelf: 'flex-start',
+                                borderRadius: '6px',
+                              }}
+                            />
+                            <Typography
+                              variant="caption"
+                              sx={{
+                                color: '#b45309',
+                                fontStyle: 'italic',
+                                fontWeight: 600,
+                              }}
+                            >
+                              (Bitte auf dem Dashboard zuordnen)
+                            </Typography>
+                          </Stack>
+                        )}
+                      </TableCell>
+                      <TableCell sx={{ fontWeight: 600 }}>{sub.className}</TableCell>
+                      <TableCell>{sub.examTitle}</TableCell>
+                      <TableCell>
+                        <Chip
+                          label={sub.subject}
+                          size="small"
+                          sx={{ backgroundColor: '#e3f2fd', color: '#1b77d1', fontWeight: 650 }}
+                        />
+                      </TableCell>
+                      <TableCell sx={{ fontWeight: 600 }}>{sub.points}</TableCell>
+                      <TableCell>
                         <Chip
                           label={sub.grade}
                           size="small"
@@ -358,82 +359,43 @@ export default function SubmissionsPage() {
                             borderRadius: '6px',
                           }}
                         />
-                      ) : (
-                        <Typography variant="body2" sx={{ color: 'text.secondary' }}>
-                          —
-                        </Typography>
-                      )}
-                    </TableCell>
-                    <TableCell>
-                      {sub.status === 'COMPLETED' ? (
-                        <Chip
-                          label="Abgeschlossen"
-                          size="small"
-                          color="success"
-                          variant="outlined"
-                          sx={{ fontWeight: 'bold' }}
-                        />
-                      ) : sub.status === 'PROCESSING' ? (
-                        <Chip
-                          label="Wird korrigiert..."
-                          size="small"
-                          color="info"
-                          variant="outlined"
-                          sx={{ fontWeight: 'bold' }}
-                        />
-                      ) : sub.status === 'FAILED' ? (
-                        <Chip
-                          label="Fehlgeschlagen"
-                          size="small"
-                          color="error"
-                          variant="outlined"
-                          sx={{ fontWeight: 'bold' }}
-                        />
-                      ) : (
-                        <Chip
-                          label="Warteschlange"
-                          size="small"
-                          color="warning"
-                          variant="outlined"
-                          sx={{ fontWeight: 'bold' }}
-                        />
-                      )}
-                    </TableCell>
-                    <TableCell>{sub.date}</TableCell>
-                    <TableCell sx={{ textAlign: 'right' }}>
-                      <Box
-                        sx={{
-                          display: 'flex',
-                          gap: '8px',
-                          justifyContent: 'flex-end',
-                          alignItems: 'center',
-                        }}
-                      >
-                        <Link
-                          href={`/correct/${sub.id}`}
-                          passHref
-                          style={{ textDecoration: 'none' }}
+                      </TableCell>
+                      <TableCell>{sub.date}</TableCell>
+                      <TableCell sx={{ textAlign: 'right' }}>
+                        <Box
+                          sx={{
+                            display: 'flex',
+                            gap: '8px',
+                            justifyContent: 'flex-end',
+                            alignItems: 'center',
+                          }}
                         >
-                          <Button
-                            variant="outlined"
-                            size="small"
-                            sx={{ textTransform: 'none', fontWeight: 600 }}
+                          <Link
+                            href={`/correct/${sub.id}`}
+                            passHref
+                            style={{ textDecoration: 'none' }}
                           >
-                            Workspace öffnen
-                          </Button>
-                        </Link>
-                        <IconButton
-                          size="small"
-                          color="error"
-                          onClick={() => handleDeleteSubmission(sub.id)}
-                          title="Korrektur löschen / abbrechen"
-                        >
-                          <DeleteIcon fontSize="small" />
-                        </IconButton>
-                      </Box>
-                    </TableCell>
-                  </TableRow>
-                ))}
+                            <Button
+                              variant="outlined"
+                              size="small"
+                              sx={{ textTransform: 'none', fontWeight: 600 }}
+                            >
+                              Workspace öffnen
+                            </Button>
+                          </Link>
+                          <IconButton
+                            size="small"
+                            color="error"
+                            onClick={() => handleDeleteSubmission(sub.id)}
+                            title="Korrektur löschen / abbrechen"
+                          >
+                            <DeleteIcon fontSize="small" />
+                          </IconButton>
+                        </Box>
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
               </TableBody>
             </Table>
           </TableContainer>

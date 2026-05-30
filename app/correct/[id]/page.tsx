@@ -23,6 +23,12 @@ import {
   CircularProgress,
   FormControlLabel,
   Checkbox,
+  IconButton,
+  Tooltip,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
 } from '@mui/material';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import PrintIcon from '@mui/icons-material/Print';
@@ -31,6 +37,7 @@ import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import WarningIcon from '@mui/icons-material/Warning';
 import ErrorIcon from '@mui/icons-material/Error';
 import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome';
+import AddIcon from '@mui/icons-material/Add';
 
 import { ExamCorrectionResult, CorrectedTask, CorrectedStep } from '../../../lib/gemini';
 
@@ -52,6 +59,53 @@ export default function CorrectWorkspace() {
   const [noSession, setNoSession] = useState<boolean>(false);
   const [leftPanelTab, setLeftPanelTab] = useState<'transcript' | 'scan'>('transcript');
   const [saveStatus, setSaveStatus] = useState<'saved' | 'saving' | 'error'>('saved');
+
+  const [openAddTask, setOpenAddTask] = useState<boolean>(false);
+  const [addTaskTaskId, setAddTaskTaskId] = useState<string>('');
+  const [addTaskTitle, setAddTaskTitle] = useState<string>('');
+  const [addTaskMaxPoints, setAddTaskMaxPoints] = useState<number>(5);
+  const [addTaskLoading, setAddTaskLoading] = useState<boolean>(false);
+  const [addTaskError, setAddTaskError] = useState<string>('');
+
+  const handleAddTask = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!addTaskTaskId.trim() || !addTaskTitle.trim() || addTaskMaxPoints === undefined) {
+      setAddTaskError('Bitte fülle alle Felder aus.');
+      return;
+    }
+
+    setAddTaskLoading(true);
+    setAddTaskError('');
+
+    try {
+      const res = await fetch(`/api/submissions/${id}/add-task`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          taskId: addTaskTaskId.trim(),
+          title: addTaskTitle.trim(),
+          maxPoints: Number(addTaskMaxPoints),
+        }),
+      });
+
+      const result = await res.json();
+      if (!res.ok) {
+        throw new Error(result.error || 'Hinzufügen fehlgeschlagen.');
+      }
+
+      setOpenAddTask(false);
+      setAddTaskTaskId('');
+      setAddTaskTitle('');
+      setAddTaskMaxPoints(5);
+
+      // Reload page data
+      window.location.reload();
+    } catch (err) {
+      setAddTaskError(err instanceof Error ? err.message : 'Fehler beim Hinzufügen der Aufgabe.');
+    } finally {
+      setAddTaskLoading(false);
+    }
+  };
 
   // Debounced auto-save function to prevent network storms
   const saveTimeoutRef = React.useRef<NodeJS.Timeout | null>(null);
@@ -788,17 +842,26 @@ export default function CorrectWorkspace() {
                   position: 'relative',
                 }}
               >
-                <Image
-                  src={data.studentExamUrl}
-                  alt="Original Schülerarbeit Scan"
-                  fill
-                  style={{
-                    objectFit: 'contain',
-                    padding: '12px',
-                  }}
-                  sizes="(max-width: 1200px) 100vw, 50vw"
-                  priority
-                />
+                {data.studentExamUrl.toLowerCase().endsWith('.pdf') ? (
+                  <iframe
+                    src={data.studentExamUrl}
+                    width="100%"
+                    height="100%"
+                    style={{ border: 'none', borderRadius: '8px' }}
+                  />
+                ) : (
+                  <Image
+                    src={data.studentExamUrl}
+                    alt="Original Schülerarbeit Scan"
+                    fill
+                    style={{
+                      objectFit: 'contain',
+                      padding: '12px',
+                    }}
+                    sizes="(max-width: 1200px) 100vw, 50vw"
+                    priority
+                  />
+                )}
               </Box>
             ) : (
               /* Premium Simulated Scanned Sheet with red grading ink */
@@ -993,62 +1056,93 @@ export default function CorrectWorkspace() {
             }}
           >
             {/* Task selector Tabs */}
-            <Tabs
-              value={activeTaskIndex}
-              onChange={(_, val) => setActiveTaskIndex(val)}
-              variant="fullWidth"
+            <Stack
+              direction="row"
               sx={{
-                background: '#ffffff',
+                alignItems: 'center',
                 borderBottom: '1px solid #e2e8f0',
-                '& .MuiTabs-indicator': {
-                  backgroundColor: '#1b77d1',
-                  height: '3px',
-                },
-                '& .MuiTab-root': {
-                  color: 'text.secondary',
-                  fontWeight: 600,
-                  fontSize: '0.85rem',
-                  borderRight: '1px solid #e2e8f0',
-                  textTransform: 'none',
-                  minHeight: '52px',
-                  transition: 'all 0.2s ease',
-                  '&.Mui-selected': {
-                    color: '#1b77d1',
-                    backgroundColor: '#f8fafc',
-                    fontWeight: 800,
-                  },
-                  '&:last-of-type': {
-                    borderRight: 'none',
-                  },
-                },
+                background: '#ffffff',
               }}
             >
-              {data.aufgaben.map((t, idx) => (
-                <Tab
-                  key={t.aufgabeId}
-                  label={
-                    <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
-                      <Typography variant="body2" sx={{ fontWeight: 'inherit' }}>
-                        Aufg. {t.aufgabeId}
-                      </Typography>
-                      <Chip
-                        label={`${t.erzieltePunkte.toFixed(1)} P.`}
-                        size="small"
-                        sx={{
-                          height: '20px',
-                          fontSize: '0.75rem',
-                          fontWeight: 700,
-                          backgroundColor: activeTaskIndex === idx ? '#e3f2fd' : '#f1f5f9',
-                          color: activeTaskIndex === idx ? '#1b77d1' : 'text.secondary',
-                          border: activeTaskIndex === idx ? '1px solid #1b77d1' : 'none',
-                          transition: 'all 0.2s ease',
-                        }}
-                      />
-                    </Stack>
-                  }
-                />
-              ))}
-            </Tabs>
+              <Tabs
+                value={activeTaskIndex}
+                onChange={(_, val) => setActiveTaskIndex(val)}
+                variant="scrollable"
+                scrollButtons="auto"
+                sx={{
+                  flex: 1,
+                  '& .MuiTabs-indicator': {
+                    backgroundColor: '#1b77d1',
+                    height: '3px',
+                  },
+                  '& .MuiTab-root': {
+                    color: 'text.secondary',
+                    fontWeight: 600,
+                    fontSize: '0.85rem',
+                    borderRight: '1px solid #e2e8f0',
+                    textTransform: 'none',
+                    minHeight: '52px',
+                    transition: 'all 0.2s ease',
+                    '&.Mui-selected': {
+                      color: '#1b77d1',
+                      backgroundColor: '#f8fafc',
+                      fontWeight: 800,
+                    },
+                  },
+                }}
+              >
+                {data.aufgaben.map((t, idx) => (
+                  <Tab
+                    key={t.aufgabeId}
+                    label={
+                      <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
+                        <Typography variant="body2" sx={{ fontWeight: 'inherit' }}>
+                          Aufg. {t.aufgabeId}
+                        </Typography>
+                        <Chip
+                          label={`${t.erzieltePunkte.toFixed(1)} P.`}
+                          size="small"
+                          sx={{
+                            height: '20px',
+                            fontSize: '0.75rem',
+                            fontWeight: 700,
+                            backgroundColor: activeTaskIndex === idx ? '#e3f2fd' : '#f1f5f9',
+                            color: activeTaskIndex === idx ? '#1b77d1' : 'text.secondary',
+                            border: activeTaskIndex === idx ? '1px solid #1b77d1' : 'none',
+                            transition: 'all 0.2s ease',
+                          }}
+                        />
+                      </Stack>
+                    }
+                  />
+                ))}
+              </Tabs>
+              <Box
+                sx={{
+                  px: 2,
+                  borderLeft: '1px solid #e2e8f0',
+                  height: '52px',
+                  display: 'flex',
+                  alignItems: 'center',
+                }}
+              >
+                <Tooltip title="Fehlende Aufgabe hinzufügen">
+                  <IconButton
+                    color="primary"
+                    onClick={() => setOpenAddTask(true)}
+                    sx={{
+                      backgroundColor: '#f0f7ff',
+                      '&:hover': { backgroundColor: '#e3f2fd' },
+                      width: '36px',
+                      height: '36px',
+                      borderRadius: '8px',
+                    }}
+                  >
+                    <AddIcon sx={{ fontSize: '1.25rem' }} />
+                  </IconButton>
+                </Tooltip>
+              </Box>
+            </Stack>
 
             {/* Graded steps & Comments content */}
             <Box
@@ -1509,6 +1603,72 @@ export default function CorrectWorkspace() {
           Korrekturen erfolgreich gespeichert!
         </Alert>
       </Snackbar>
+
+      {/* Dialog for adding missing tasks */}
+      <Dialog open={openAddTask} onClose={() => setOpenAddTask(false)} maxWidth="xs" fullWidth>
+        <form onSubmit={handleAddTask}>
+          <DialogTitle sx={{ fontWeight: 800, color: '#0f172a', letterSpacing: '-0.01em' }}>
+            Fehlende Aufgabe erfassen
+          </DialogTitle>
+          <DialogContent>
+            <Stack spacing={2} sx={{ mt: 1 }}>
+              {addTaskError && <Alert severity="error">{addTaskError}</Alert>}
+              <TextField
+                label="Aufgaben-ID / Nummer"
+                placeholder="z.B. 2"
+                fullWidth
+                variant="outlined"
+                value={addTaskTaskId}
+                onChange={(e) => setAddTaskTaskId(e.target.value)}
+                required
+                autoFocus
+                sx={{ '& .MuiOutlinedInput-root': { borderRadius: '8px' } }}
+              />
+              <TextField
+                label="Aufgabenbezeichnung / Titel"
+                placeholder="z.B. Aufgabe 2"
+                fullWidth
+                variant="outlined"
+                value={addTaskTitle}
+                onChange={(e) => setAddTaskTitle(e.target.value)}
+                required
+                sx={{ '& .MuiOutlinedInput-root': { borderRadius: '8px' } }}
+              />
+              <TextField
+                label="Maximale Punkte"
+                type="number"
+                fullWidth
+                variant="outlined"
+                value={addTaskMaxPoints}
+                onChange={(e) => setAddTaskMaxPoints(Number(e.target.value))}
+                required
+                sx={{ '& .MuiOutlinedInput-root': { borderRadius: '8px' } }}
+              />
+            </Stack>
+          </DialogContent>
+          <DialogActions sx={{ p: 2, pt: 0 }}>
+            <Button
+              onClick={() => setOpenAddTask(false)}
+              sx={{ textTransform: 'none', fontWeight: 650 }}
+            >
+              Abbrechen
+            </Button>
+            <Button
+              type="submit"
+              variant="contained"
+              disabled={addTaskLoading}
+              sx={{
+                textTransform: 'none',
+                fontWeight: 700,
+                backgroundColor: '#1b77d1',
+                borderRadius: '8px',
+              }}
+            >
+              {addTaskLoading ? <CircularProgress size={20} /> : 'Aufgabe hinzufügen'}
+            </Button>
+          </DialogActions>
+        </form>
+      </Dialog>
 
       {/* 2. Hidden HTML A4 Printable View (Rendered only on window.print()) */}
       <div className="print-only print-page" style={{ fontFamily: 'sans-serif' }}>
