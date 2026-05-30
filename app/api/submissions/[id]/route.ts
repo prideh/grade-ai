@@ -133,17 +133,18 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       let totalEarnedPoints = 0;
 
       for (const updatedTask of aufgaben) {
-        let taskPoints = 0;
+        let taskPoints = updatedTask.erzieltePunkte || 0;
 
         // 1. Update individual steps
-        if (Array.isArray(updatedTask.schritte)) {
+        if (Array.isArray(updatedTask.schritte) && updatedTask.schritte.length > 0) {
+          let stepSum = 0;
           for (const updatedStep of updatedTask.schritte) {
             // Clamp points between 0 and max
             const clampedPoints = Math.max(
               0,
               Math.min(updatedStep.maximalPunkte, updatedStep.erreichtePunkte)
             );
-            taskPoints += clampedPoints;
+            stepSum += clampedPoints;
 
             // If step ID is present, update in DB
             if (updatedStep.id) {
@@ -155,6 +156,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
               });
             }
           }
+          taskPoints = stepSum;
         }
 
         totalEarnedPoints += taskPoints;
