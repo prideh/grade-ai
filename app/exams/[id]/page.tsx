@@ -97,7 +97,7 @@ export default function ExamDetailsPage() {
       setUploadedFileName(file.name);
 
       const reader = new FileReader();
-      if (file.type.startsWith('image/')) {
+      if (file.type.startsWith('image/') || file.type === 'application/pdf') {
         reader.onload = (event) => {
           const dataUrl = event.target?.result as string;
           if (dataUrl) {
@@ -597,6 +597,28 @@ export default function ExamDetailsPage() {
                       if (exam?.rubricText?.startsWith('{"mimeType":')) {
                         try {
                           const parsed = JSON.parse(exam.rubricText);
+                          if (parsed.mimeType === 'application/pdf') {
+                            return (
+                              <Stack
+                                direction="row"
+                                spacing={1.5}
+                                sx={{ alignItems: 'center', p: 1 }}
+                              >
+                                <StarsIcon sx={{ color: 'primary.main', fontSize: '2rem' }} />
+                                <Box>
+                                  <Typography
+                                    variant="subtitle2"
+                                    sx={{ fontWeight: 700, color: 'text.primary' }}
+                                  >
+                                    PDF-Musterlösung hinterlegt
+                                  </Typography>
+                                  <Typography variant="caption" sx={{ color: 'text.secondary' }}>
+                                    Die KI verwendet das PDF-Dokument zur Korrektur.
+                                  </Typography>
+                                </Box>
+                              </Stack>
+                            );
+                          }
                           return (
                             <Box
                               sx={{
@@ -620,7 +642,7 @@ export default function ExamDetailsPage() {
                             </Box>
                           );
                         } catch {
-                          return 'Ungültige Bild-Musterlösung';
+                          return 'Ungültige Musterlösung';
                         }
                       }
                       return exam?.rubricText || 'Keine Musterlösung hinterlegt.';

@@ -130,8 +130,12 @@ export async function POST(request: Request) {
       }
       if (existingExam.rubricText.startsWith('{"mimeType":')) {
         try {
-          rubricParam = JSON.parse(existingExam.rubricText);
-          rubricTextString = 'Musterlösung als Bild hinterlegt';
+          const parsed = JSON.parse(existingExam.rubricText);
+          rubricParam = parsed;
+          const isPdf = typeof parsed !== 'string' && parsed.mimeType === 'application/pdf';
+          rubricTextString = isPdf
+            ? 'Musterlösung als PDF hinterlegt'
+            : 'Musterlösung als Bild hinterlegt';
         } catch {
           rubricParam = existingExam.rubricText;
           rubricTextString = existingExam.rubricText;
@@ -159,7 +163,7 @@ export async function POST(request: Request) {
         const mimeType = rubric.type || '';
         const rubricBytes = await rubric.arrayBuffer();
 
-        if (mimeType.startsWith('image/')) {
+        if (mimeType.startsWith('image/') || mimeType === 'application/pdf') {
           const base64Data = Buffer.from(rubricBytes).toString('base64');
           rubricParam = { mimeType, data: base64Data };
           rubricTextString = JSON.stringify(rubricParam);

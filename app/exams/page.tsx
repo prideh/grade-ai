@@ -70,7 +70,7 @@ export default function ExamsPage() {
       setUploadedFileName(file.name);
 
       const reader = new FileReader();
-      if (file.type.startsWith('image/')) {
+      if (file.type.startsWith('image/') || file.type === 'application/pdf') {
         reader.onload = (event) => {
           const dataUrl = event.target?.result as string;
           if (dataUrl) {
