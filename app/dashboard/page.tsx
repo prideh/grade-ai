@@ -47,6 +47,8 @@ import AssignmentIcon from '@mui/icons-material/Assignment';
 import TrendingUpIcon from '@mui/icons-material/TrendingUp';
 import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome';
 import ErrorIcon from '@mui/icons-material/Error';
+import StarIcon from '@mui/icons-material/Star';
+import StarBorderIcon from '@mui/icons-material/StarBorder';
 import DashboardLayout from '@/components/DashboardLayout';
 import { getCachedTeacher, setCachedTeacher } from '@/lib/sessionCache';
 
@@ -100,6 +102,12 @@ export default function Dashboard() {
 
   // Selection states
   const [selectedClassId, setSelectedClassId] = useState<string>('');
+  const [defaultClassId, setDefaultClassId] = useState<string | null>(() => {
+    if (typeof window !== 'undefined') {
+      return localStorage.getItem('gradeai_default_class_id');
+    }
+    return null;
+  });
   const [selectedStudentId, setSelectedStudentId] = useState<string>('AUTO'); // Recommended default
   const [selectedExamId, setSelectedExamId] = useState<string>('NEW'); // 'NEW' or specific exam UUID
 
@@ -158,9 +166,15 @@ export default function Dashboard() {
       if (res.ok) {
         const data = await res.json();
         setClasses(data.classes || []);
-        // Pre-select first class if available
+        // Pre-select default class if available, else first class
         if (data.classes && data.classes.length > 0) {
-          handleClassChange(data.classes[0].id);
+          const stored = localStorage.getItem('gradeai_default_class_id');
+          const classExists = data.classes.some((c: DashboardClass) => c.id === stored);
+          if (stored && classExists) {
+            handleClassChange(stored);
+          } else {
+            handleClassChange(data.classes[0].id);
+          }
         }
       }
     } catch (err) {
@@ -239,6 +253,19 @@ export default function Dashboard() {
 
     return () => clearInterval(interval);
   }, [hasActiveJobs, fetchRecentSubmissions]);
+
+  // Set default class handler
+  const handleSetDefaultClass = () => {
+    if (!selectedClassId) return;
+
+    if (defaultClassId === selectedClassId) {
+      localStorage.removeItem('gradeai_default_class_id');
+      setDefaultClassId(null);
+    } else {
+      localStorage.setItem('gradeai_default_class_id', selectedClassId);
+      setDefaultClassId(selectedClassId);
+    }
+  };
 
   // 5. Handle Logout
   const _handleLogout = async () => {
@@ -766,22 +793,50 @@ export default function Dashboard() {
                   <Grid container spacing={3}>
                     {/* Class Selector Dropdown */}
                     <Grid size={{ xs: 12 }}>
-                      <FormControl fullWidth size="medium">
-                        <InputLabel id="class-select-label">Klasse auswählen</InputLabel>
-                        <Select
-                          labelId="class-select-label"
-                          value={selectedClassId}
-                          label="Klasse auswählen"
-                          onChange={(e) => handleClassChange(e.target.value)}
-                          sx={{ borderRadius: '8px' }}
-                        >
-                          {classes.map((cls) => (
-                            <MenuItem key={cls.id} value={cls.id}>
-                              {cls.name} ({cls._count?.students || 0} Schüler)
-                            </MenuItem>
-                          ))}
-                        </Select>
-                      </FormControl>
+                      <Stack direction="row" spacing={2} sx={{ alignItems: 'center' }}>
+                        <FormControl fullWidth size="medium">
+                          <InputLabel id="class-select-label">Klasse auswählen</InputLabel>
+                          <Select
+                            labelId="class-select-label"
+                            value={selectedClassId}
+                            label="Klasse auswählen"
+                            onChange={(e) => handleClassChange(e.target.value)}
+                            sx={{ borderRadius: '8px' }}
+                          >
+                            {classes.map((cls) => (
+                              <MenuItem key={cls.id} value={cls.id}>
+                                {cls.name} ({cls._count?.students || 0} Schüler)
+                              </MenuItem>
+                            ))}
+                          </Select>
+                        </FormControl>
+                        {selectedClassId && (
+                          <Button
+                            variant={defaultClassId === selectedClassId ? 'contained' : 'outlined'}
+                            color="primary"
+                            onClick={handleSetDefaultClass}
+                            startIcon={
+                              defaultClassId === selectedClassId ? (
+                                <StarIcon sx={{ color: '#ffffff' }} />
+                              ) : (
+                                <StarBorderIcon />
+                              )
+                            }
+                            sx={{
+                              height: '56px',
+                              borderRadius: '8px',
+                              px: 3,
+                              textTransform: 'none',
+                              whiteSpace: 'nowrap',
+                              flexShrink: 0,
+                            }}
+                          >
+                            {defaultClassId === selectedClassId
+                              ? 'Standardklasse'
+                              : 'Als Standard setzen'}
+                          </Button>
+                        )}
+                      </Stack>
                     </Grid>
 
                     {/* Student Selector Cards */}
