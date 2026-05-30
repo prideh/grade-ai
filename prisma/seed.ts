@@ -23,7 +23,7 @@ function hashPassword(password: string): Promise<string> {
 }
 
 async function main() {
-  console.log('🌱 Start seeding expanded database...');
+  console.log('🌱 Start seeding simplified high-fidelity database...');
 
   // 1. Create Default Teacher
   const email = 'lehrer@schule.ch';
@@ -52,55 +52,31 @@ async function main() {
   }
   console.log('🧹 Cleaned existing class data for seed freshness.');
 
-  // 2. Create Classes
-  const classNames = ['Klasse 9a', 'Klasse 9b', 'Klasse 10a'];
-  const createdClasses: Record<string, { id: string; name: string }> = {};
+  // 2. Create Single Class
+  const schoolClass = await prisma.class.create({
+    data: {
+      name: 'Klasse 9a',
+      teacherId: teacher.id,
+    },
+  });
+  console.log(`🏫 Class created: ${schoolClass.name}`);
 
-  for (const name of classNames) {
-    const schoolClass = await prisma.class.create({
+  // 3. Enroll exactly 3 Students
+  const studentNames = ['Max Mustermann', 'Sarah Tobler', 'Lukas Frischknecht'];
+  const enrolledStudents: { id: string; name: string }[] = [];
+
+  for (const name of studentNames) {
+    const student = await prisma.student.create({
       data: {
         name,
-        teacherId: teacher.id,
+        classId: schoolClass.id,
       },
     });
-    createdClasses[name] = schoolClass;
-    console.log(`🏫 Class created: ${schoolClass.name}`);
+    enrolledStudents.push(student);
+    console.log(`🎓 Student enrolled: ${student.name} in ${schoolClass.name}`);
   }
 
-  // 3. Enroll Students
-  const studentsMap: Record<string, string[]> = {
-    'Klasse 9a': [
-      'Max Mustermann',
-      'Sarah Tobler',
-      'Lukas Frischknecht',
-      'Anna Bieri',
-      'David Müller',
-    ],
-    'Klasse 9b': ['Peter Keller', 'Julia Kaufmann', 'Simon Meier', 'Laura Schweizer'],
-    'Klasse 10a': ['Marc Steiner', 'Elena Roth', 'Nico Graf'],
-  };
-
-  const createdStudents: Record<string, { id: string; name: string }[]> = {
-    'Klasse 9a': [],
-    'Klasse 9b': [],
-    'Klasse 10a': [],
-  };
-
-  for (const [className, studentNames] of Object.entries(studentsMap)) {
-    const classId = createdClasses[className].id;
-    for (const name of studentNames) {
-      const student = await prisma.student.create({
-        data: {
-          name,
-          classId,
-        },
-      });
-      createdStudents[className].push(student);
-      console.log(`🎓 Student enrolled: ${student.name} in ${className}`);
-    }
-  }
-
-  // 4. Create Exams
+  // 4. Create 2 Exams
   // Exam 1: Klasse 9a Math 1
   const exam9aMath1 = await prisma.exam.create({
     data: {
@@ -109,7 +85,7 @@ async function main() {
       rubricText:
         'Aufgabe 1: 3x - 5 = 10 -> x = 5. (5 Punkte)\nAufgabe 2: 2(x+3) = 14 -> x = 4. (5 Punkte)\nAufgabe 3: Lineares System x+y=5, x-y=1 -> x=3, y=2. (10 Punkte)',
       maxPoints: 20,
-      classId: createdClasses['Klasse 9a'].id,
+      classId: schoolClass.id,
     },
   });
 
@@ -121,48 +97,13 @@ async function main() {
       rubricText:
         'Aufgabe 1: x^2 - 4 = 0 -> x = ±2. (5 Punkte)\nAufgabe 2: Scheitelpunkt bestimmen f(x)=(x-3)^2 + 1 -> S(3,1). (10 Punkte)',
       maxPoints: 15,
-      classId: createdClasses['Klasse 9a'].id,
+      classId: schoolClass.id,
     },
   });
 
-  // Exam 3: Klasse 9a Physik 1
-  await prisma.exam.create({
-    data: {
-      title: 'Physik Test 1: Mechanik & Beschleunigung',
-      subject: 'Physik',
-      rubricText: 'Aufgabe 1: Formel v = a * t herleiten und berechnen. Max 10 Punkte.',
-      maxPoints: 10,
-      classId: createdClasses['Klasse 9a'].id,
-    },
-  });
+  console.log('📝 Exams created.');
 
-  // Exam 4: Klasse 9b Math 1
-  const exam9bMath1 = await prisma.exam.create({
-    data: {
-      title: 'Mathematik Klassenarbeit 1: Lineare Gleichungen',
-      subject: 'Mathematik',
-      rubricText:
-        'Aufgabe 1: 3x - 5 = 10 -> x = 5. (5 Punkte)\nAufgabe 2: 2(x+3) = 14 -> x = 4. (5 Punkte)\nAufgabe 3: Lineares System x+y=5, x-y=1 -> x=3, y=2. (10 Punkte)',
-      maxPoints: 20,
-      classId: createdClasses['Klasse 9b'].id,
-    },
-  });
-
-  // Exam 5: Klasse 10a Chemie 1
-  const exam10aChemie1 = await prisma.exam.create({
-    data: {
-      title: 'Chemie Prüfung 1: Periodensystem & Atome',
-      subject: 'Chemie',
-      rubricText:
-        'Aufgabe 1: Elektronenkonfiguration zeichnen. Max 10 Punkte.\nAufgabe 2: Chemische Bindung erklären. Max 10 Punkte.\nAufgabe 3: Stöchiometrische Berechnungen. Max 10 Punkte.',
-      maxPoints: 30,
-      classId: createdClasses['Klasse 10a'].id,
-    },
-  });
-
-  console.log('📝 Exams created across all classes.');
-
-  // 5. Helper to create a submission with mock tasks/steps
+  // 5. Helper to create a submission with mock tasks/steps for BOTH Aufgabe 1 and Aufgabe 2
   async function seedSubmission({
     student,
     exam,
@@ -175,7 +116,7 @@ async function main() {
     exerciseRecommendation = '',
   }: {
     student: { id: string; name: string };
-    exam: { id: string; maxPoints: number };
+    exam: { id: string; title: string; maxPoints: number };
     earnedPoints: number;
     grade: string;
     status?: 'PENDING' | 'PROCESSING' | 'COMPLETED' | 'FAILED';
@@ -222,7 +163,7 @@ async function main() {
       },
     });
 
-    await prisma.taskCorrection.create({
+    const tc2 = await prisma.taskCorrection.create({
       data: {
         submissionId: sub.id,
         taskId: '2',
@@ -237,39 +178,136 @@ async function main() {
       },
     });
 
-    // Create StepCorrections for Task 1
-    await prisma.stepCorrection.create({
-      data: {
-        taskCorrectionId: tc1.id,
-        schrittIndex: 0,
-        schrittText: '3x - 5 = 10',
-        istKorrekt: true,
-        fehlerTyp: 'KeinFehler',
-        erreichtePunkte: task1Max * 0.5,
-        maximalPunkte: task1Max * 0.5,
-        begruendung: 'Gleichung korrekt abgeschrieben.',
-      },
-    });
+    const isMath1 = exam.title.includes('Klassenarbeit 1');
 
-    await prisma.stepCorrection.create({
-      data: {
-        taskCorrectionId: tc1.id,
-        schrittIndex: 1,
-        schrittText: '3x = 15 -> x = 5',
-        istKorrekt: task1Earned > task1Max * 0.5,
-        fehlerTyp: task1Earned === task1Max ? 'KeinFehler' : 'Rechenfehler',
-        erreichtePunkte: Math.max(0, task1Earned - task1Max * 0.5),
-        maximalPunkte: task1Max * 0.5,
-        begruendung: task1Earned === task1Max ? 'Korrekt berechnet.' : 'Rechenfehler bei Division.',
-      },
-    });
+    if (isMath1) {
+      // StepCorrections for Task 1 (3x - 5 = 10)
+      await prisma.stepCorrection.create({
+        data: {
+          taskCorrectionId: tc1.id,
+          schrittIndex: 0,
+          schrittText: '3x - 5 = 10',
+          istKorrekt: true,
+          fehlerTyp: 'KeinFehler',
+          erreichtePunkte: task1Max * 0.5,
+          maximalPunkte: task1Max * 0.5,
+          begruendung: 'Gleichung korrekt abgeschrieben.',
+        },
+      });
+
+      await prisma.stepCorrection.create({
+        data: {
+          taskCorrectionId: tc1.id,
+          schrittIndex: 1,
+          schrittText: '3x = 15 -> x = 5',
+          istKorrekt: task1Earned > task1Max * 0.5,
+          fehlerTyp: task1Earned === task1Max ? 'KeinFehler' : 'Rechenfehler',
+          erreichtePunkte: Math.max(0, task1Earned - task1Max * 0.5),
+          maximalPunkte: task1Max * 0.5,
+          begruendung:
+            task1Earned === task1Max ? 'Korrekt berechnet.' : 'Rechenfehler bei Division.',
+        },
+      });
+
+      // StepCorrections for Task 2 (2(x+3) = 14)
+      const t2Half = task2Max * 0.5;
+      await prisma.stepCorrection.create({
+        data: {
+          taskCorrectionId: tc2.id,
+          schrittIndex: 0,
+          schrittText: '2x + 6 = 14',
+          istKorrekt: true,
+          fehlerTyp: 'KeinFehler',
+          erreichtePunkte: t2Half,
+          maximalPunkte: t2Half,
+          begruendung: 'Klammer korrekt ausmultipliziert.',
+        },
+      });
+
+      await prisma.stepCorrection.create({
+        data: {
+          taskCorrectionId: tc2.id,
+          schrittIndex: 1,
+          schrittText: '2x = 8 -> x = 4',
+          istKorrekt: task2Earned > t2Half,
+          fehlerTyp: task2Earned === task2Max ? 'KeinFehler' : 'Rechenfehler',
+          erreichtePunkte: Math.max(0, task2Earned - t2Half),
+          maximalPunkte: t2Half,
+          begruendung:
+            task2Earned === task2Max
+              ? 'Korrekt nach x aufgelöst.'
+              : 'Korrektes Vorgehen mit Folgefehler.',
+        },
+      });
+    } else {
+      // Quadratische Funktionen (Math 2)
+      // StepCorrections for Task 1 (x^2 - 4 = 0)
+      await prisma.stepCorrection.create({
+        data: {
+          taskCorrectionId: tc1.id,
+          schrittIndex: 0,
+          schrittText: 'x^2 = 4',
+          istKorrekt: true,
+          fehlerTyp: 'KeinFehler',
+          erreichtePunkte: task1Max * 0.5,
+          maximalPunkte: task1Max * 0.5,
+          begruendung: 'Konstante korrekt auf die rechte Seite gebracht.',
+        },
+      });
+
+      await prisma.stepCorrection.create({
+        data: {
+          taskCorrectionId: tc1.id,
+          schrittIndex: 1,
+          schrittText: 'x = 2 oder x = -2',
+          istKorrekt: task1Earned > task1Max * 0.5,
+          fehlerTyp: task1Earned === task1Max ? 'KeinFehler' : 'Rechenfehler',
+          erreichtePunkte: Math.max(0, task1Earned - task1Max * 0.5),
+          maximalPunkte: task1Max * 0.5,
+          begruendung:
+            task1Earned === task1Max
+              ? 'Beide reellen Wurzeln korrekt bestimmt.'
+              : 'Negative Wurzel vergessen.',
+        },
+      });
+
+      // StepCorrections for Task 2 (f(x) = (x-3)^2 + 1)
+      const t2Half = task2Max * 0.5;
+      await prisma.stepCorrection.create({
+        data: {
+          taskCorrectionId: tc2.id,
+          schrittIndex: 0,
+          schrittText: 'x-Koordinate des Scheitelpunkts ablesen: d = 3',
+          istKorrekt: true,
+          fehlerTyp: 'KeinFehler',
+          erreichtePunkte: t2Half,
+          maximalPunkte: t2Half,
+          begruendung: 'Vorzeichenregel in der Klammer richtig angewendet.',
+        },
+      });
+
+      await prisma.stepCorrection.create({
+        data: {
+          taskCorrectionId: tc2.id,
+          schrittIndex: 1,
+          schrittText: 'y-Koordinate ablesen: e = 1 -> S(3, 1)',
+          istKorrekt: task2Earned > t2Half,
+          fehlerTyp: task2Earned === task2Max ? 'KeinFehler' : 'Rechenfehler',
+          erreichtePunkte: Math.max(0, task2Earned - t2Half),
+          maximalPunkte: t2Half,
+          begruendung:
+            task2Earned === task2Max
+              ? 'Scheitelpunkt korrekt angegeben.'
+              : 'Koordinaten vertauscht oder Vorzeichenfehler.',
+        },
+      });
+    }
   }
 
-  // 6. Populate Submissions
-  // Klasse 9a - Exam 1 (Math 1)
-  const class9a = createdStudents['Klasse 9a'];
+  // 6. Populate Submissions for the 3 Students across the 2 Exams
+  // Max Mustermann
   await seedSubmission({
-    student: class9a[0], // Max Mustermann
+    student: enrolledStudents[0],
     exam: exam9aMath1,
     earnedPoints: 17,
     grade: '5.3',
@@ -280,7 +318,18 @@ async function main() {
   });
 
   await seedSubmission({
-    student: class9a[1], // Sarah Tobler
+    student: enrolledStudents[0],
+    exam: exam9aMath2,
+    earnedPoints: 13.5,
+    grade: '5.5',
+    strengths: ['Hervorragendes Verständnis quadratischer Gleichungen'],
+    weaknesses: [],
+    helpfulTip: 'Weiter so!',
+  });
+
+  // Sarah Tobler
+  await seedSubmission({
+    student: enrolledStudents[1],
     exam: exam9aMath1,
     earnedPoints: 19,
     grade: '5.8',
@@ -291,7 +340,17 @@ async function main() {
   });
 
   await seedSubmission({
-    student: class9a[2], // Lukas Frischknecht
+    student: enrolledStudents[1],
+    exam: exam9aMath2,
+    earnedPoints: 15,
+    grade: '6.0',
+    strengths: ['Perfekte Punktzahl', 'Elegante Beweisführung'],
+    weaknesses: [],
+  });
+
+  // Lukas Frischknecht
+  await seedSubmission({
+    student: enrolledStudents[2],
     exam: exam9aMath1,
     earnedPoints: 12,
     grade: '4.0',
@@ -301,115 +360,19 @@ async function main() {
     exerciseRecommendation: 'S. 42 Aufgabe 1-4',
   });
 
+  // Let Lukas Frischknecht's second exam be PENDING to test grading queue workflows
   await seedSubmission({
-    student: class9a[3], // Anna Bieri
-    exam: exam9aMath1,
-    earnedPoints: 9,
-    grade: '3.3',
-    strengths: ['Aufgabe 1 korrekt gelöst'],
-    weaknesses: ['Verständnisprobleme bei linearen Systemen', 'Fehlende Lösungswege bei Aufgabe 2'],
-    helpfulTip: 'Nutze die Nachhilfestunde, um lineare Gleichungssysteme zu wiederholen.',
-    exerciseRecommendation: 'Arbeitsblatt "Lineare Systeme" Grundstufe',
-  });
-
-  await seedSubmission({
-    student: class9a[4], // David Müller
-    exam: exam9aMath1,
-    earnedPoints: 14,
-    grade: '4.5',
-    status: 'PENDING', // Keep one as pending to test status badges!
-    strengths: ['Gute mathematische Intuition'],
-    weaknesses: ['Unvollständige Begründungen bei Beweisen'],
-    helpfulTip: 'Schreibe jeden mathematischen Zwischenschritt explizit auf.',
-    exerciseRecommendation: 'S. 44 Aufgabe 6-8',
-  });
-
-  // Klasse 9a - Exam 2 (Math 2) - to show progress metrics!
-  await seedSubmission({
-    student: class9a[0], // Max Mustermann
-    exam: exam9aMath2,
-    earnedPoints: 13.5,
-    grade: '5.5', // Improved from 5.3!
-    strengths: ['Hervorragendes Verständnis quadratischer Gleichungen'],
-    weaknesses: [],
-    helpfulTip: 'Weiter so!',
-  });
-
-  await seedSubmission({
-    student: class9a[1], // Sarah Tobler
-    exam: exam9aMath2,
-    earnedPoints: 15,
-    grade: '6.0', // Improved from 5.8!
-    strengths: ['Perfekte Punktzahl', 'Elegante Beweisführung'],
-    weaknesses: [],
-  });
-
-  await seedSubmission({
-    student: class9a[2], // Lukas Frischknecht
+    student: enrolledStudents[2],
     exam: exam9aMath2,
     earnedPoints: 11,
-    grade: '4.7', // Improved from 4.0!
+    grade: '4.7',
+    status: 'PENDING',
     strengths: ['Starke Verbesserung beim Aufzeichnen von Scheitelpunkten'],
     weaknesses: ['Kleinere Rundungsfehler'],
   });
 
-  await seedSubmission({
-    student: class9a[3], // Anna Bieri
-    exam: exam9aMath2,
-    earnedPoints: 7.5,
-    grade: '3.5', // Improved from 3.3!
-    strengths: ['Basisberechnungen funktionieren gut'],
-    weaknesses: ['Probleme beim Anwenden der PQ-Formel'],
-    helpfulTip: 'Lerne die Formel auswendig.',
-  });
-
-  // Klasse 9b - Exam 4 (Math 1)
-  const class9b = createdStudents['Klasse 9b'];
-  await seedSubmission({
-    student: class9b[0], // Peter Keller
-    exam: exam9bMath1,
-    earnedPoints: 16,
-    grade: '5.0',
-    strengths: ['Konzentriertes Arbeiten'],
-  });
-  await seedSubmission({
-    student: class9b[1], // Julia Kaufmann
-    exam: exam9bMath1,
-    earnedPoints: 18,
-    grade: '5.5',
-    strengths: ['Exzellentes logisches Denken'],
-  });
-
-  // Klasse 10a - Exam 5 (Chemie 1)
-  const class10a = createdStudents['Klasse 10a'];
-  await seedSubmission({
-    student: class10a[0], // Marc Steiner
-    exam: exam10aChemie1,
-    earnedPoints: 25,
-    grade: '5.2',
-    strengths: ['Hervorragende Atombindungs-Skizzen'],
-  });
-
-  await seedSubmission({
-    student: class10a[1], // Elena Roth
-    exam: exam10aChemie1,
-    earnedPoints: 28,
-    grade: '5.7',
-    strengths: ['Exzellente Stöchiometrie-Berechnungen', 'Klar strukturierter Lösungsweg'],
-  });
-
-  await seedSubmission({
-    student: class10a[2], // Nico Graf
-    exam: exam10aChemie1,
-    earnedPoints: 16,
-    grade: '3.7',
-    strengths: ['Konfigurationen teilweise korrekt'],
-    weaknesses: ['Verständnisfehler bei Elektronenpaarbindungen'],
-    helpfulTip: 'Sieh dir Kapitel 4 im Lehrbuch nochmals an.',
-  });
-
   console.log('✅ Submissions, task corrections, and step corrections successfully seeded.');
-  console.log('🎉 Expanded Database Seeding finished successfully!');
+  console.log('🎉 Simplified Database Seeding finished successfully!');
 }
 
 main()
