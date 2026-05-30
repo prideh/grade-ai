@@ -661,11 +661,11 @@ export default function Dashboard() {
                                     gap: '4px',
                                   }}
                                 >
-                                  🤖 Auto-Match läuft... ({job.examTitle.split(':')[0]}) (Klasse{' '}
+                                  🤖 Auto-Match läuft... ({job.examTitle.split(':')[0]}) (
                                   {job.className})
                                 </Box>
                               ) : (
-                                `${job.studentName} — ${job.examTitle} (Klasse ${job.className})`
+                                `${job.studentName} — ${job.examTitle} (${job.className})`
                               )}
                             </Typography>
                             <Typography
