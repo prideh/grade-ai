@@ -94,7 +94,11 @@ export default function RegisterPage() {
     >
       <Container maxWidth="sm">
         {/* Logo and Brand */}
-        <Stack direction="row" spacing={1.5} sx={{ justifyContent: 'center', alignItems: 'center', mb: 4 }}>
+        <Stack
+          direction="row"
+          spacing={1.5}
+          sx={{ justifyContent: 'center', alignItems: 'center', mb: 4 }}
+        >
           <Box
             sx={{
               width: '40px',
@@ -137,7 +141,11 @@ export default function RegisterPage() {
         >
           <CardContent sx={{ padding: '40px' }}>
             <Box sx={{ mb: 3, textAlign: 'center' }}>
-              <Typography variant="h5" component="h1" sx={{ fontWeight: 800, color: '#0f172a', mb: 1 }}>
+              <Typography
+                variant="h5"
+                component="h1"
+                sx={{ fontWeight: 800, color: '#0f172a', mb: 1 }}
+              >
                 Registrieren
               </Typography>
               <Typography variant="body2" sx={{ color: 'text.secondary', fontWeight: 500 }}>
@@ -271,7 +279,10 @@ export default function RegisterPage() {
             <Box sx={{ mt: 3, textAlign: 'center' }}>
               <Typography variant="body2" sx={{ color: 'text.secondary', fontWeight: 500 }}>
                 Bereits registriert?{' '}
-                <Link href="/login" style={{ color: '#1b77d1', fontWeight: 600, textDecoration: 'none' }}>
+                <Link
+                  href="/login"
+                  style={{ color: '#1b77d1', fontWeight: 600, textDecoration: 'none' }}
+                >
                   Jetzt anmelden
                 </Link>
               </Typography>

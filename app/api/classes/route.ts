@@ -48,7 +48,10 @@ export async function POST(request: Request) {
     });
 
     if (existingClass) {
-      return NextResponse.json({ error: 'Eine Klasse mit diesem Namen existiert bereits.' }, { status: 400 });
+      return NextResponse.json(
+        { error: 'Eine Klasse mit diesem Namen existiert bereits.' },
+        { status: 400 }
+      );
     }
 
     const schoolClass = await db.class.create({
@@ -64,4 +67,3 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'Fehler beim Erstellen der Klasse.' }, { status: 500 });
   }
 }
-

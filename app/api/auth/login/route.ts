@@ -8,10 +8,7 @@ export async function POST(request: Request) {
     const { email, password } = await request.json();
 
     if (!email || !password) {
-      return NextResponse.json(
-        { error: 'Bitte gib E-Mail und Passwort ein.' },
-        { status: 400 }
-      );
+      return NextResponse.json({ error: 'Bitte gib E-Mail und Passwort ein.' }, { status: 400 });
     }
 
     // Find the teacher by email
@@ -50,7 +47,9 @@ export async function POST(request: Request) {
   } catch (error) {
     console.error('Error in teacher login API:', error);
     return NextResponse.json(
-      { error: 'Login fehlgeschlagen: ' + (error instanceof Error ? error.message : String(error)) },
+      {
+        error: 'Login fehlgeschlagen: ' + (error instanceof Error ? error.message : String(error)),
+      },
       { status: 500 }
     );
   }

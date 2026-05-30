@@ -3,10 +3,7 @@ import { db } from '@/lib/db';
 import { getSession } from '@/lib/session';
 
 // GET: Fetch student details, analytics, grade trajectory, and AI feedback aggregation
-export async function GET(
-  request: Request,
-  { params }: { params: Promise<{ id: string }> }
-) {
+export async function GET(request: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
     const session = await getSession();
     if (!session) {
@@ -69,7 +66,7 @@ export async function GET(
         },
       },
     });
-    
+
     let classAverage = 0;
     if (allClassSubmissions.length > 0) {
       const sum = allClassSubmissions.reduce((a, b) => a + b.gradeRaw, 0);
@@ -125,10 +122,7 @@ export async function GET(
 }
 
 // PUT: Update student name or transfer class
-export async function PUT(
-  request: Request,
-  { params }: { params: Promise<{ id: string }> }
-) {
+export async function PUT(request: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
     const session = await getSession();
     if (!session) {
@@ -180,10 +174,7 @@ export async function PUT(
 }
 
 // DELETE: Delete student (cascade deletes submissions)
-export async function DELETE(
-  request: Request,
-  { params }: { params: Promise<{ id: string }> }
-) {
+export async function DELETE(request: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
     const session = await getSession();
     if (!session) {

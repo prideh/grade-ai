@@ -68,7 +68,10 @@ export async function POST(request: Request) {
     }
 
     if (maxPoints === undefined || typeof maxPoints !== 'number' || maxPoints <= 0) {
-      return NextResponse.json({ error: 'Maximale Punktzahl muss eine positive Zahl sein.' }, { status: 400 });
+      return NextResponse.json(
+        { error: 'Maximale Punktzahl muss eine positive Zahl sein.' },
+        { status: 400 }
+      );
     }
 
     if (!classId || typeof classId !== 'string') {

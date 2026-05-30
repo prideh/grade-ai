@@ -7,9 +7,6 @@ export async function POST() {
     return NextResponse.json({ success: true, message: 'Erfolgreich abgemeldet.' });
   } catch (error) {
     console.error('Error in logout API:', error);
-    return NextResponse.json(
-      { error: 'Abmeldung fehlgeschlagen.' },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: 'Abmeldung fehlgeschlagen.' }, { status: 500 });
   }
 }

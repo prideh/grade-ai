@@ -3,10 +3,7 @@ import { db } from '@/lib/db';
 import { getSession } from '@/lib/session';
 
 // GET: Fetch class details, students roster, and class statistics
-export async function GET(
-  request: Request,
-  { params }: { params: Promise<{ id: string }> }
-) {
+export async function GET(request: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
     const session = await getSession();
     if (!session) {
@@ -79,7 +76,9 @@ export async function GET(
       });
 
       // Calculate Standard Deviation
-      const variance = grades.reduce((sqSum, val) => sqSum + Math.pow(val - averageGrade, 2), 0) / totalSubmissions;
+      const variance =
+        grades.reduce((sqSum, val) => sqSum + Math.pow(val - averageGrade, 2), 0) /
+        totalSubmissions;
       stdDev = Math.sqrt(variance);
     } else {
       lowestGrade = 0;
@@ -124,7 +123,8 @@ export async function GET(
 
     const stats = {
       averageGrade: averageGrade > 0 ? averageGrade.toFixed(2) : 'N/A',
-      passRate: totalSubmissions > 0 ? ((passingCount / totalSubmissions) * 100).toFixed(1) + '%' : '0%',
+      passRate:
+        totalSubmissions > 0 ? ((passingCount / totalSubmissions) * 100).toFixed(1) + '%' : '0%',
       highestGrade: highestGrade > 0 ? highestGrade.toFixed(1) : 'N/A',
       lowestGrade: lowestGrade > 0 ? lowestGrade.toFixed(1) : 'N/A',
       stdDev: stdDev > 0 ? stdDev.toFixed(2) : '0.00',
@@ -149,10 +149,7 @@ export async function GET(
 }
 
 // PUT: Update class name
-export async function PUT(
-  request: Request,
-  { params }: { params: Promise<{ id: string }> }
-) {
+export async function PUT(request: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
     const session = await getSession();
     if (!session) {
@@ -189,10 +186,7 @@ export async function PUT(
 }
 
 // DELETE: Delete class (cascade deletes all students, exams, and submissions via Prisma)
-export async function DELETE(
-  request: Request,
-  { params }: { params: Promise<{ id: string }> }
-) {
+export async function DELETE(request: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
     const session = await getSession();
     if (!session) {

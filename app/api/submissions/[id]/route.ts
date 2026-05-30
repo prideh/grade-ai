@@ -78,7 +78,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
       })),
       schuelerFeedback: {
         staerken: submission.strengths,
-        weaknesses: submission.weaknesses,
+        schwaechen: submission.weaknesses,
         hilfreicherTipp: submission.helpfulTip || '',
         uebungsEmpfehlung: submission.exerciseRecommendation || '',
       },

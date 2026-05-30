@@ -26,8 +26,8 @@ import LockIcon from '@mui/icons-material/Lock';
 
 export default function LoginPage() {
   const router = useRouter();
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
+  const [email, setEmail] = useState('lehrer@schule.ch');
+  const [password, setPassword] = useState('password123');
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -87,7 +87,11 @@ export default function LoginPage() {
     >
       <Container maxWidth="sm">
         {/* Logo and Brand */}
-        <Stack direction="row" spacing={1.5} sx={{ justifyContent: 'center', alignItems: 'center', mb: 4 }}>
+        <Stack
+          direction="row"
+          spacing={1.5}
+          sx={{ justifyContent: 'center', alignItems: 'center', mb: 4 }}
+        >
           <Box
             sx={{
               width: '40px',
@@ -130,7 +134,11 @@ export default function LoginPage() {
         >
           <CardContent sx={{ padding: '40px' }}>
             <Box sx={{ mb: 3, textAlign: 'center' }}>
-              <Typography variant="h5" component="h1" sx={{ fontWeight: 800, color: '#0f172a', mb: 1 }}>
+              <Typography
+                variant="h5"
+                component="h1"
+                sx={{ fontWeight: 800, color: '#0f172a', mb: 1 }}
+              >
                 Willkommen zurück!
               </Typography>
               <Typography variant="body2" sx={{ color: 'text.secondary', fontWeight: 500 }}>
@@ -227,11 +235,7 @@ export default function LoginPage() {
                     mt: 1,
                   }}
                 >
-                  {loading ? (
-                    <CircularProgress size={24} sx={{ color: '#ffffff' }} />
-                  ) : (
-                    'Anmelden'
-                  )}
+                  {loading ? <CircularProgress size={24} sx={{ color: '#ffffff' }} /> : 'Anmelden'}
                 </Button>
               </Stack>
             </form>
@@ -239,7 +243,10 @@ export default function LoginPage() {
             <Box sx={{ mt: 3, textAlign: 'center' }}>
               <Typography variant="body2" sx={{ color: 'text.secondary', fontWeight: 500 }}>
                 Noch keinen Account?{' '}
-                <Link href="/register" style={{ color: '#1b77d1', fontWeight: 600, textDecoration: 'none' }}>
+                <Link
+                  href="/register"
+                  style={{ color: '#1b77d1', fontWeight: 600, textDecoration: 'none' }}
+                >
                   Jetzt registrieren
                 </Link>
               </Typography>

@@ -3,10 +3,7 @@ import { db } from '@/lib/db';
 import { getSession } from '@/lib/session';
 
 // GET: Fetch exam details, statistics, and submissions tracking (all class students)
-export async function GET(
-  request: Request,
-  { params }: { params: Promise<{ id: string }> }
-) {
+export async function GET(request: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
     const session = await getSession();
     if (!session) {
@@ -77,7 +74,8 @@ export async function GET(
       });
 
       // Calculate Standard Deviation
-      const variance = grades.reduce((sqSum, val) => sqSum + Math.pow(val - averageGrade, 2), 0) / totalCompleted;
+      const variance =
+        grades.reduce((sqSum, val) => sqSum + Math.pow(val - averageGrade, 2), 0) / totalCompleted;
       stdDev = Math.sqrt(variance);
     } else {
       lowestGrade = 0;
@@ -86,7 +84,7 @@ export async function GET(
     // 2. Track submission status for ALL class students (to identify who has NOT taken/completed the exam)
     const submissionsTracker = exam.class.students.map((student) => {
       const existingSub = exam.submissions.find((s) => s.studentId === student.id);
-      
+
       return {
         studentId: student.id,
         studentName: student.name,
@@ -100,7 +98,8 @@ export async function GET(
 
     const stats = {
       averageGrade: averageGrade > 0 ? averageGrade.toFixed(2) : 'N/A',
-      passRate: totalCompleted > 0 ? ((passingCount / totalCompleted) * 100).toFixed(1) + '%' : '0%',
+      passRate:
+        totalCompleted > 0 ? ((passingCount / totalCompleted) * 100).toFixed(1) + '%' : '0%',
       highestGrade: highestGrade > 0 ? highestGrade.toFixed(1) : 'N/A',
       lowestGrade: lowestGrade > 0 ? lowestGrade.toFixed(1) : 'N/A',
       stdDev: stdDev > 0 ? stdDev.toFixed(2) : '0.00',
@@ -130,10 +129,7 @@ export async function GET(
 }
 
 // PUT: Update exam fields or rubric text
-export async function PUT(
-  request: Request,
-  { params }: { params: Promise<{ id: string }> }
-) {
+export async function PUT(request: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
     const session = await getSession();
     if (!session) {
@@ -181,10 +177,7 @@ export async function PUT(
 }
 
 // DELETE: Delete exam (cascade deletes submissions)
-export async function DELETE(
-  request: Request,
-  { params }: { params: Promise<{ id: string }> }
-) {
+export async function DELETE(request: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
     const session = await getSession();
     if (!session) {
