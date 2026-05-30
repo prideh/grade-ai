@@ -74,6 +74,7 @@ interface DashboardSubmission {
   id: string;
   studentName: string;
   examTitle: string;
+  className: string;
   subject: string;
   points: string;
   grade: string;
@@ -660,10 +661,11 @@ export default function Dashboard() {
                                     gap: '4px',
                                   }}
                                 >
-                                  🤖 Auto-Match läuft... ({job.examTitle.split(':')[0]})
+                                  🤖 Auto-Match läuft... ({job.examTitle.split(':')[0]}) (Klasse{' '}
+                                  {job.className})
                                 </Box>
                               ) : (
-                                `${job.studentName} — ${job.examTitle}`
+                                `${job.studentName} — ${job.examTitle} (Klasse ${job.className})`
                               )}
                             </Typography>
                             <Typography
