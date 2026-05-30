@@ -32,7 +32,7 @@ import WarningIcon from '@mui/icons-material/Warning';
 import ErrorIcon from '@mui/icons-material/Error';
 import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome';
 
-import { ExamCorrectionResult } from '../../../lib/gemini';
+import { ExamCorrectionResult, CorrectedTask, CorrectedStep } from '../../../lib/gemini';
 
 interface WorkspaceSubmission extends ExamCorrectionResult {
   status: 'PENDING' | 'PROCESSING' | 'COMPLETED' | 'FAILED';
@@ -348,6 +348,23 @@ export default function CorrectWorkspace() {
     );
   }
 
+  // Helper to dynamically calculate task status based on its steps
+  const updateTaskStatus = (task: CorrectedTask) => {
+    const allStepsCorrect = task.schritte.every((s: CorrectedStep) => s.fehlerTyp === 'KeinFehler');
+    if (allStepsCorrect) {
+      task.status = 'Korrekt';
+    } else {
+      const hasFolgefehlerStep = task.schritte.some(
+        (s: CorrectedStep) => s.fehlerTyp === 'Folgefehler'
+      );
+      if (task.status === 'Folgefehler' || hasFolgefehlerStep) {
+        task.status = 'Folgefehler';
+      } else {
+        task.status = 'Fehler';
+      }
+    }
+  };
+
   // Handle inline point adjustments by the teacher
   const handlePointChange = (taskIndex: number, stepIndex: number, newPoints: number) => {
     if (!data) return;
@@ -361,12 +378,24 @@ export default function CorrectWorkspace() {
     const roundedPoints = Math.round(newPoints * 10) / 10;
     const clamped = Math.max(0, Math.min(step.maximalPunkte, roundedPoints));
     step.erreichtePunkte = clamped;
+
+    // Auto-adjust error type based on points
+    if (clamped === step.maximalPunkte) {
+      step.fehlerTyp = 'KeinFehler';
+    } else if (clamped < step.maximalPunkte && step.fehlerTyp === 'KeinFehler') {
+      step.fehlerTyp = 'SonstigerFehler';
+    }
+
     steps[stepIndex] = step;
+    task.schritte = steps;
 
     // Recalculate task total with rounding
-    task.schritte = steps;
     task.erzieltePunkte =
       Math.round(steps.reduce((sum, s) => sum + s.erreichtePunkte, 0) * 10) / 10;
+
+    // Update task status dynamically
+    updateTaskStatus(task);
+
     updatedTasks[taskIndex] = task;
 
     // Recalculate total score with rounding
@@ -432,13 +461,32 @@ export default function CorrectWorkspace() {
     const step = { ...steps[stepIndex] };
 
     step.fehlerTyp = newErrorType;
+
     steps[stepIndex] = step;
     task.schritte = steps;
+
+    // Recalculate task total
+    task.erzieltePunkte =
+      Math.round(steps.reduce((sum, s) => sum + s.erreichtePunkte, 0) * 10) / 10;
+
+    // Update task status dynamically
+    updateTaskStatus(task);
+
     updatedTasks[taskIndex] = task;
+
+    // Recalculate total score with rounding
+    const totalScore =
+      Math.round(updatedTasks.reduce((sum, t) => sum + t.erzieltePunkte, 0) * 10) / 10;
+
+    const maxScore = data.gesamtmaximalPunkte;
+    const rawGrade = maxScore > 0 ? 5 * (totalScore / maxScore) + 1 : 1;
+    const newGrade = (Math.round(rawGrade * 10) / 10).toFixed(1);
 
     const updatedResult = {
       ...data,
       aufgaben: updatedTasks,
+      gesamterzieltePunkte: totalScore,
+      note: newGrade,
     };
 
     setData(updatedResult);
@@ -455,16 +503,40 @@ export default function CorrectWorkspace() {
 
     if (checked) {
       task.status = 'Folgefehler';
+      // Auto-upgrade first incorrect step to Folgefehler if none is already
+      const firstIncorrectStep = task.schritte.find((s) => s.fehlerTyp !== 'KeinFehler');
+      if (firstIncorrectStep && !task.schritte.some((s) => s.fehlerTyp === 'Folgefehler')) {
+        firstIncorrectStep.fehlerTyp = 'Folgefehler';
+      }
     } else {
-      // If perfect points, set to Korrekt, else set to Fehler
-      task.status = task.erzieltePunkte === task.maximalPunkte ? 'Korrekt' : 'Fehler';
+      const allStepsCorrect = task.schritte.every((s) => s.fehlerTyp === 'KeinFehler');
+      task.status = allStepsCorrect ? 'Korrekt' : 'Fehler';
+
+      // Reset any step marked as Folgefehler to SonstigerFehler
+      task.schritte.forEach((s) => {
+        if (s.fehlerTyp === 'Folgefehler') {
+          s.fehlerTyp = 'SonstigerFehler';
+        }
+      });
     }
 
+    // Recalculate task points and total grades since step types and points might have changed
+    task.erzieltePunkte =
+      Math.round(task.schritte.reduce((sum, s) => sum + s.erreichtePunkte, 0) * 10) / 10;
     updatedTasks[activeTaskIndex] = task;
+
+    const totalScore =
+      Math.round(updatedTasks.reduce((sum, t) => sum + t.erzieltePunkte, 0) * 10) / 10;
+
+    const maxScore = data.gesamtmaximalPunkte;
+    const rawGrade = maxScore > 0 ? 5 * (totalScore / maxScore) + 1 : 1;
+    const newGrade = (Math.round(rawGrade * 10) / 10).toFixed(1);
 
     const updatedResult = {
       ...data,
       aufgaben: updatedTasks,
+      gesamterzieltePunkte: totalScore,
+      note: newGrade,
     };
 
     setData(updatedResult);
@@ -848,7 +920,7 @@ export default function CorrectWorkspace() {
                                   mb: 1,
                                 }}
                               >
-                                Schritt {step.schrittIndex}: {step.begruendung} ❌ (-
+                                Schritt {step.schrittIndex + 1}: {step.begruendung} ❌ (-
                                 {Math.round((step.maximalPunkte - step.erreichtePunkte) * 10) /
                                   10}{' '}
                                 P.)
@@ -871,7 +943,7 @@ export default function CorrectWorkspace() {
                                   mb: 1,
                                 }}
                               >
-                                Schritt {step.schrittIndex}: Folgefehler berücksichtigt! ✔️ (
+                                Schritt {step.schrittIndex + 1}: Folgefehler berücksichtigt! ✔️ (
                                 {Math.round(step.erreichtePunkte * 10) / 10}/
                                 {Math.round(step.maximalPunkte * 10) / 10} P.)
                               </Box>
@@ -992,7 +1064,7 @@ export default function CorrectWorkspace() {
               {/* Task title and points */}
               <Stack
                 direction="row"
-                sx={{ justifyContent: 'space-between', alignItems: 'flex-start' }}
+                sx={{ justifyContent: 'space-between', alignItems: 'flex-start', flexShrink: 0 }}
               >
                 <Box>
                   <Typography
@@ -1054,7 +1126,7 @@ export default function CorrectWorkspace() {
               </Stack>
 
               {/* Steps breakdown list */}
-              <Stack spacing={2}>
+              <Stack spacing={2} sx={{ flexShrink: 0 }}>
                 <Typography variant="subtitle2" sx={{ color: 'text.secondary', fontWeight: 600 }}>
                   Teilschritte & Bepunktung
                 </Typography>
@@ -1092,7 +1164,7 @@ export default function CorrectWorkspace() {
                               gap: 1,
                             }}
                           >
-                            Schritt {s.schrittIndex}:
+                            Schritt {s.schrittIndex + 1}:
                             <Box
                               component="code"
                               sx={{
@@ -1229,7 +1301,7 @@ export default function CorrectWorkspace() {
               </Stack>
 
               {/* Teacher Comments Editor */}
-              <Stack spacing={1}>
+              <Stack spacing={1} sx={{ flexShrink: 0 }}>
                 <Typography variant="subtitle2" sx={{ color: 'text.secondary', fontWeight: 600 }}>
                   Lehrer-Kommentar zu dieser Aufgabe
                 </Typography>
@@ -1253,6 +1325,7 @@ export default function CorrectWorkspace() {
                   background: '#f4f3ff',
                   borderColor: '#938eef',
                   boxShadow: 'none',
+                  flexShrink: 0,
                 }}
               >
                 <CardContent sx={{ padding: '20px !important' }}>
