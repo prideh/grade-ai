@@ -582,13 +582,21 @@ export default function ExamDetailsPage() {
                       borderRadius: '8px',
                       backgroundColor: '#f8fafc',
                       border: '1px solid #e2e8f0',
-                      fontFamily: 'monospace',
+                      fontFamily: exam?.rubricText?.startsWith('{"mimeType":')
+                        ? 'inherit'
+                        : 'monospace',
                       fontSize: '0.85rem',
-                      whiteSpace: 'pre-wrap',
+                      whiteSpace: exam?.rubricText?.startsWith('{"mimeType":')
+                        ? 'normal'
+                        : 'pre-wrap',
                       color: '#334155',
                       flexGrow: 1,
-                      overflowY: 'auto',
-                      maxHeight: '220px',
+                      overflowY: exam?.rubricText?.startsWith('{"mimeType":"application/pdf"')
+                        ? 'hidden'
+                        : 'auto',
+                      maxHeight: exam?.rubricText?.startsWith('{"mimeType":"application/pdf"')
+                        ? '500px'
+                        : '220px',
                       display: 'flex',
                       flexDirection: 'column',
                     }}
@@ -599,22 +607,64 @@ export default function ExamDetailsPage() {
                           const parsed = JSON.parse(exam.rubricText);
                           if (parsed.mimeType === 'application/pdf') {
                             return (
-                              <Stack
-                                direction="row"
-                                spacing={1.5}
-                                sx={{ alignItems: 'center', p: 1 }}
-                              >
-                                <StarsIcon sx={{ color: 'primary.main', fontSize: '2rem' }} />
-                                <Box>
-                                  <Typography
-                                    variant="subtitle2"
-                                    sx={{ fontWeight: 700, color: 'text.primary' }}
+                              <Stack spacing={2} sx={{ width: '100%' }}>
+                                <Stack
+                                  direction="row"
+                                  sx={{ justifyContent: 'space-between', alignItems: 'center' }}
+                                >
+                                  <Stack
+                                    direction="row"
+                                    spacing={1.5}
+                                    sx={{ alignItems: 'center', p: 0.5 }}
                                   >
-                                    PDF-Musterlösung hinterlegt
-                                  </Typography>
-                                  <Typography variant="caption" sx={{ color: 'text.secondary' }}>
-                                    Die KI verwendet das PDF-Dokument zur Korrektur.
-                                  </Typography>
+                                    <StarsIcon sx={{ color: 'primary.main', fontSize: '1.5rem' }} />
+                                    <Box>
+                                      <Typography
+                                        variant="subtitle2"
+                                        sx={{ fontWeight: 700, color: 'text.primary' }}
+                                      >
+                                        PDF-Musterlösung hinterlegt
+                                      </Typography>
+                                      <Typography
+                                        variant="caption"
+                                        sx={{ color: 'text.secondary' }}
+                                      >
+                                        Die KI liest dieses Dokument zur Korrektur.
+                                      </Typography>
+                                    </Box>
+                                  </Stack>
+                                  <Button
+                                    size="small"
+                                    variant="outlined"
+                                    onClick={() => {
+                                      const newTab = window.open();
+                                      if (newTab) {
+                                        newTab.document.write(
+                                          `<title>PDF Musterlösung</title><body style="margin:0"><iframe width="100%" height="100%" style="border:none" src="data:application/pdf;base64,${parsed.data}"></iframe></body>`
+                                        );
+                                      }
+                                    }}
+                                    sx={{ textTransform: 'none', borderRadius: '6px' }}
+                                  >
+                                    In neuem Tab öffnen
+                                  </Button>
+                                </Stack>
+                                <Box
+                                  sx={{
+                                    border: '1px solid #cbd5e1',
+                                    borderRadius: '8px',
+                                    overflow: 'hidden',
+                                    height: '350px',
+                                    backgroundColor: '#f8fafc',
+                                  }}
+                                >
+                                  <iframe
+                                    src={`data:${parsed.mimeType};base64,${parsed.data}`}
+                                    title="PDF Musterlösung Vorschau"
+                                    width="100%"
+                                    height="100%"
+                                    style={{ border: 'none' }}
+                                  />
                                 </Box>
                               </Stack>
                             );
