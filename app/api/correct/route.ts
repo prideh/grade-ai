@@ -128,8 +128,18 @@ export async function POST(request: Request) {
           { status: 404 }
         );
       }
-      rubricParam = existingExam.rubricText;
-      rubricTextString = existingExam.rubricText;
+      if (existingExam.rubricText.startsWith('{"mimeType":')) {
+        try {
+          rubricParam = JSON.parse(existingExam.rubricText);
+          rubricTextString = 'Musterlösung als Bild hinterlegt';
+        } catch {
+          rubricParam = existingExam.rubricText;
+          rubricTextString = existingExam.rubricText;
+        }
+      } else {
+        rubricParam = existingExam.rubricText;
+        rubricTextString = existingExam.rubricText;
+      }
     } else {
       // Process uploaded new rubric or find existing one dynamically to avoid double creations in batch
       if (!examTitle || !examSubject || !rubric) {
@@ -152,7 +162,7 @@ export async function POST(request: Request) {
         if (mimeType.startsWith('image/')) {
           const base64Data = Buffer.from(rubricBytes).toString('base64');
           rubricParam = { mimeType, data: base64Data };
-          rubricTextString = 'Musterlösung als Bild hochgeladen';
+          rubricTextString = JSON.stringify(rubricParam);
         } else {
           rubricTextString = Buffer.from(rubricBytes).toString('utf-8');
           rubricParam = rubricTextString;

@@ -89,6 +89,44 @@ export default function ExamDetailsPage() {
   const [rubricText, setRubricText] = useState('');
   const [editingRubric, setEditingRubric] = useState(false);
   const [saveLoading, setSaveLoading] = useState(false);
+  const [uploadedFileName, setUploadedFileName] = useState('');
+
+  const handleRubricFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files[0]) {
+      const file = e.target.files[0];
+      setUploadedFileName(file.name);
+
+      const reader = new FileReader();
+      if (file.type.startsWith('image/')) {
+        reader.onload = (event) => {
+          const dataUrl = event.target?.result as string;
+          if (dataUrl) {
+            const base64Data = dataUrl.split(',')[1];
+            setRubricText(
+              JSON.stringify({
+                mimeType: file.type,
+                data: base64Data,
+              })
+            );
+          }
+        };
+        reader.readAsDataURL(file);
+      } else {
+        reader.onload = (event) => {
+          const text = event.target?.result as string;
+          if (text) {
+            setRubricText(text);
+          }
+        };
+        reader.readAsText(file);
+      }
+    }
+  };
+
+  const handleResetRubric = () => {
+    setRubricText('');
+    setUploadedFileName('');
+  };
 
   // Dialogs
   const [openDelete, setOpenDelete] = useState(false);
@@ -112,6 +150,7 @@ export default function ExamDetailsPage() {
       setStats(data.stats);
       setRoster(data.roster || []);
       setRubricText(data.exam.rubricText || '');
+      setUploadedFileName('');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Ein unerwarteter Fehler ist aufgetreten.');
     } finally {
@@ -138,6 +177,7 @@ export default function ExamDetailsPage() {
       });
       if (!res.ok) throw new Error('Musterlösung konnte nicht aktualisiert werden.');
       setEditingRubric(false);
+      setUploadedFileName('');
       fetchData();
     } catch (err) {
       alert(err instanceof Error ? err.message : 'Fehler beim Speichern.');
@@ -443,7 +483,15 @@ export default function ExamDetailsPage() {
                     </Button>
                   ) : (
                     <Stack direction="row" spacing={1}>
-                      <Button size="small" variant="text" onClick={() => setEditingRubric(false)}>
+                      <Button
+                        size="small"
+                        variant="text"
+                        onClick={() => {
+                          setEditingRubric(false);
+                          setUploadedFileName('');
+                          setRubricText(exam?.rubricText || '');
+                        }}
+                      >
                         Abbrechen
                       </Button>
                       <Button
@@ -462,15 +510,71 @@ export default function ExamDetailsPage() {
                 <Divider sx={{ mb: 2 }} />
 
                 {editingRubric ? (
-                  <TextField
-                    multiline
-                    rows={7}
-                    fullWidth
-                    variant="outlined"
-                    value={rubricText}
-                    onChange={(e) => setRubricText(e.target.value)}
-                    sx={{ '& .MuiOutlinedInput-root': { borderRadius: '8px' }, flexGrow: 1 }}
-                  />
+                  uploadedFileName || rubricText.startsWith('{"mimeType":') ? (
+                    <Box
+                      sx={{
+                        border: '1px solid #cbd5e1',
+                        padding: '12px 16px',
+                        borderRadius: '8px',
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        alignItems: 'center',
+                        backgroundColor: '#f8fafc',
+                        mb: 2,
+                      }}
+                    >
+                      <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
+                        <StarsIcon sx={{ color: 'primary.main' }} />
+                        <Typography variant="body2" sx={{ fontWeight: 600, color: 'text.primary' }}>
+                          {uploadedFileName || 'Bild-Musterlösung geladen'}
+                        </Typography>
+                      </Stack>
+                      <Button size="small" color="error" onClick={handleResetRubric}>
+                        Zurücksetzen
+                      </Button>
+                    </Box>
+                  ) : (
+                    <Stack spacing={1.5} sx={{ flexGrow: 1 }}>
+                      <TextField
+                        multiline
+                        rows={7}
+                        fullWidth
+                        variant="outlined"
+                        value={rubricText}
+                        onChange={(e) => setRubricText(e.target.value)}
+                        sx={{ '& .MuiOutlinedInput-root': { borderRadius: '8px' }, flexGrow: 1 }}
+                      />
+                      <Stack direction="row" spacing={1.5} sx={{ alignItems: 'center' }}>
+                        <Typography
+                          variant="caption"
+                          sx={{ color: 'text.secondary', fontWeight: 600 }}
+                        >
+                          Oder lade eine Datei/einen Screenshot hoch:
+                        </Typography>
+                        <input
+                          type="file"
+                          accept="application/pdf,text/plain,image/*"
+                          id="editRubricFile"
+                          onChange={handleRubricFileChange}
+                          style={{ display: 'none' }}
+                        />
+                        <Button
+                          component="label"
+                          htmlFor="editRubricFile"
+                          variant="outlined"
+                          size="small"
+                          sx={{
+                            color: 'text.primary',
+                            borderColor: '#cbd5e1',
+                            fontWeight: 650,
+                            textTransform: 'none',
+                          }}
+                        >
+                          Datei auswählen
+                        </Button>
+                      </Stack>
+                    </Stack>
+                  )
                 ) : (
                   <Box
                     sx={{
@@ -485,9 +589,42 @@ export default function ExamDetailsPage() {
                       flexGrow: 1,
                       overflowY: 'auto',
                       maxHeight: '220px',
+                      display: 'flex',
+                      flexDirection: 'column',
                     }}
                   >
-                    {exam?.rubricText || 'Keine Musterlösung hinterlegt.'}
+                    {(() => {
+                      if (exam?.rubricText?.startsWith('{"mimeType":')) {
+                        try {
+                          const parsed = JSON.parse(exam.rubricText);
+                          return (
+                            <Box
+                              sx={{
+                                maxWidth: '100%',
+                                maxHeight: '180px',
+                                display: 'flex',
+                                justifyContent: 'center',
+                              }}
+                            >
+                              {/* eslint-disable-next-line @next/next/no-img-element */}
+                              <img
+                                src={`data:${parsed.mimeType};base64,${parsed.data}`}
+                                alt="Musterlösung"
+                                style={{
+                                  maxWidth: '100%',
+                                  maxHeight: '180px',
+                                  objectFit: 'contain',
+                                  borderRadius: '4px',
+                                }}
+                              />
+                            </Box>
+                          );
+                        } catch {
+                          return 'Ungültige Bild-Musterlösung';
+                        }
+                      }
+                      return exam?.rubricText || 'Keine Musterlösung hinterlegt.';
+                    })()}
                   </Box>
                 )}
               </CardContent>

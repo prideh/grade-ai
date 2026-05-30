@@ -29,6 +29,7 @@ import {
 import AddIcon from '@mui/icons-material/Add';
 import AssignmentIcon from '@mui/icons-material/Assignment';
 import ArrowForwardIcon from '@mui/icons-material/ArrowForward';
+import StarsIcon from '@mui/icons-material/Stars';
 import DashboardLayout from '@/components/DashboardLayout';
 
 interface SimpleClass {
@@ -61,6 +62,45 @@ export default function ExamsPage() {
   const [examSubject, setExamSubject] = useState('Mathematik');
   const [examMaxPoints, setExamMaxPoints] = useState<number>(20);
   const [examRubric, setExamRubric] = useState('');
+  const [uploadedFileName, setUploadedFileName] = useState('');
+
+  const handleRubricFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files[0]) {
+      const file = e.target.files[0];
+      setUploadedFileName(file.name);
+
+      const reader = new FileReader();
+      if (file.type.startsWith('image/')) {
+        reader.onload = (event) => {
+          const dataUrl = event.target?.result as string;
+          if (dataUrl) {
+            const base64Data = dataUrl.split(',')[1];
+            setExamRubric(
+              JSON.stringify({
+                mimeType: file.type,
+                data: base64Data,
+              })
+            );
+          }
+        };
+        reader.readAsDataURL(file);
+      } else {
+        reader.onload = (event) => {
+          const text = event.target?.result as string;
+          if (text) {
+            setExamRubric(text);
+          }
+        };
+        reader.readAsText(file);
+      }
+    }
+  };
+
+  const handleResetRubric = () => {
+    setExamRubric('');
+    setUploadedFileName('');
+  };
+
   const [selectedClassId, setSelectedClassId] = useState('');
   const [createLoading, setCreateLoading] = useState(false);
   const [createError, setCreateError] = useState('');
@@ -149,6 +189,7 @@ export default function ExamsPage() {
       setOpenCreate(false);
       setExamTitle('');
       setExamRubric('');
+      setUploadedFileName('');
       fetchData(); // Refresh list
     } catch (err) {
       setCreateError(err instanceof Error ? err.message : 'Prüfung konnte nicht erstellt werden.');
@@ -478,17 +519,72 @@ export default function ExamsPage() {
                   </Grid>
                 </Grid>
 
-                <TextField
-                  label="Erwartungshorizont / Musterlösung"
-                  placeholder="Gib Formeln, richtige Ergebnisse oder Teilschritte ein. Je präziser deine Musterlösung, desto genauer bewertet die KI."
-                  multiline
-                  rows={4}
-                  fullWidth
-                  variant="outlined"
-                  value={examRubric}
-                  onChange={(e) => setExamRubric(e.target.value)}
-                  sx={{ '& .MuiOutlinedInput-root': { borderRadius: '8px' } }}
-                />
+                {uploadedFileName || examRubric.startsWith('{"mimeType":') ? (
+                  <Box
+                    sx={{
+                      border: '1px solid #cbd5e1',
+                      padding: '12px 16px',
+                      borderRadius: '8px',
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'center',
+                      backgroundColor: '#f8fafc',
+                    }}
+                  >
+                    <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
+                      <StarsIcon sx={{ color: 'primary.main' }} />
+                      <Typography variant="body2" sx={{ fontWeight: 600, color: 'text.primary' }}>
+                        {uploadedFileName || 'Bild-Musterlösung geladen'}
+                      </Typography>
+                    </Stack>
+                    <Button size="small" color="error" onClick={handleResetRubric}>
+                      Zurücksetzen
+                    </Button>
+                  </Box>
+                ) : (
+                  <Stack spacing={1.5}>
+                    <TextField
+                      label="Erwartungshorizont / Musterlösung"
+                      placeholder="Gib Formeln, richtige Ergebnisse oder Teilschritte ein. Je präziser deine Musterlösung, desto genauer bewertet die KI."
+                      multiline
+                      rows={4}
+                      fullWidth
+                      variant="outlined"
+                      value={examRubric}
+                      onChange={(e) => setExamRubric(e.target.value)}
+                      sx={{ '& .MuiOutlinedInput-root': { borderRadius: '8px' } }}
+                    />
+                    <Stack direction="row" spacing={1.5} sx={{ alignItems: 'center' }}>
+                      <Typography
+                        variant="caption"
+                        sx={{ color: 'text.secondary', fontWeight: 600 }}
+                      >
+                        Oder lade eine Datei/einen Screenshot hoch:
+                      </Typography>
+                      <input
+                        type="file"
+                        accept="application/pdf,text/plain,image/*"
+                        id="dialogRubricFile"
+                        onChange={handleRubricFileChange}
+                        style={{ display: 'none' }}
+                      />
+                      <Button
+                        component="label"
+                        htmlFor="dialogRubricFile"
+                        variant="outlined"
+                        size="small"
+                        sx={{
+                          color: 'text.primary',
+                          borderColor: '#cbd5e1',
+                          fontWeight: 650,
+                          textTransform: 'none',
+                        }}
+                      >
+                        Datei auswählen
+                      </Button>
+                    </Stack>
+                  </Stack>
+                )}
               </Stack>
             </DialogContent>
             <DialogActions sx={{ p: 2, pt: 0 }}>
