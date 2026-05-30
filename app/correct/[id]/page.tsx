@@ -21,6 +21,8 @@ import {
   Tab,
   useTheme,
   CircularProgress,
+  FormControlLabel,
+  Checkbox,
 } from '@mui/material';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import PrintIcon from '@mui/icons-material/Print';
@@ -413,6 +415,60 @@ export default function CorrectWorkspace() {
 
     setData(updatedResult);
     // Auto-save Description adjustments directly to PostgreSQL (debounced)
+    saveToDatabase(updatedResult);
+  };
+
+  // Handle inline error type adjustments by the teacher
+  const handleErrorTypeChange = (
+    taskIndex: number,
+    stepIndex: number,
+    newErrorType: 'KeinFehler' | 'Folgefehler' | 'SonstigerFehler'
+  ) => {
+    if (!data) return;
+
+    const updatedTasks = [...data.aufgaben];
+    const task = { ...updatedTasks[taskIndex] };
+    const steps = [...task.schritte];
+    const step = { ...steps[stepIndex] };
+
+    step.fehlerTyp = newErrorType;
+    steps[stepIndex] = step;
+    task.schritte = steps;
+    updatedTasks[taskIndex] = task;
+
+    const updatedResult = {
+      ...data,
+      aufgaben: updatedTasks,
+    };
+
+    setData(updatedResult);
+    // Auto-save Error Type adjustments directly to PostgreSQL (debounced)
+    saveToDatabase(updatedResult);
+  };
+
+  // Handle toggling the Folgefehler status for the active task
+  const handleFolgefehlerToggle = (checked: boolean) => {
+    if (!data) return;
+
+    const updatedTasks = [...data.aufgaben];
+    const task = { ...updatedTasks[activeTaskIndex] };
+
+    if (checked) {
+      task.status = 'Folgefehler';
+    } else {
+      // If perfect points, set to Korrekt, else set to Fehler
+      task.status = task.erzieltePunkte === task.maximalPunkte ? 'Korrekt' : 'Fehler';
+    }
+
+    updatedTasks[activeTaskIndex] = task;
+
+    const updatedResult = {
+      ...data,
+      aufgaben: updatedTasks,
+    };
+
+    setData(updatedResult);
+    // Auto-save task status directly to PostgreSQL
     saveToDatabase(updatedResult);
   };
 
@@ -927,7 +983,7 @@ export default function CorrectWorkspace() {
               sx={{
                 flex: 1,
                 overflowY: 'auto',
-                padding: '24px',
+                padding: '24px 24px 80px 24px',
                 display: 'flex',
                 flexDirection: 'column',
                 gap: '24px',
@@ -954,28 +1010,47 @@ export default function CorrectWorkspace() {
                   </Typography>
                 </Box>
 
-                <Chip
-                  label={
-                    activeTask.status === 'Folgefehler' ? 'Folgefehler erkannt' : activeTask.status
-                  }
-                  color={
-                    activeTask.status === 'Korrekt'
-                      ? 'success'
-                      : activeTask.status === 'Folgefehler'
-                        ? 'warning'
-                        : 'error'
-                  }
-                  icon={
-                    activeTask.status === 'Korrekt' ? (
-                      <CheckCircleIcon />
-                    ) : activeTask.status === 'Folgefehler' ? (
-                      <WarningIcon />
-                    ) : (
-                      <ErrorIcon />
-                    )
-                  }
-                  sx={{ fontWeight: 'bold' }}
-                />
+                <Stack direction="row" spacing={2} sx={{ alignItems: 'center' }}>
+                  <FormControlLabel
+                    control={
+                      <Checkbox
+                        checked={activeTask.status === 'Folgefehler'}
+                        onChange={(e) => handleFolgefehlerToggle(e.target.checked)}
+                        color="warning"
+                        size="small"
+                      />
+                    }
+                    label={
+                      <Typography variant="body2" sx={{ fontWeight: 600, color: 'text.secondary' }}>
+                        Folgefehler berücksichtigen
+                      </Typography>
+                    }
+                  />
+                  <Chip
+                    label={
+                      activeTask.status === 'Folgefehler'
+                        ? 'Folgefehler erkannt'
+                        : activeTask.status
+                    }
+                    color={
+                      activeTask.status === 'Korrekt'
+                        ? 'success'
+                        : activeTask.status === 'Folgefehler'
+                          ? 'warning'
+                          : 'error'
+                    }
+                    icon={
+                      activeTask.status === 'Korrekt' ? (
+                        <CheckCircleIcon />
+                      ) : activeTask.status === 'Folgefehler' ? (
+                        <WarningIcon />
+                      ) : (
+                        <ErrorIcon />
+                      )
+                    }
+                    sx={{ fontWeight: 'bold' }}
+                  />
+                </Stack>
               </Stack>
 
               {/* Steps breakdown list */}
@@ -1106,28 +1181,46 @@ export default function CorrectWorkspace() {
                           }}
                         />
 
-                        <Box>
-                          <Chip
-                            label={
-                              s.fehlerTyp === 'KeinFehler'
-                                ? 'Korrekt'
-                                : s.fehlerTyp === 'Folgefehler'
-                                  ? 'Folgefehler (Teilpunkte)'
-                                  : s.fehlerTyp === 'Rechenfehler'
-                                    ? 'Rechenfehler'
-                                    : 'Fehler'
+                        <Box sx={{ mt: 0.5 }}>
+                          <select
+                            value={s.fehlerTyp === 'Rechenfehler' ? 'SonstigerFehler' : s.fehlerTyp}
+                            onChange={(e) =>
+                              handleErrorTypeChange(
+                                activeTaskIndex,
+                                sIdx,
+                                e.target.value as 'KeinFehler' | 'Folgefehler' | 'SonstigerFehler'
+                              )
                             }
-                            size="small"
-                            color={
-                              s.fehlerTyp === 'KeinFehler'
-                                ? 'success'
-                                : s.fehlerTyp === 'Folgefehler'
-                                  ? 'warning'
-                                  : 'error'
-                            }
-                            variant="outlined"
-                            sx={{ height: '22px', fontSize: '0.75rem', fontWeight: 600 }}
-                          />
+                            style={{
+                              fontSize: '0.75rem',
+                              fontWeight: 700,
+                              borderRadius: '16px',
+                              padding: '3px 10px',
+                              cursor: 'pointer',
+                              border: `1.5px solid ${
+                                s.fehlerTyp === 'KeinFehler'
+                                  ? theme.palette.success.main
+                                  : s.fehlerTyp === 'Folgefehler'
+                                    ? theme.palette.warning.main
+                                    : theme.palette.error.main
+                              }`,
+                              color:
+                                s.fehlerTyp === 'KeinFehler'
+                                  ? theme.palette.success.main
+                                  : s.fehlerTyp === 'Folgefehler'
+                                    ? theme.palette.warning.main
+                                    : theme.palette.error.main,
+                              backgroundColor: '#ffffff',
+                              outline: 'none',
+                              fontFamily: 'inherit',
+                              transition: 'all 0.2s ease',
+                              boxShadow: '0 1px 2px rgba(0, 0, 0, 0.05)',
+                            }}
+                          >
+                            <option value="KeinFehler">Korrekt</option>
+                            <option value="Folgefehler">Folgefehler (Teilpunkte)</option>
+                            <option value="SonstigerFehler">Fehler</option>
+                          </select>
                         </Box>
                       </Stack>
                     </CardContent>

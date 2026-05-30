@@ -155,6 +155,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
                 data: {
                   erreichtePunkte: clampedPoints,
                   begruendung: updatedStep.begruendung,
+                  fehlerTyp: updatedStep.fehlerTyp,
                 },
               });
             }
@@ -173,6 +174,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
           data: {
             erzieltePunkte: taskPoints,
             lehrerKommentar: updatedTask.lehrerKommentar || '',
+            status: updatedTask.status,
           },
         });
       }
