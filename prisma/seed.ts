@@ -142,11 +142,14 @@ async function main() {
       },
     });
 
+    // Helper to round points to 1 decimal place to prevent floating point anomalies in DB
+    const roundPoints = (val: number) => Math.round(val * 10) / 10;
+
     // Create 2 mock TaskCorrections
-    const task1Max = exam.maxPoints * 0.4;
-    const task1Earned = Math.min(task1Max, earnedPoints * 0.4);
-    const task2Max = exam.maxPoints * 0.6;
-    const task2Earned = Math.max(0, earnedPoints - task1Earned);
+    const task1Max = roundPoints(exam.maxPoints * 0.4);
+    const task1Earned = roundPoints(Math.min(task1Max, earnedPoints * 0.4));
+    const task2Max = roundPoints(exam.maxPoints * 0.6);
+    const task2Earned = roundPoints(Math.max(0, earnedPoints - task1Earned));
 
     const tc1 = await prisma.taskCorrection.create({
       data: {
@@ -189,8 +192,8 @@ async function main() {
           schrittText: '3x - 5 = 10',
           istKorrekt: true,
           fehlerTyp: 'KeinFehler',
-          erreichtePunkte: task1Max * 0.5,
-          maximalPunkte: task1Max * 0.5,
+          erreichtePunkte: roundPoints(task1Max * 0.5),
+          maximalPunkte: roundPoints(task1Max * 0.5),
           begruendung: 'Gleichung korrekt abgeschrieben.',
         },
       });
@@ -202,15 +205,15 @@ async function main() {
           schrittText: '3x = 15 -> x = 5',
           istKorrekt: task1Earned > task1Max * 0.5,
           fehlerTyp: task1Earned === task1Max ? 'KeinFehler' : 'Rechenfehler',
-          erreichtePunkte: Math.max(0, task1Earned - task1Max * 0.5),
-          maximalPunkte: task1Max * 0.5,
+          erreichtePunkte: roundPoints(Math.max(0, task1Earned - task1Max * 0.5)),
+          maximalPunkte: roundPoints(task1Max * 0.5),
           begruendung:
             task1Earned === task1Max ? 'Korrekt berechnet.' : 'Rechenfehler bei Division.',
         },
       });
 
       // StepCorrections for Task 2 (2(x+3) = 14)
-      const t2Half = task2Max * 0.5;
+      const t2Half = roundPoints(task2Max * 0.5);
       await prisma.stepCorrection.create({
         data: {
           taskCorrectionId: tc2.id,
@@ -231,7 +234,7 @@ async function main() {
           schrittText: '2x = 8 -> x = 4',
           istKorrekt: task2Earned > t2Half,
           fehlerTyp: task2Earned === task2Max ? 'KeinFehler' : 'Rechenfehler',
-          erreichtePunkte: Math.max(0, task2Earned - t2Half),
+          erreichtePunkte: roundPoints(Math.max(0, task2Earned - t2Half)),
           maximalPunkte: t2Half,
           begruendung:
             task2Earned === task2Max
@@ -249,8 +252,8 @@ async function main() {
           schrittText: 'x^2 = 4',
           istKorrekt: true,
           fehlerTyp: 'KeinFehler',
-          erreichtePunkte: task1Max * 0.5,
-          maximalPunkte: task1Max * 0.5,
+          erreichtePunkte: roundPoints(task1Max * 0.5),
+          maximalPunkte: roundPoints(task1Max * 0.5),
           begruendung: 'Konstante korrekt auf die rechte Seite gebracht.',
         },
       });
@@ -262,8 +265,8 @@ async function main() {
           schrittText: 'x = 2 oder x = -2',
           istKorrekt: task1Earned > task1Max * 0.5,
           fehlerTyp: task1Earned === task1Max ? 'KeinFehler' : 'Rechenfehler',
-          erreichtePunkte: Math.max(0, task1Earned - task1Max * 0.5),
-          maximalPunkte: task1Max * 0.5,
+          erreichtePunkte: roundPoints(Math.max(0, task1Earned - task1Max * 0.5)),
+          maximalPunkte: roundPoints(task1Max * 0.5),
           begruendung:
             task1Earned === task1Max
               ? 'Beide reellen Wurzeln korrekt bestimmt.'
@@ -272,7 +275,7 @@ async function main() {
       });
 
       // StepCorrections for Task 2 (f(x) = (x-3)^2 + 1)
-      const t2Half = task2Max * 0.5;
+      const t2Half = roundPoints(task2Max * 0.5);
       await prisma.stepCorrection.create({
         data: {
           taskCorrectionId: tc2.id,
@@ -293,7 +296,7 @@ async function main() {
           schrittText: 'y-Koordinate ablesen: e = 1 -> S(3, 1)',
           istKorrekt: task2Earned > t2Half,
           fehlerTyp: task2Earned === task2Max ? 'KeinFehler' : 'Rechenfehler',
-          erreichtePunkte: Math.max(0, task2Earned - t2Half),
+          erreichtePunkte: roundPoints(Math.max(0, task2Earned - t2Half)),
           maximalPunkte: t2Half,
           begruendung:
             task2Earned === task2Max

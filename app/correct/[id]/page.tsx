@@ -1018,7 +1018,7 @@ export default function CorrectWorkspace() {
                                 htmlInput: {
                                   step: 0.5,
                                   min: 0,
-                                  max: s.maximalPunkte,
+                                  max: Math.round(s.maximalPunkte * 10) / 10,
                                   style: {
                                     textAlign: 'center',
                                     fontWeight: 'bold',
@@ -1027,7 +1027,7 @@ export default function CorrectWorkspace() {
                                   },
                                 },
                               }}
-                              value={s.erreichtePunkte}
+                              value={Math.round(s.erreichtePunkte * 10) / 10}
                               onChange={(e) =>
                                 handlePointChange(
                                   activeTaskIndex,
