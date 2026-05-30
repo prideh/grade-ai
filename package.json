@@ -8,6 +8,7 @@
     "start": "next start",
     "lint": "eslint",
     "format": "prettier --write .",
+    "postinstall": "prisma generate",
     "prepare": "husky"
   },
   "dependencies": {
