@@ -619,7 +619,7 @@ export default function CorrectWorkspace() {
         </Box>
 
         {/* Split container layout */}
-        <Box sx={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
+        <Box sx={{ display: 'flex', flex: 1, overflow: 'hidden', height: 'calc(100vh - 64px)' }}>
           {/* Left panel: Visual Exam Sheet rendering */}
           <Box
             sx={{
