@@ -63,7 +63,10 @@ export default function CorrectWorkspace() {
         const res = await fetch(`/api/submissions/${id}`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ aufgaben: updatedData.aufgaben }),
+          body: JSON.stringify({
+            aufgaben: updatedData.aufgaben,
+            schuelerFeedback: updatedData.schuelerFeedback,
+          }),
         });
         if (res.ok) {
           setShowSaveToast(true);
@@ -392,6 +395,25 @@ export default function CorrectWorkspace() {
 
     setData(updatedResult);
     // Auto-save Comment changes directly to PostgreSQL (debounced)
+    saveToDatabase(updatedResult);
+  };
+
+  // Handle inline student feedback adjustments by the teacher
+  const handleFeedbackChange = (key: 'hilfreicherTipp' | 'uebungsEmpfehlung', newValue: string) => {
+    if (!data) return;
+
+    const updatedFeedback = {
+      ...data.schuelerFeedback,
+      [key]: newValue,
+    };
+
+    const updatedResult = {
+      ...data,
+      schuelerFeedback: updatedFeedback,
+    };
+
+    setData(updatedResult);
+    // Auto-save feedback changes directly to PostgreSQL (debounced)
     saveToDatabase(updatedResult);
   };
 
@@ -1092,23 +1114,45 @@ export default function CorrectWorkspace() {
                     <AutoAwesomeIcon sx={{ color: 'secondary.main', fontSize: '1.2rem' }} />{' '}
                     Schüler-Hilfekarte (wird gedruckt)
                   </Typography>
-                  <Stack spacing={1.5} sx={{ fontSize: '0.9rem', lineHeight: 1.4 }}>
-                    <Box>
-                      <Box component="strong" sx={{ color: 'secondary.dark' }}>
-                        Hilfreicher Tipp:{' '}
-                      </Box>
-                      <Box component="span" sx={{ color: 'text.secondary' }}>
-                        {data.schuelerFeedback.hilfreicherTipp}
-                      </Box>
-                    </Box>
-                    <Box>
-                      <Box component="strong" sx={{ color: 'success.main' }}>
-                        Übungs-Empfehlung:{' '}
-                      </Box>
-                      <Box component="span" sx={{ color: 'text.secondary' }}>
-                        {data.schuelerFeedback.uebungsEmpfehlung}
-                      </Box>
-                    </Box>
+                  <Stack spacing={2.5} sx={{ mt: 1 }}>
+                    <TextField
+                      label="Hilfreicher Tipp"
+                      value={data.schuelerFeedback.hilfreicherTipp}
+                      onChange={(e) => handleFeedbackChange('hilfreicherTipp', e.target.value)}
+                      fullWidth
+                      multiline
+                      rows={2}
+                      variant="outlined"
+                      size="small"
+                      sx={{
+                        '& .MuiOutlinedInput-root': {
+                          borderRadius: '8px',
+                          backgroundColor: '#faf5ff',
+                        },
+                        '& .MuiInputLabel-root': {
+                          color: 'secondary.dark',
+                        },
+                      }}
+                    />
+                    <TextField
+                      label="Übungs-Empfehlung"
+                      value={data.schuelerFeedback.uebungsEmpfehlung}
+                      onChange={(e) => handleFeedbackChange('uebungsEmpfehlung', e.target.value)}
+                      fullWidth
+                      multiline
+                      rows={2}
+                      variant="outlined"
+                      size="small"
+                      sx={{
+                        '& .MuiOutlinedInput-root': {
+                          borderRadius: '8px',
+                          backgroundColor: '#f0fdf4',
+                        },
+                        '& .MuiInputLabel-root': {
+                          color: 'success.main',
+                        },
+                      }}
+                    />
                   </Stack>
                 </CardContent>
               </Card>

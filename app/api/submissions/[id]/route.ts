@@ -101,7 +101,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
 
     const { id: submissionId } = await params;
     const body = await request.json();
-    const { aufgaben } = body; // Array of updated tasks
+    const { aufgaben, schuelerFeedback } = body; // Array of updated tasks + optional student feedback
 
     if (!Array.isArray(aufgaben)) {
       return NextResponse.json({ error: 'Ungültige Aufgaben-Daten.' }, { status: 400 });
@@ -186,6 +186,14 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
           earnedPoints: totalEarnedPoints,
           gradeRaw: rawGrade,
           gradeRounded: roundedGrade,
+          helpfulTip:
+            schuelerFeedback?.hilfreicherTipp !== undefined
+              ? schuelerFeedback.hilfreicherTipp
+              : undefined,
+          exerciseRecommendation:
+            schuelerFeedback?.uebungsEmpfehlung !== undefined
+              ? schuelerFeedback.uebungsEmpfehlung
+              : undefined,
         },
       });
 
