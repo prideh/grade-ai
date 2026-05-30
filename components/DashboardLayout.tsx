@@ -70,6 +70,43 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
     checkAuth();
   }, [router]);
 
+  // Auto-dismiss any active dropdown/menu/popover when scrolling the page
+  useEffect(() => {
+    const handleScroll = (event: Event) => {
+      const target = event.target as HTMLElement;
+      // Do not close if scrolling inside the dropdown list itself
+      if (
+        target &&
+        (target.closest?.('.MuiMenu-list') ||
+          target.closest?.('.MuiPopover-root') ||
+          target.closest?.('.MuiAutocomplete-popper'))
+      ) {
+        return;
+      }
+
+      // Close any active select dropdown/menu/popover
+      const activeElement = document.activeElement as HTMLElement;
+      if (activeElement && activeElement !== document.body) {
+        const escEvent = new KeyboardEvent('keydown', {
+          key: 'Escape',
+          code: 'Escape',
+          keyCode: 27,
+          which: 27,
+          bubbles: true,
+          cancelable: true,
+        });
+        activeElement.dispatchEvent(escEvent);
+        document.dispatchEvent(escEvent);
+        activeElement.blur();
+      }
+    };
+
+    window.addEventListener('scroll', handleScroll, true);
+    return () => {
+      window.removeEventListener('scroll', handleScroll, true);
+    };
+  }, []);
+
   const handleDrawerToggle = () => {
     setMobileOpen(!mobileOpen);
   };

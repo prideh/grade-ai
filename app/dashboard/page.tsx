@@ -150,9 +150,14 @@ export default function Dashboard() {
       const examsRes = await fetch(`/api/classes/${classId}/exams`);
       if (examsRes.ok) {
         const examsData = await examsRes.json();
-        setExams(examsData.exams || []);
-        // Reset exam selection to NEW
-        setSelectedExamId('NEW');
+        const loadedExams = examsData.exams || [];
+        setExams(loadedExams);
+        // Pre-select the latest created exam if one exists, else NEW
+        if (loadedExams.length > 0) {
+          setSelectedExamId(loadedExams[0].id);
+        } else {
+          setSelectedExamId('NEW');
+        }
       }
     } catch (err) {
       console.error('Error fetching class details:', err);
