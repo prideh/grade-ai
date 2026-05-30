@@ -300,3 +300,46 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
     return NextResponse.json({ error: 'Zuweisung fehlgeschlagen.' }, { status: 500 });
   }
 }
+
+// DELETE: Delete a submission entirely
+export async function DELETE(request: Request, { params }: { params: Promise<{ id: string }> }) {
+  try {
+    const session = await getSession();
+    if (!session) {
+      return NextResponse.json({ error: 'Nicht autorisiert.' }, { status: 401 });
+    }
+
+    const { id: submissionId } = await params;
+
+    // Load the submission to verify ownership
+    const submission = await db.submission.findUnique({
+      where: { id: submissionId },
+      include: {
+        exam: {
+          include: {
+            class: true,
+          },
+        },
+      },
+    });
+
+    if (!submission) {
+      return NextResponse.json({ error: 'Korrektur nicht gefunden.' }, { status: 404 });
+    }
+
+    // Verify ownership
+    if (submission.exam.class.teacherId !== session.userId) {
+      return NextResponse.json({ error: 'Nicht autorisiert.' }, { status: 403 });
+    }
+
+    // Delete the submission (cascade will delete task and step corrections)
+    await db.submission.delete({
+      where: { id: submissionId },
+    });
+
+    return NextResponse.json({ success: true });
+  } catch (error) {
+    console.error('Error deleting submission:', error);
+    return NextResponse.json({ error: 'Löschen fehlgeschlagen.' }, { status: 500 });
+  }
+}

@@ -25,9 +25,11 @@ import {
   Select,
   MenuItem,
   Grid,
+  IconButton,
 } from '@mui/material';
 import HistoryIcon from '@mui/icons-material/History';
 import SearchIcon from '@mui/icons-material/Search';
+import DeleteIcon from '@mui/icons-material/Delete';
 import DashboardLayout from '@/components/DashboardLayout';
 
 interface ClassData {
@@ -110,6 +112,30 @@ export default function SubmissionsPage() {
       fetchData();
     });
   }, [fetchData]);
+
+  const handleDeleteSubmission = async (id: string) => {
+    if (
+      !confirm(
+        'Möchtest du diese Korrektur wirklich löschen? Dieser Schritt kann nicht rückgängig gemacht werden.'
+      )
+    ) {
+      return;
+    }
+
+    try {
+      const res = await fetch(`/api/submissions/${id}`, {
+        method: 'DELETE',
+      });
+
+      if (!res.ok) {
+        throw new Error('Korrektur konnte nicht gelöscht werden.');
+      }
+
+      fetchData();
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Fehler beim Löschen.');
+    }
+  };
 
   // Filter Logic
   const filteredSubmissions = submissions.filter((sub) => {
@@ -375,15 +401,36 @@ export default function SubmissionsPage() {
                     </TableCell>
                     <TableCell>{sub.date}</TableCell>
                     <TableCell sx={{ textAlign: 'right' }}>
-                      <Link href={`/correct/${sub.id}`} passHref style={{ textDecoration: 'none' }}>
-                        <Button
-                          variant="outlined"
-                          size="small"
-                          sx={{ textTransform: 'none', fontWeight: 600 }}
+                      <Box
+                        sx={{
+                          display: 'flex',
+                          gap: '8px',
+                          justifyContent: 'flex-end',
+                          alignItems: 'center',
+                        }}
+                      >
+                        <Link
+                          href={`/correct/${sub.id}`}
+                          passHref
+                          style={{ textDecoration: 'none' }}
                         >
-                          Workspace öffnen
-                        </Button>
-                      </Link>
+                          <Button
+                            variant="outlined"
+                            size="small"
+                            sx={{ textTransform: 'none', fontWeight: 600 }}
+                          >
+                            Workspace öffnen
+                          </Button>
+                        </Link>
+                        <IconButton
+                          size="small"
+                          color="error"
+                          onClick={() => handleDeleteSubmission(sub.id)}
+                          title="Korrektur löschen / abbrechen"
+                        >
+                          <DeleteIcon fontSize="small" />
+                        </IconButton>
+                      </Box>
                     </TableCell>
                   </TableRow>
                 ))}
