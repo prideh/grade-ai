@@ -49,10 +49,10 @@ Grade AI is an advanced K-12 grading and correction platform built for teachers.
 The centralized cockpit for managing school classes, active student tasks, and tracking cohort statistics (class averages).
 ![Teacher Dashboard](/public/screenshots/dashboard.png)
 
-### 2. Live Correction Workspace (Anna C.)
+### 2. Live Correction Workspace (Anna Muster)
 
 Side-by-side view of student handwriting transcript alongside step-by-step automatic mathematical assessment.
-![Teacher Workspace - Anna C.](/public/screenshots/correct_anna.png)
+![Teacher Workspace - Anna Muster](/public/screenshots/correct_anna.png)
 
 ### 3. Consequential Error Tracking (Mahdi Nasserzadeh)
 
