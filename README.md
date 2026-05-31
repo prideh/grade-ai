@@ -42,6 +42,25 @@ Grade AI is an advanced K-12 grading and correction platform built for teachers.
 
 ---
 
+## 📸 App Screenshots
+
+### 1. Teacher Dashboard
+
+The centralized cockpit for managing school classes, active student tasks, and tracking cohort statistics (class averages).
+![Teacher Dashboard](/public/screenshots/dashboard.png)
+
+### 2. Live Correction Workspace (Anna Cao)
+
+Side-by-side view of student handwriting transcript alongside step-by-step automatic mathematical assessment.
+![Teacher Workspace - Anna Cao](/public/screenshots/correct_anna.png)
+
+### 3. Consequential Error Tracking (Mahdi Nasserzadeh)
+
+Visual orange-ink overlays representing fully credited carry-over errors (_Folgefehler_) to ensure students are never double-penalized.
+![Teacher Workspace - Mahdi Nasserzadeh](/public/screenshots/correct_mahdi.png)
+
+---
+
 ## 🛠️ Technology Stack
 
 - **Frontend & Routing:** Next.js 16 (App Router), React 19
@@ -107,6 +126,7 @@ Prepare your database structures and generate the local Prisma client:
    npx prisma db push
    ```
 3. Populate default classes, exams, students, and sample submissions:
+
    ```bash
    npx prisma db seed
    ```
