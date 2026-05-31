@@ -21,8 +21,6 @@ import {
   Tab,
   useTheme,
   CircularProgress,
-  FormControlLabel,
-  Checkbox,
   IconButton,
   Tooltip,
   Dialog,
@@ -33,8 +31,6 @@ import {
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import PrintIcon from '@mui/icons-material/Print';
 import SaveIcon from '@mui/icons-material/Save';
-import CheckCircleIcon from '@mui/icons-material/CheckCircle';
-import WarningIcon from '@mui/icons-material/Warning';
 import ErrorIcon from '@mui/icons-material/Error';
 import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome';
 import AddIcon from '@mui/icons-material/Add';
@@ -545,56 +541,6 @@ export default function CorrectWorkspace() {
 
     setData(updatedResult);
     // Auto-save Error Type adjustments directly to PostgreSQL (debounced)
-    saveToDatabase(updatedResult);
-  };
-
-  // Handle toggling the Folgefehler status for the active task
-  const handleFolgefehlerToggle = (checked: boolean) => {
-    if (!data) return;
-
-    const updatedTasks = [...data.aufgaben];
-    const task = { ...updatedTasks[activeTaskIndex] };
-
-    if (checked) {
-      task.status = 'Folgefehler';
-      // Auto-upgrade first incorrect step to Folgefehler if none is already
-      const firstIncorrectStep = task.schritte.find((s) => s.fehlerTyp !== 'KeinFehler');
-      if (firstIncorrectStep && !task.schritte.some((s) => s.fehlerTyp === 'Folgefehler')) {
-        firstIncorrectStep.fehlerTyp = 'Folgefehler';
-      }
-    } else {
-      const allStepsCorrect = task.schritte.every((s) => s.fehlerTyp === 'KeinFehler');
-      task.status = allStepsCorrect ? 'Korrekt' : 'Fehler';
-
-      // Reset any step marked as Folgefehler to SonstigerFehler
-      task.schritte.forEach((s) => {
-        if (s.fehlerTyp === 'Folgefehler') {
-          s.fehlerTyp = 'SonstigerFehler';
-        }
-      });
-    }
-
-    // Recalculate task points and total grades since step types and points might have changed
-    task.erzieltePunkte =
-      Math.round(task.schritte.reduce((sum, s) => sum + s.erreichtePunkte, 0) * 10) / 10;
-    updatedTasks[activeTaskIndex] = task;
-
-    const totalScore =
-      Math.round(updatedTasks.reduce((sum, t) => sum + t.erzieltePunkte, 0) * 10) / 10;
-
-    const maxScore = data.gesamtmaximalPunkte;
-    const rawGrade = maxScore > 0 ? 5 * (totalScore / maxScore) + 1 : 1;
-    const newGrade = (Math.round(rawGrade * 10) / 10).toFixed(1);
-
-    const updatedResult = {
-      ...data,
-      aufgaben: updatedTasks,
-      gesamterzieltePunkte: totalScore,
-      note: newGrade,
-    };
-
-    setData(updatedResult);
-    // Auto-save task status directly to PostgreSQL
     saveToDatabase(updatedResult);
   };
 
@@ -1155,69 +1101,18 @@ export default function CorrectWorkspace() {
                 gap: '24px',
               }}
             >
-              {/* Task title and points */}
-              <Stack
-                direction="row"
-                sx={{ justifyContent: 'space-between', alignItems: 'flex-start', flexShrink: 0 }}
-              >
-                <Box>
-                  <Typography
-                    variant="caption"
-                    sx={{ color: 'primary.main', fontWeight: 650, letterSpacing: '0.05em' }}
-                  >
-                    AKTIVE AUFGABE
-                  </Typography>
-                  <Typography
-                    variant="h5"
-                    component="h3"
-                    sx={{ fontWeight: 700, marginTop: '4px' }}
-                  >
-                    {activeTask.titel}
-                  </Typography>
-                </Box>
-
-                <Stack direction="row" spacing={2} sx={{ alignItems: 'center' }}>
-                  <FormControlLabel
-                    control={
-                      <Checkbox
-                        checked={activeTask.status === 'Folgefehler'}
-                        onChange={(e) => handleFolgefehlerToggle(e.target.checked)}
-                        color="warning"
-                        size="small"
-                      />
-                    }
-                    label={
-                      <Typography variant="body2" sx={{ fontWeight: 600, color: 'text.secondary' }}>
-                        Folgefehler berücksichtigen
-                      </Typography>
-                    }
-                  />
-                  <Chip
-                    label={
-                      activeTask.status === 'Folgefehler'
-                        ? 'Folgefehler erkannt'
-                        : activeTask.status
-                    }
-                    color={
-                      activeTask.status === 'Korrekt'
-                        ? 'success'
-                        : activeTask.status === 'Folgefehler'
-                          ? 'warning'
-                          : 'error'
-                    }
-                    icon={
-                      activeTask.status === 'Korrekt' ? (
-                        <CheckCircleIcon />
-                      ) : activeTask.status === 'Folgefehler' ? (
-                        <WarningIcon />
-                      ) : (
-                        <ErrorIcon />
-                      )
-                    }
-                    sx={{ fontWeight: 'bold' }}
-                  />
-                </Stack>
-              </Stack>
+              {/* Task title */}
+              <Box sx={{ flexShrink: 0 }}>
+                <Typography
+                  variant="caption"
+                  sx={{ color: 'primary.main', fontWeight: 650, letterSpacing: '0.05em' }}
+                >
+                  AKTIVE AUFGABE
+                </Typography>
+                <Typography variant="h5" component="h3" sx={{ fontWeight: 700, marginTop: '4px' }}>
+                  {activeTask.titel}
+                </Typography>
+              </Box>
 
               {/* Steps breakdown list */}
               <Stack spacing={2} sx={{ flexShrink: 0 }}>
