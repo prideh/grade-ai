@@ -1,47 +1,50 @@
 import { NextResponse, after } from 'next/server';
 import { db } from '@/lib/db';
 import { getSession } from '@/lib/session';
-import { runLiveGeminiCorrection } from '@/lib/gemini';
+import { DEFAULT_GEMINI_MODEL, runLiveGeminiCorrection } from '@/lib/gemini';
+import {
+  calculateRawSwissGrade,
+  calculateSwissGrade,
+  matchStudentByNameWithConfidence,
+} from '@/lib/grading';
 import fs from 'fs/promises';
 import path from 'path';
 import crypto from 'crypto';
 
-// Helper to fuzzy match student names against class student database
-function matchStudentByName(
-  extractedName: string,
-  students: { id: string; name: string }[]
-): string | null {
-  const clean = (s: string) =>
-    s
-      .toLowerCase()
-      .replace(/[^a-z0-9]/g, '')
-      .trim();
-  const cleanExtracted = clean(extractedName);
-  if (!cleanExtracted) return null;
+// Allowed student exam MIME types and safe file extensions
+const ALLOWED_MIME_TO_EXT: Record<string, string> = {
+  'application/pdf': 'pdf',
+  'image/jpeg': 'jpg',
+  'image/jpg': 'jpg',
+  'image/png': 'png',
+  'image/webp': 'webp',
+};
 
-  // 1. Exact match after cleaning
-  let matches = students.filter((s) => clean(s.name) === cleanExtracted);
-  if (matches.length === 1) return matches[0].id;
-
-  // 2. Part match: database name contains extracted name, or vice versa
-  matches = students.filter((s) => {
-    const cleanDb = clean(s.name);
-    return cleanDb.includes(cleanExtracted) || cleanExtracted.includes(cleanDb);
-  });
-  if (matches.length === 1) return matches[0].id;
-
-  // 3. Token-based matching (e.g. "Max Mustermann" matches "Max" or "Mustermann" if unique)
-  const extractedTokens = cleanExtracted.split(/\s+/).filter(Boolean);
-  matches = students.filter((s) => {
-    const dbTokens = clean(s.name).split(/\s+/).filter(Boolean);
-    return (
-      dbTokens.some((t) => extractedTokens.includes(t)) ||
-      extractedTokens.some((t) => dbTokens.includes(t))
-    );
-  });
-  if (matches.length === 1) return matches[0].id;
-
+function resolveSafeFileFormat(file: File): { mimeType: string; ext: string } | null {
+  const mime = (file.type || '').toLowerCase();
+  if (ALLOWED_MIME_TO_EXT[mime]) {
+    return { mimeType: mime === 'image/jpg' ? 'image/jpeg' : mime, ext: ALLOWED_MIME_TO_EXT[mime] };
+  }
+  const rawExt = (file.name.split('.').pop() || '').toLowerCase();
+  if (rawExt === 'pdf') return { mimeType: 'application/pdf', ext: 'pdf' };
+  if (rawExt === 'png') return { mimeType: 'image/png', ext: 'png' };
+  if (rawExt === 'webp') return { mimeType: 'image/webp', ext: 'webp' };
+  if (rawExt === 'jpg' || rawExt === 'jpeg') return { mimeType: 'image/jpeg', ext: 'jpg' };
   return null;
+}
+
+function parseStoredMaterial(
+  rawText?: string | null
+): string | { mimeType: string; data: string } | null {
+  if (!rawText) return null;
+  if (rawText.startsWith('{"mimeType":')) {
+    try {
+      return JSON.parse(rawText);
+    } catch {
+      return rawText;
+    }
+  }
+  return rawText;
 }
 
 export async function POST(request: Request) {
@@ -62,10 +65,14 @@ export async function POST(request: Request) {
     const examTitle = formData.get('examTitle') as string | null;
     const examSubject = formData.get('examSubject') as string | null;
     const rubric = formData.get('rubric') as File | string | null;
+    const examTemplate = formData.get('examTemplate') as File | string | null;
+    const gradingNotes = formData.get('gradingNotes') as string | null;
+    const gradingFormula = (formData.get('gradingFormula') as string | null) || 'LINEAR_60';
+    const gradeRounding = (formData.get('gradeRounding') as string | null) || '0.1';
 
     // Core parameters
     const studentExam = formData.get('studentExam') as File | null;
-    const model = (formData.get('model') as string) || 'gemini-3.5-flash';
+    const model = DEFAULT_GEMINI_MODEL;
     const apiKey = process.env.GEMINI_API_KEY;
 
     if (!apiKey) {
@@ -87,6 +94,22 @@ export async function POST(request: Request) {
         { error: 'Es wurde keine Schülerarbeit hochgeladen.' },
         { status: 400 }
       );
+    }
+
+    const safeFormat = resolveSafeFileFormat(studentExam);
+    if (!safeFormat) {
+      return NextResponse.json(
+        { error: 'Ungültiges Dateiformat. Erlaubt sind PDF, JPG, PNG und WebP.' },
+        { status: 400 }
+      );
+    }
+
+    // Verify class exists and belongs to the authenticated teacher
+    const classRecord = await db.class.findFirst({
+      where: { id: classId, teacherId: session.userId },
+    });
+    if (!classRecord) {
+      return NextResponse.json({ error: 'Keine Berechtigung für diese Klasse.' }, { status: 403 });
     }
 
     // Pre-flight check: If studentId and examId are selected
@@ -118,13 +141,13 @@ export async function POST(request: Request) {
     let finalExamId = examId;
 
     if (examId) {
-      // Fetch existing exam details
-      const existingExam = await db.exam.findUnique({
-        where: { id: examId },
+      // Fetch existing exam details and verify it belongs to the target class
+      const existingExam = await db.exam.findFirst({
+        where: { id: examId, classId },
       });
       if (!existingExam) {
         return NextResponse.json(
-          { error: 'Ausgewählte Prüfung existiert nicht.' },
+          { error: 'Ausgewählte Prüfung existiert nicht in dieser Klasse.' },
           { status: 404 }
         );
       }
@@ -178,6 +201,24 @@ export async function POST(request: Request) {
         where: { title: examTitle, classId },
       });
 
+      let examTemplateString: string | null = null;
+      if (examTemplate) {
+        if (typeof examTemplate === 'string') {
+          examTemplateString = examTemplate.trim() || null;
+        } else {
+          const tplMime = examTemplate.type || '';
+          const tplBytes = await examTemplate.arrayBuffer();
+          if (tplMime.startsWith('image/') || tplMime === 'application/pdf') {
+            examTemplateString = JSON.stringify({
+              mimeType: tplMime,
+              data: Buffer.from(tplBytes).toString('base64'),
+            });
+          } else {
+            examTemplateString = Buffer.from(tplBytes).toString('utf-8');
+          }
+        }
+      }
+
       if (existingExam) {
         finalExamId = existingExam.id;
       } else {
@@ -186,6 +227,10 @@ export async function POST(request: Request) {
             title: examTitle,
             subject: examSubject,
             rubricText: rubricTextString,
+            examTemplateText: examTemplateString,
+            gradingNotes: gradingNotes?.trim() || null,
+            gradingFormula,
+            gradeRounding,
             maxPoints: 0, // Will be updated by the first finished correction
             classId: classId,
           },
@@ -207,24 +252,20 @@ export async function POST(request: Request) {
     await fs.mkdir(uploadsDir, { recursive: true });
 
     const submissionId = crypto.randomUUID();
-    const fileExtension = studentExam.name.split('.').pop() || 'jpg';
-    const fileName = `${submissionId}.${fileExtension}`;
+    const fileName = `${submissionId}.${safeFormat.ext}`;
     const filePath = path.join(uploadsDir, fileName);
     await fs.writeFile(filePath, Buffer.from(studentBytes));
     const savedFilePath = `/uploads/${fileName}`;
 
-    // Fetch names synchronously for decouple logging
-    const [classRecord, examRecordSync] = await Promise.all([
-      db.class.findUnique({ where: { id: classId } }),
-      db.exam.findUnique({ where: { id: finalExamId } }),
-    ]);
+    // Fetch exam name synchronously for decoupled logging
+    const examRecordSync = await db.exam.findUnique({ where: { id: finalExamId } });
 
-    const resolvedClassName = classRecord?.name || 'Unbekannte Klasse';
+    const resolvedClassName = classRecord.name || 'Unbekannte Klasse';
     const resolvedExamTitle = examRecordSync?.title || 'Unbekannte Prüfung';
 
     let resolvedStudentName = 'Automatische Zuordnung';
     if (studentId) {
-      const studentRecord = await db.student.findUnique({ where: { id: studentId } });
+      const studentRecord = await db.student.findFirst({ where: { id: studentId, classId } });
       if (studentRecord) {
         resolvedStudentName = studentRecord.name;
       }
@@ -295,46 +336,191 @@ export async function POST(request: Request) {
               }))
             : undefined;
 
-        // 3. Run live Gemini OCR and correction analysis
+        // 3. Run live Gemini OCR and correction analysis with 3-tier reference hierarchy
+        const examTemplateParam = parseStoredMaterial(examRecord?.examTemplateText);
         const result = await runLiveGeminiCorrection(
           studentBase64,
           rubricParam,
-          model as 'gemini-3.5-flash' | 'gemini-3.1-pro-preview',
+          model,
           apiKey,
-          studentExam.type || 'image/jpeg',
-          predefinedTasks
+          safeFormat.mimeType,
+          predefinedTasks,
+          examRecord?.subject,
+          {
+            examTemplate: examTemplateParam,
+            gradingNotes: examRecord?.gradingNotes,
+          }
         );
 
-        // 4. Perform AI Auto-Matching if studentId was not provided synchronously
+        // 4. Perform AI Auto-Matching with explicit confidence calibration if studentId was not provided synchronously
         let matchedStudentId = studentId || null;
-        if (!matchedStudentId && result.schuelerName) {
+        let suggestedStudentId: string | null = null;
+        let isStudentMatchUncertain = false;
+        const extractedStudentName = (result.schuelerName || '').trim() || null;
+
+        if (!matchedStudentId) {
           const classStudents = await db.student.findMany({
             where: { classId },
           });
-          matchedStudentId = matchStudentByName(result.schuelerName, classStudents);
-          if (matchedStudentId) {
+          const matchResult = matchStudentByNameWithConfidence(
+            extractedStudentName || '',
+            classStudents,
+            Boolean(result.istNameUnsicher)
+          );
+          suggestedStudentId = matchResult.suggestedStudentId;
+
+          if (matchResult.confidence === 'HIGH' && matchResult.matchedStudentId) {
+            matchedStudentId = matchResult.matchedStudentId;
+            isStudentMatchUncertain = false;
             const matchedRec = classStudents.find((s) => s.id === matchedStudentId);
             if (matchedRec) {
               finalStudentName = matchedRec.name;
             }
           } else {
-            finalStudentName = `${result.schuelerName} (Nicht zugeordnet)`;
+            matchedStudentId = null;
+            isStudentMatchUncertain = true;
+            finalStudentName = extractedStudentName
+              ? `${extractedStudentName} (Nicht zugeordnet)`
+              : 'Nicht zugeordnet';
           }
         }
 
-        // 5. Update Exam maxPoints based on the resolved points of the first finished grading
+        // 5. Build deterministic task & step corrections and compute server-authoritative points
+        const taskCorrectionsData: {
+          id: string;
+          submissionId: string;
+          taskId: string;
+          title: string;
+          studentAnswer: string;
+          erzieltePunkte: number;
+          maximalPunkte: number;
+          status: 'Korrekt' | 'Folgefehler' | 'Fehler';
+          lehrerKommentar: string;
+          orderIndex: number;
+        }[] = [];
+        const stepCorrectionsData: {
+          id: string;
+          taskCorrectionId: string;
+          schrittIndex: number;
+          schrittText: string;
+          istKorrekt: boolean;
+          fehlerTyp: 'KeinFehler' | 'Rechenfehler' | 'Folgefehler' | 'SonstigerFehler';
+          erreichtePunkte: number;
+          maximalPunkte: number;
+          begruendung: string;
+          istUnsicher: boolean;
+          unsicherheitsGrund: string | null;
+        }[] = [];
+
+        let serverTotalEarnedPoints = 0;
+        let serverTotalMaxPoints = 0;
+
+        for (let tIdx = 0; tIdx < result.aufgaben.length; tIdx++) {
+          const task = result.aufgaben[tIdx];
+
+          let taskStatus: 'Korrekt' | 'Folgefehler' | 'Fehler' = 'Korrekt';
+          if (task.status === 'Folgefehler') taskStatus = 'Folgefehler';
+          else if (task.status === 'Fehler') taskStatus = 'Fehler';
+
+          const taskCorrectionId = crypto.randomUUID();
+
+          let calculatedTaskPoints = 0;
+          const hasSteps = Array.isArray(task.schritte) && task.schritte.length > 0;
+
+          if (hasSteps) {
+            for (const step of task.schritte) {
+              let errorType: 'KeinFehler' | 'Rechenfehler' | 'Folgefehler' | 'SonstigerFehler' =
+                'KeinFehler';
+              if (step.fehlerTyp === 'Rechenfehler') errorType = 'Rechenfehler';
+              else if (step.fehlerTyp === 'Folgefehler') errorType = 'Folgefehler';
+              else if (step.fehlerTyp === 'SonstigerFehler') errorType = 'SonstigerFehler';
+
+              const clampedStepMax = Math.max(0, Number(step.maximalPunkte || 0));
+              const clampedStepEarned = Math.max(
+                0,
+                Math.min(clampedStepMax, Number(step.erreichtePunkte || 0))
+              );
+
+              calculatedTaskPoints += clampedStepEarned;
+
+              const isStepUncertain = Boolean(step.istUnsicher);
+              stepCorrectionsData.push({
+                id: crypto.randomUUID(),
+                taskCorrectionId: taskCorrectionId,
+                schrittIndex: step.schrittIndex,
+                schrittText: step.schrittText,
+                istKorrekt: step.istKorrekt,
+                fehlerTyp: errorType,
+                erreichtePunkte: clampedStepEarned,
+                maximalPunkte: clampedStepMax,
+                begruendung: step.begruendung || '',
+                istUnsicher: isStepUncertain,
+                unsicherheitsGrund: isStepUncertain
+                  ? step.unsicherheitsGrund || 'Bitte diesen Teilschritt manuell überprüfen.'
+                  : null,
+              });
+            }
+          }
+
+          const clampedTaskMax = Math.max(0, Number(task.maximalPunkte || 0));
+          const finalTaskPoints = hasSteps
+            ? Math.min(clampedTaskMax, Math.round(calculatedTaskPoints * 10) / 10)
+            : Math.max(0, Math.min(clampedTaskMax, Number(task.erzieltePunkte || 0)));
+
+          serverTotalEarnedPoints =
+            Math.round((serverTotalEarnedPoints + finalTaskPoints) * 10) / 10;
+          serverTotalMaxPoints = Math.round((serverTotalMaxPoints + clampedTaskMax) * 10) / 10;
+
+          taskCorrectionsData.push({
+            id: taskCorrectionId,
+            submissionId: submissionId,
+            taskId: task.aufgabeId,
+            title: task.titel,
+            studentAnswer: task.schuelerAntwort,
+            erzieltePunkte: finalTaskPoints,
+            maximalPunkte: clampedTaskMax,
+            status: taskStatus,
+            lehrerKommentar: task.lehrerKommentar || '',
+            orderIndex: tIdx,
+          });
+        }
+
+        // Update Exam maxPoints based on the resolved points of the first finished grading
         // ONLY if the exam has NO predefined tasks yet!
         const hasPredefinedTasks = examRecord && examRecord.tasks && examRecord.tasks.length > 0;
+        const resolvedMaxPoints =
+          serverTotalMaxPoints > 0 ? serverTotalMaxPoints : result.gesamtmaximalPunkte;
+
         if (
           examRecord &&
           !hasPredefinedTasks &&
-          (examRecord.maxPoints === 0 || examRecord.maxPoints !== result.gesamtmaximalPunkte)
+          resolvedMaxPoints > 0 &&
+          (examRecord.maxPoints === 0 || examRecord.maxPoints !== resolvedMaxPoints)
         ) {
           await db.exam.update({
             where: { id: finalExamId },
-            data: { maxPoints: result.gesamtmaximalPunkte },
+            data: { maxPoints: resolvedMaxPoints },
           });
         }
+
+        const effectiveMaxPoints =
+          hasPredefinedTasks && examRecord.maxPoints > 0
+            ? examRecord.maxPoints
+            : resolvedMaxPoints > 0
+              ? resolvedMaxPoints
+              : examRecord?.maxPoints || 0;
+
+        const rawGrade = calculateRawSwissGrade(
+          serverTotalEarnedPoints,
+          effectiveMaxPoints,
+          examRecord?.gradingFormula || 'LINEAR_60'
+        );
+        const roundedGrade = calculateSwissGrade(
+          serverTotalEarnedPoints,
+          effectiveMaxPoints,
+          examRecord?.gradingFormula || 'LINEAR_60',
+          examRecord?.gradeRounding || '0.1'
+        );
 
         // 6. Execute transaction to write AI grading results
         await db.$transaction(async (tx) => {
@@ -367,82 +553,19 @@ export async function POST(request: Request) {
             data: {
               studentId: matchedStudentId, // Can be null if unmatched (unassigned)
               targetStudentId: null, // Clear the temporary target field on completion
+              extractedStudentName,
+              suggestedStudentId,
+              isStudentMatchUncertain,
               status: 'COMPLETED',
-              earnedPoints: result.gesamterzieltePunkte,
-              gradeRaw: parseFloat(result.note),
-              gradeRounded: result.note,
+              earnedPoints: serverTotalEarnedPoints,
+              gradeRaw: rawGrade,
+              gradeRounded: roundedGrade,
               strengths: result.schuelerFeedback.staerken,
               weaknesses: result.schuelerFeedback.schwaechen,
               helpfulTip: result.schuelerFeedback.hilfreicherTipp,
               exerciseRecommendation: result.schuelerFeedback.uebungsEmpfehlung,
             },
           });
-
-          // Batch Task and Step corrections
-          const taskCorrectionsData = [];
-          const stepCorrectionsData = [];
-
-          for (let tIdx = 0; tIdx < result.aufgaben.length; tIdx++) {
-            const task = result.aufgaben[tIdx];
-
-            let taskStatus: 'Korrekt' | 'Folgefehler' | 'Fehler' = 'Korrekt';
-            if (task.status === 'Folgefehler') taskStatus = 'Folgefehler';
-            else if (task.status === 'Fehler') taskStatus = 'Fehler';
-
-            const taskCorrectionId = crypto.randomUUID();
-
-            let calculatedTaskPoints = 0;
-            const hasSteps = Array.isArray(task.schritte) && task.schritte.length > 0;
-
-            // Insert Teilschritte
-            if (hasSteps) {
-              for (const step of task.schritte) {
-                let errorType: 'KeinFehler' | 'Rechenfehler' | 'Folgefehler' | 'SonstigerFehler' =
-                  'KeinFehler';
-                if (step.fehlerTyp === 'Rechenfehler') errorType = 'Rechenfehler';
-                else if (step.fehlerTyp === 'Folgefehler') errorType = 'Folgefehler';
-                else if (step.fehlerTyp === 'SonstigerFehler') errorType = 'SonstigerFehler';
-
-                const clampedStepMax = Math.max(0, Number(step.maximalPunkte || 0));
-                const clampedStepEarned = Math.max(
-                  0,
-                  Math.min(clampedStepMax, Number(step.erreichtePunkte || 0))
-                );
-
-                calculatedTaskPoints += clampedStepEarned;
-
-                stepCorrectionsData.push({
-                  id: crypto.randomUUID(),
-                  taskCorrectionId: taskCorrectionId,
-                  schrittIndex: step.schrittIndex,
-                  schrittText: step.schrittText,
-                  istKorrekt: step.istKorrekt,
-                  fehlerTyp: errorType,
-                  erreichtePunkte: clampedStepEarned,
-                  maximalPunkte: clampedStepMax,
-                  begruendung: step.begruendung || '',
-                });
-              }
-            }
-
-            const clampedTaskMax = Math.max(0, Number(task.maximalPunkte || 0));
-            const finalTaskPoints = hasSteps
-              ? Math.round(calculatedTaskPoints * 10) / 10
-              : Math.max(0, Math.min(clampedTaskMax, Number(task.erzieltePunkte || 0)));
-
-            taskCorrectionsData.push({
-              id: taskCorrectionId,
-              submissionId: submissionId,
-              taskId: task.aufgabeId,
-              title: task.titel,
-              studentAnswer: task.schuelerAntwort,
-              erzieltePunkte: finalTaskPoints,
-              maximalPunkte: clampedTaskMax,
-              status: taskStatus,
-              lehrerKommentar: task.lehrerKommentar || '',
-              orderIndex: tIdx,
-            });
-          }
 
           if (taskCorrectionsData.length > 0) {
             await tx.taskCorrection.createMany({
@@ -475,7 +598,7 @@ export async function POST(request: Request) {
           error && typeof error === 'object' && 'code' in error && error.code === 'P2025';
 
         if (isCancelled) {
-          console.log(
+          console.info(
             `Background grading for submission ${submissionId} was cancelled by the user (record deleted).`
           );
 
@@ -528,7 +651,7 @@ export async function POST(request: Request) {
           if (!isDbErrCancelled) {
             console.error(`Failed to set FAILED state on submission ${submissionId}:`, dbErr);
           } else {
-            console.log(
+            console.info(
               `Failed to set FAILED state: submission ${submissionId} was already deleted (cancelled).`
             );
           }

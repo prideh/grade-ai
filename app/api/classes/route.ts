@@ -9,14 +9,40 @@ export async function GET() {
       return NextResponse.json({ error: 'Nicht autorisiert.' }, { status: 401 });
     }
 
-    const classes = await db.class.findMany({
+    const rawClasses = await db.class.findMany({
       where: { teacherId: session.userId },
       include: {
         _count: {
-          select: { students: true },
+          select: { students: true, exams: true },
+        },
+        exams: {
+          select: {
+            submissions: {
+              where: { status: 'COMPLETED' },
+              select: { gradeRaw: true },
+            },
+          },
         },
       },
       orderBy: { name: 'asc' },
+    });
+
+    const classes = rawClasses.map((cls) => {
+      const allGrades = cls.exams.flatMap((ex) => ex.submissions.map((s) => s.gradeRaw));
+      const avg =
+        allGrades.length > 0
+          ? (allGrades.reduce((sum, g) => sum + g, 0) / allGrades.length).toFixed(2)
+          : 'N/A';
+
+      return {
+        id: cls.id,
+        name: cls.name,
+        teacherId: cls.teacherId,
+        createdAt: cls.createdAt,
+        _count: { students: cls._count.students },
+        totalExams: cls._count.exams,
+        averageGrade: avg,
+      };
     });
 
     return NextResponse.json({ classes });

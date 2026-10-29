@@ -1,4 +1,4 @@
-name: CI
+name: GradeAi CI/CD Pipeline
 
 on:
   push:
@@ -6,25 +6,188 @@ on:
   pull_request:
     branches: [main, master]
 
-jobs:
-  build:
-    runs-on: ubuntu-latest
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
+env:
+  JWT_SECRET: ci-test-jwt-secret-key-for-github-actions-32chars
+  GEMINI_API_KEY: ci-mock-gemini-api-key
+
+jobs:
+  # ============================================================================
+  # STAGE 1: Fast Gate — Orthography, Lint, Type-Check & Unit Tests (~30s)
+  # ============================================================================
+  static-and-unit:
+    name: 1. Lint, Typecheck & Unit Tests
+    runs-on: ubuntu-latest
     steps:
-      - name: Checkout code
+      - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Setup Node.js
+      - name: Setup Node.js 22
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '22'
           cache: 'npm'
 
       - name: Install dependencies
         run: npm ci
 
-      - name: Run Linter
+      - name: Enforce Swiss German Orthography (No Eszett "ß")
+        run: |
+          if git grep -n "ß" -- "app" "components" "lib" "prisma" "proxy.ts"; then
+            echo "❌ Found forbidden Eszett ('ß') character. Use 'ss' per Swiss German standards."
+            exit 1
+          fi
+
+      - name: Run ESLint
         run: npm run lint
 
-      - name: Build Project
+      - name: Run TypeScript Compiler Check
+        run: npx tsc --noEmit
+
+      - name: Run Vitest Unit Test Suite
+        run: npm run test:unit
+
+  # ============================================================================
+  # STAGE 2: Production Build & Smoke Tests (Server Boot, Proxy Auth & Routes)
+  # ============================================================================
+  build-and-smoke:
+    name: 2. Production Build & Smoke Tests
+    needs: static-and-unit
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: grade_ai
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/grade_ai?schema=public
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Push Prisma Schema to PostgreSQL
+        run: npx prisma db push
+
+      - name: Build Next.js Production Application
         run: npm run build
+
+      - name: Upload Production Build (.next) Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: next-production-build
+          path: .next
+          retention-days: 1
+
+      - name: Cache Playwright Chromium Binary
+        id: playwright-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: ${{ runner.os }}-playwright-${{ hashFiles('package-lock.json') }}
+
+      - name: Install Playwright Chromium
+        if: steps.playwright-cache.outputs.cache-hit != 'true'
+        run: npx playwright install --with-deps chromium
+
+      - name: Install Playwright OS Dependencies (Cache Hit)
+        if: steps.playwright-cache.outputs.cache-hit == 'true'
+        run: npx playwright install-deps chromium
+
+      - name: Run Smoke Tests against Production Server
+        run: npm run test:smoke
+
+  # ============================================================================
+  # STAGE 3: Full E2E Suite (Teacher Flows, Roster/CSV & Mobile QR Relay)
+  # ============================================================================
+  e2e-tests:
+    name: 3. Full E2E Tests (Playwright + PostgreSQL)
+    needs: build-and-smoke
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: grade_ai
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/grade_ai?schema=public
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Download Production Build (.next) Artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: next-production-build
+          path: .next
+
+      - name: Push Prisma Schema & Seed Baseline Database
+        run: |
+          npx prisma db push
+          npx tsx prisma/seed.ts
+
+      - name: Restore Playwright Chromium Binary
+        id: playwright-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: ${{ runner.os }}-playwright-${{ hashFiles('package-lock.json') }}
+
+      - name: Install Playwright Chromium
+        if: steps.playwright-cache.outputs.cache-hit != 'true'
+        run: npx playwright install --with-deps chromium
+
+      - name: Install Playwright OS Dependencies (Cache Hit)
+        if: steps.playwright-cache.outputs.cache-hit == 'true'
+        run: npx playwright install-deps chromium
+
+      - name: Run Full E2E Test Suite
+        run: npm run test:e2e
+
+      - name: Upload Playwright Report & Traces on Failure
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-e2e-report
+          path: |
+            playwright-report/
+            test-results/
+          retention-days: 7

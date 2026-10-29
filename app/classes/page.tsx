@@ -81,27 +81,15 @@ export default function ClassesPage() {
       if (!res.ok) throw new Error('Fehler beim Laden der Klassen.');
       const data = await res.json();
 
-      // For each class, fetch details to show total exams and class averages
-      const detailedClasses = await Promise.all(
-        (data.classes || []).map(async (cls: PrismaClassInfo) => {
-          try {
-            const detailRes = await fetch(`/api/classes/${cls.id}`);
-            if (detailRes.ok) {
-              const detailData = await detailRes.json();
-              return {
-                ...cls,
-                totalExams: detailData.exams?.length || 0,
-                averageGrade: detailData.stats?.averageGrade || 'N/A',
-              };
-            }
-          } catch (e) {
-            console.error('Error fetching details for class', cls.id, e);
-          }
-          return { ...cls, totalExams: 0, averageGrade: 'N/A' };
+      const loadedClasses: ClassListItem[] = (data.classes || []).map(
+        (cls: PrismaClassInfo & { totalExams?: number; averageGrade?: string }) => ({
+          ...cls,
+          totalExams: cls.totalExams ?? 0,
+          averageGrade: cls.averageGrade || 'N/A',
         })
       );
 
-      setClasses(detailedClasses);
+      setClasses(loadedClasses);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Ein unerwarteter Fehler ist aufgetreten.');
     } finally {

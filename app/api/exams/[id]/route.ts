@@ -23,6 +23,14 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
         submissions: {
           include: {
             student: true,
+            tasks: {
+              select: {
+                schritte: {
+                  where: { istUnsicher: true },
+                  select: { id: true },
+                },
+              },
+            },
           },
         },
         tasks: {
@@ -69,12 +77,13 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
         if (g > highestGrade) highestGrade = g;
         if (g < lowestGrade) lowestGrade = g;
 
-        // Bucketing for distribution histogram
-        if (g >= 1.0 && g < 2.0) gradeDistribution['1.0-2.0']++;
-        else if (g >= 2.0 && g < 3.0) gradeDistribution['2.0-3.0']++;
-        else if (g >= 3.0 && g < 4.0) gradeDistribution['3.0-4.0']++;
-        else if (g >= 4.0 && g < 5.0) gradeDistribution['4.0-5.0']++;
-        else if (g >= 5.0 && g <= 6.0) gradeDistribution['5.0-6.0']++;
+        // Bucketing for distribution histogram (clamped to [1.0, 6.0] Swiss scale)
+        const clampedG = Math.min(6.0, Math.max(1.0, g));
+        if (clampedG >= 1.0 && clampedG < 2.0) gradeDistribution['1.0-2.0']++;
+        else if (clampedG >= 2.0 && clampedG < 3.0) gradeDistribution['2.0-3.0']++;
+        else if (clampedG >= 3.0 && clampedG < 4.0) gradeDistribution['3.0-4.0']++;
+        else if (clampedG >= 4.0 && clampedG < 5.0) gradeDistribution['4.0-5.0']++;
+        else if (clampedG >= 5.0 && clampedG <= 6.0) gradeDistribution['5.0-6.0']++;
       });
 
       // Calculate Standard Deviation
@@ -97,6 +106,9 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
         grade: existingSub && existingSub.status === 'COMPLETED' ? existingSub.gradeRounded : 'N/A',
         earnedPoints: existingSub ? existingSub.earnedPoints.toFixed(1) : 'N/A',
         date: existingSub ? existingSub.createdAt.toLocaleDateString('de-CH') : 'N/A',
+        uncertainStepsCount: existingSub
+          ? existingSub.tasks.reduce((sum, t) => sum + t.schritte.length, 0)
+          : 0,
       };
     });
 
@@ -119,6 +131,10 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
         subject: exam.subject,
         maxPoints: exam.maxPoints,
         rubricText: exam.rubricText,
+        examTemplateText: exam.examTemplateText,
+        gradingNotes: exam.gradingNotes,
+        gradingFormula: exam.gradingFormula,
+        gradeRounding: exam.gradeRounding,
         classId: exam.classId,
         className: exam.class.name,
         createdAt: exam.createdAt.toLocaleDateString('de-CH'),
@@ -143,7 +159,17 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
 
     const { id: examId } = await params;
     const body = await request.json();
-    const { title, subject, rubricText, maxPoints, tasks } = body;
+    const {
+      title,
+      subject,
+      rubricText,
+      examTemplateText,
+      gradingNotes,
+      gradingFormula,
+      gradeRounding,
+      maxPoints,
+      tasks,
+    } = body;
 
     // Fetch existing exam
     const exam = await db.exam.findUnique({
@@ -176,6 +202,10 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
           title: title !== undefined ? title.trim() : undefined,
           subject: subject !== undefined ? subject.trim() : undefined,
           rubricText: rubricText !== undefined ? rubricText : undefined,
+          examTemplateText: examTemplateText !== undefined ? examTemplateText : undefined,
+          gradingNotes: gradingNotes !== undefined ? gradingNotes : undefined,
+          gradingFormula: gradingFormula !== undefined ? gradingFormula : undefined,
+          gradeRounding: gradeRounding !== undefined ? gradeRounding : undefined,
           maxPoints: finalMaxPoints,
         },
       });

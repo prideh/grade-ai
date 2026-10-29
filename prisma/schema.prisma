@@ -42,17 +42,21 @@ model Student {
 }
 
 model Exam {
-  id          String       @id @default(uuid())
-  title       String       // e.g. "Mathematik Klassenarbeit 1"
-  subject     String       // e.g. "Mathematik"
-  rubricText  String       // The plain text rubric / master solution
-  maxPoints   Float
-  classId     String
-  class       Class        @relation(fields: [classId], references: [id], onDelete: Cascade)
-  submissions Submission[]
-  tasks       ExamTask[]
-  createdAt   DateTime     @default(now())
-  updatedAt   DateTime     @updatedAt
+  id               String       @id @default(uuid())
+  title            String       // e.g. "Mathematik Klassenarbeit 1"
+  subject          String       // e.g. "Mathematik"
+  rubricText       String       // Tier 2: Musterlösung / Erwartungshorizont
+  examTemplateText String?      // Tier 1: Vorlagenprüfung (Aufgabenblatt / offizielle Punktelimits)
+  gradingNotes     String?      // Tier 3: Unterrichtsmaterial / zusätzliche Bewertungshinweise
+  gradingFormula   String       @default("LINEAR_60") // "LINEAR_60", "KNICK_50", "KNICK_66"
+  gradeRounding    String       @default("0.1")       // "0.1", "0.25", "0.5"
+  maxPoints        Float
+  classId          String
+  class            Class        @relation(fields: [classId], references: [id], onDelete: Cascade)
+  submissions      Submission[]
+  tasks            ExamTask[]
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
 }
 
 enum SubmissionStatus {
@@ -63,35 +67,39 @@ enum SubmissionStatus {
 }
 
 model Submission {
-  id                     String           @id @default(uuid())
-  examId                 String
-  exam                   Exam             @relation(fields: [examId], references: [id], onDelete: Cascade)
-  studentId              String?
-  student                Student?         @relation(fields: [studentId], references: [id], onDelete: Cascade)
-  targetStudentId        String?
-  status                 SubmissionStatus @default(PENDING)
-  
+  id                      String           @id @default(uuid())
+  examId                  String
+  exam                    Exam             @relation(fields: [examId], references: [id], onDelete: Cascade)
+  studentId               String?
+  student                 Student?         @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  targetStudentId         String?
+  extractedStudentName    String?
+  suggestedStudentId      String?
+  isStudentMatchUncertain Boolean          @default(false)
+  isExamMatchUncertain    Boolean          @default(false)
+  status                  SubmissionStatus @default(PENDING)
+
   // Grading metrics
   earnedPoints           Float            @default(0.0)
   gradeRaw               Float            @default(1.0)
-  gradeRounded           String           @default("1.0") // Schweizer note rounded (e.g. "5.0")
-  
+  gradeRounded           String           @default("1.0") // Schweizer Note gerundet (z. B. "5.0")
+
   // AI summary feedback
   strengths              String[]
   weaknesses             String[]
   helpfulTip             String?
   exerciseRecommendation String?
-  
+
   // Failure reason capturing
   errorMessage           String?
-  
+
   // Scan metadata
   // NOTE FOR PRODUCTION DEPLOYMENTS:
   // currently we are using Option A (local filesystem upload under public/uploads/).
-  // TODO: Migrate this schema and local filesystem helper functions to an S3-compatible cloud storage solution 
+  // TODO: Migrate this schema and local filesystem helper functions to an S3-compatible cloud storage solution
   // (e.g., AWS S3, Supabase Storage, or Vercel Blob) when deploying to high-volume multi-client production environments.
-  studentExamUrl         String?          
-  
+  studentExamUrl         String?
+
   tasks                  TaskCorrection[]
   createdAt              DateTime         @default(now())
   updatedAt              DateTime         @updatedAt
@@ -117,7 +125,7 @@ model TaskCorrection {
   status          TaskStatus
   lehrerKommentar String           @default("")
   orderIndex      Int              @default(0)
-  
+
   schritte        StepCorrection[]
   createdAt       DateTime         @default(now())
   updatedAt       DateTime         @updatedAt
@@ -131,18 +139,20 @@ enum ErrorType {
 }
 
 model StepCorrection {
-  id               String         @id @default(uuid())
-  taskCorrectionId String
-  taskCorrection   TaskCorrection @relation(fields: [taskCorrectionId], references: [id], onDelete: Cascade)
-  schrittIndex     Int
-  schrittText      String         // e.g. "4x = 16"
-  istKorrekt       Boolean
-  fehlerTyp        ErrorType
-  erreichtePunkte  Float          @default(0.0)
-  maximalPunkte    Float
-  begruendung      String
-  createdAt        DateTime       @default(now())
-  updatedAt        DateTime       @updatedAt
+  id                 String         @id @default(uuid())
+  taskCorrectionId   String
+  taskCorrection     TaskCorrection @relation(fields: [taskCorrectionId], references: [id], onDelete: Cascade)
+  schrittIndex       Int
+  schrittText        String         // e.g. "4x = 16"
+  istKorrekt         Boolean
+  fehlerTyp          ErrorType
+  erreichtePunkte    Float          @default(0.0)
+  maximalPunkte      Float
+  begruendung        String
+  istUnsicher        Boolean        @default(false)
+  unsicherheitsGrund String?
+  createdAt          DateTime       @default(now())
+  updatedAt          DateTime       @updatedAt
 }
 
 model ExamTask {
@@ -164,18 +174,18 @@ model CorrectionLog {
   createdAt     DateTime @default(now())
   submissionId  String?  // Links to active submission (nullified or kept upon deletion)
   teacherId     String   // Owner of this log (retained even if parent records are deleted)
-  
+
   // Decoupled context fields (preserved even if parent records are deleted)
   className     String
   examTitle     String
   studentName   String   @default("Automatische Zuordnung")
-  
+
   // Execution statistics
-  modelUsed     String   @default("gemini-3.5-flash")
+  modelUsed     String   @default("gemini-3.8-flash")
   durationMs    Int?     // Processing time in milliseconds
   status        String   // "PENDING", "PROCESSING", "COMPLETED", "FAILED", "CANCELLED"
   actionType    String   // "ERSTELLT" (new correction), "ERSETZT" (replaced conflict), "NEUSTART" (re-run from failure)
-  
+
   // Auditing payloads
   errorMessage  String?
 }

@@ -1,0 +1,161 @@
+import { test, expect } from '@playwright/test';
+
+test.describe('Full E2E Teacher & Mobile QR Relay Workflows', () => {
+  const uniqueSuffix = Date.now();
+  const teacherEmail = `e2e.teacher.${uniqueSuffix}@schule.ch`;
+  const teacherPassword = 'SwissGradeAiPassword2026!';
+  const teacherName = 'Herr Dr. Schweizer';
+
+  test('1. Teacher Registration -> Decluttered Dashboard -> Class & Student Creation -> Exam & CSV Export -> Mobile QR Relay Handover', async ({
+    page,
+  }) => {
+    // --- STEP 1: Register a new teacher via UI ---
+    await page.goto('/register');
+    await page.getByLabel(/Name/i).first().fill(teacherName);
+    await page
+      .getByLabel(/E-Mail/i)
+      .first()
+      .fill(teacherEmail);
+    await page
+      .getByLabel(/Passwort/i)
+      .first()
+      .fill(teacherPassword);
+    await page.getByRole('button', { name: /Registrieren|Konto erstellen/i }).click();
+
+    await expect(page).toHaveURL(/\/dashboard/, { timeout: 15000 });
+    await expect(page.getByText('Prüfungskorrektur starten')).toBeVisible();
+
+    // Verify sidebar does NOT show cluttering "Protokoll" link
+    await expect(page.getByRole('link', { name: 'Protokoll' })).toHaveCount(0);
+
+    // --- STEP 2: Create a Class & Add Students ---
+    await page.goto('/classes');
+    await page.getByRole('button', { name: /Neue Klasse/i }).click();
+    await page.getByLabel(/Klassenname/i).fill('Gymnasium 10b');
+    await page.getByRole('button', { name: /Erstellen|Speichern/i }).click();
+
+    await expect(page.getByText('Gymnasium 10b').first()).toBeVisible();
+    await page.getByText('Gymnasium 10b').first().click();
+    await expect(page).toHaveURL(/\/classes\/.+/);
+
+    // Add a student to the class
+    const addStudentBtn = page.getByRole('button', { name: /Schüler.*hinzufügen/i });
+    if (await addStudentBtn.isVisible()) {
+      await addStudentBtn.click();
+      await page.getByLabel(/Name/i).last().fill('Lukas Keller');
+      await page
+        .getByRole('button', { name: /Hinzufügen|Speichern/i })
+        .last()
+        .click();
+      await expect(page.getByText('Lukas Keller').first()).toBeVisible();
+    }
+
+    // --- STEP 3: Create an Exam & Verify Exam Details + CSV Export ---
+    await page.goto('/exams');
+    await page.getByRole('button', { name: /Neue Prüfung/i }).click();
+    await page.getByLabel(/Prüfungstitel/i).fill('Algebra Prüfung 1');
+    await page
+      .getByPlaceholder(/Trage hier die Musterlösung/i)
+      .fill('Aufgabe 1: 2x = 10 -> x = 5 (4 Punkte)');
+    await page.getByRole('button', { name: /Prüfung anlegen/i }).click();
+
+    await expect(page.getByText('Algebra Prüfung 1').first()).toBeVisible();
+    await page.getByText('Algebra Prüfung 1').first().click();
+    await expect(page).toHaveURL(/\/exams\/.+/);
+
+    // Verify new "Korrektur-Fortschritt" KPI card (replaced Standardabweichung)
+    await expect(page.getByText('Korrektur-Fortschritt')).toBeVisible();
+    await expect(
+      page.getByRole('button', { name: /Notenliste exportieren \(CSV\)/i })
+    ).toBeVisible();
+
+    // --- STEP 4: Verify Mobile QR Relay Token Generation & Document Scan Handover ---
+    const relayRes = await page.request.post('/api/mobile-relay', {
+      data: {
+        targetMode: 'RUBRIC',
+      },
+    });
+    expect(relayRes.status()).toBe(200);
+    const relayJson = await relayRes.json();
+    expect(relayJson.token).toBeTruthy();
+
+    // Open the mobile scanner page with the generated token
+    await page.goto(`/scan/${encodeURIComponent(relayJson.token)}`);
+    await expect(page.getByText(/GradeAi Mobile Scanner/i)).toBeVisible();
+    await expect(page.getByText(new RegExp(teacherName))).toBeVisible();
+
+    // Upload a simulated 1x1 JPEG image as a scanned Musterlösung (RUBRIC) via the relay upload API
+    const minimalPngBase64 =
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
+    const imageBuffer = Buffer.from(minimalPngBase64, 'base64');
+
+    const uploadRes = await page.request.post('/api/mobile-relay/upload', {
+      multipart: {
+        token: relayJson.token,
+        targetMode: 'RUBRIC',
+        pages: {
+          name: 'musterloesung.png',
+          mimeType: 'image/png',
+          buffer: imageBuffer,
+        },
+      },
+    });
+    expect(uploadRes.status()).toBe(200);
+    const uploadJson = await uploadRes.json();
+    expect(uploadJson.targetMode).toBe('RUBRIC');
+    expect(uploadJson.pageCount).toBe(1);
+
+    // Verify desktop polling endpoint (/api/mobile-relay?token=...) now returns the scannedDocument
+    const pollRes = await page.request.get(
+      `/api/mobile-relay?token=${encodeURIComponent(relayJson.token)}`
+    );
+    expect(pollRes.status()).toBe(200);
+    const pollJson = await pollRes.json();
+    expect(pollJson.scannedDocument).not.toBeNull();
+    expect(pollJson.scannedDocument.targetMode).toBe('RUBRIC');
+    expect(pollJson.scannedDocument.pageCount).toBe(1);
+  });
+
+  test('2. Seeded Teacher Login -> Correction Workspace (/correct/[id]) -> Resolve AI Uncertainty -> Live Grade Recalculation -> Speed-Grading Sibling Navigation', async ({
+    page,
+  }) => {
+    await page.goto('/login');
+    await page
+      .getByLabel(/E-Mail/i)
+      .first()
+      .fill('lehrer@schule.ch');
+    await page
+      .getByLabel(/Passwort/i)
+      .first()
+      .fill('password123');
+    await page.getByRole('button', { name: /Anmelden|Login/i }).click();
+
+    await expect(page).toHaveURL(/\/dashboard/, { timeout: 15000 });
+
+    // Open the first seeded submission (Max Mustermann) in the Correction Workspace
+    const openWorkspaceBtn = page.getByRole('button', { name: /Workspace öffnen/i }).first();
+    await expect(openWorkspaceBtn).toBeVisible();
+    await openWorkspaceBtn.click();
+
+    await expect(page).toHaveURL(/\/correct\/.+/);
+    await expect(page.getByText(/KI-Unsicherheit erkannt/i)).toBeVisible();
+
+    // Jump to the uncertain task and confirm review
+    const jumpBtn = page.getByRole('button', { name: /Zur Aufgabe springen/i });
+    if (await jumpBtn.isVisible()) {
+      await jumpBtn.click();
+    }
+    const resolveBtn = page.getByRole('button', { name: /Als geprüft bestätigen/i });
+    await expect(resolveBtn).toBeVisible();
+    await resolveBtn.click();
+
+    // Banner should disappear once resolved
+    await expect(page.getByText(/KI-Unsicherheit erkannt/i)).toHaveCount(0);
+
+    // Navigate to sibling student via Speed-Grading button
+    const nextStudentBtn = page.getByRole('button', { name: /Nächste\/r \(Sarah Tobler\)/i });
+    await expect(nextStudentBtn).toBeVisible();
+    await nextStudentBtn.click();
+    await expect(page.getByText(/Sehr gut gelöst!/i).first()).toBeVisible();
+  });
+});

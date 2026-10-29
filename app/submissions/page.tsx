@@ -27,6 +27,10 @@ import {
   Grid,
   IconButton,
   Stack,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
 } from '@mui/material';
 import HistoryIcon from '@mui/icons-material/History';
 import SearchIcon from '@mui/icons-material/Search';
@@ -58,6 +62,7 @@ interface SubmissionData {
   date: string;
   classId: string;
   examId: string;
+  uncertainStepsCount?: number;
 }
 
 export default function SubmissionsPage() {
@@ -69,6 +74,7 @@ export default function SubmissionsPage() {
   // Loading & Error States
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [deleteTargetId, setDeleteTargetId] = useState<string | null>(null);
 
   // Filter States
   const [searchQuery, setSearchQuery] = useState('');
@@ -113,14 +119,14 @@ export default function SubmissionsPage() {
     });
   }, [fetchData]);
 
-  const handleDeleteSubmission = async (id: string) => {
-    if (
-      !confirm(
-        'Möchtest du diese Korrektur wirklich löschen? Dieser Schritt kann nicht rückgängig gemacht werden.'
-      )
-    ) {
-      return;
-    }
+  const handleDeleteSubmission = (id: string) => {
+    setDeleteTargetId(id);
+  };
+
+  const confirmDeleteSubmission = async () => {
+    if (!deleteTargetId) return;
+    const id = deleteTargetId;
+    setDeleteTargetId(null);
 
     try {
       const res = await fetch(`/api/submissions/${id}`, {
@@ -133,7 +139,7 @@ export default function SubmissionsPage() {
 
       fetchData();
     } catch (err) {
-      alert(err instanceof Error ? err.message : 'Fehler beim Löschen.');
+      setError(err instanceof Error ? err.message : 'Fehler beim Löschen.');
     }
   };
 
@@ -349,16 +355,31 @@ export default function SubmissionsPage() {
                       </TableCell>
                       <TableCell sx={{ fontWeight: 600 }}>{sub.points}</TableCell>
                       <TableCell>
-                        <Chip
-                          label={sub.grade}
-                          size="small"
-                          sx={{
-                            backgroundColor: parseFloat(sub.grade) >= 4.0 ? '#1b77d1' : '#dc2626',
-                            color: '#ffffff',
-                            fontWeight: 'bold',
-                            borderRadius: '6px',
-                          }}
-                        />
+                        <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
+                          <Chip
+                            label={sub.grade}
+                            size="small"
+                            sx={{
+                              backgroundColor: parseFloat(sub.grade) >= 4.0 ? '#1b77d1' : '#dc2626',
+                              color: '#ffffff',
+                              fontWeight: 'bold',
+                              borderRadius: '6px',
+                            }}
+                          />
+                          {(sub.uncertainStepsCount ?? 0) > 0 && (
+                            <Chip
+                              label={`⚠ KI unsicher (${sub.uncertainStepsCount})`}
+                              size="small"
+                              sx={{
+                                backgroundColor: '#fef3c7',
+                                color: '#b45309',
+                                border: '1px solid #f59e0b',
+                                fontWeight: 700,
+                                borderRadius: '6px',
+                              }}
+                            />
+                          )}
+                        </Stack>
                       </TableCell>
                       <TableCell>{sub.date}</TableCell>
                       <TableCell sx={{ textAlign: 'right' }}>
@@ -401,6 +422,52 @@ export default function SubmissionsPage() {
           </TableContainer>
         )}
       </Box>
+
+      {/* Dialog for Delete Confirmation */}
+      <Dialog
+        open={Boolean(deleteTargetId)}
+        onClose={() => setDeleteTargetId(null)}
+        maxWidth="xs"
+        fullWidth
+        slotProps={{
+          paper: {
+            sx: {
+              borderRadius: '12px',
+              padding: '8px',
+            },
+          },
+        }}
+      >
+        <DialogTitle sx={{ fontWeight: 800, color: '#0f172a', letterSpacing: '-0.01em' }}>
+          Korrektur löschen?
+        </DialogTitle>
+        <DialogContent>
+          <Typography variant="body2" sx={{ color: 'text.secondary', lineHeight: 1.5 }}>
+            Möchtest du diese Korrektur wirklich löschen? Dieser Schritt kann nicht rückgängig
+            gemacht werden.
+          </Typography>
+        </DialogContent>
+        <DialogActions sx={{ p: 2, pt: 1 }}>
+          <Button
+            onClick={() => setDeleteTargetId(null)}
+            sx={{ textTransform: 'none', fontWeight: 650 }}
+          >
+            Abbrechen
+          </Button>
+          <Button
+            onClick={confirmDeleteSubmission}
+            variant="contained"
+            color="error"
+            sx={{
+              textTransform: 'none',
+              fontWeight: 700,
+              borderRadius: '8px',
+            }}
+          >
+            Endgültig löschen
+          </Button>
+        </DialogActions>
+      </Dialog>
     </DashboardLayout>
   );
 }

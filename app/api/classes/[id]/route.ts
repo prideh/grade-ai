@@ -67,12 +67,13 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
         if (g > highestGrade) highestGrade = g;
         if (g < lowestGrade) lowestGrade = g;
 
-        // Bucketing for distribution
-        if (g >= 1.0 && g < 2.0) gradeDistribution['1.0-2.0']++;
-        else if (g >= 2.0 && g < 3.0) gradeDistribution['2.0-3.0']++;
-        else if (g >= 3.0 && g < 4.0) gradeDistribution['3.0-4.0']++;
-        else if (g >= 4.0 && g < 5.0) gradeDistribution['4.0-5.0']++;
-        else if (g >= 5.0 && g <= 6.0) gradeDistribution['5.0-6.0']++;
+        // Bucketing for distribution (clamped to [1.0, 6.0] Swiss scale)
+        const clampedG = Math.min(6.0, Math.max(1.0, g));
+        if (clampedG >= 1.0 && clampedG < 2.0) gradeDistribution['1.0-2.0']++;
+        else if (clampedG >= 2.0 && clampedG < 3.0) gradeDistribution['2.0-3.0']++;
+        else if (clampedG >= 3.0 && clampedG < 4.0) gradeDistribution['3.0-4.0']++;
+        else if (clampedG >= 4.0 && clampedG < 5.0) gradeDistribution['4.0-5.0']++;
+        else if (clampedG >= 5.0 && clampedG <= 6.0) gradeDistribution['5.0-6.0']++;
       });
 
       // Calculate Standard Deviation

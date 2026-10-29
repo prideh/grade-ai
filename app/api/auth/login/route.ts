@@ -3,6 +3,9 @@ import { db } from '@/lib/db';
 import { verifyPassword } from '@/lib/auth';
 import { createSession } from '@/lib/session';
 
+// Precomputed 16-byte hex salt + 64-byte hex key for constant-time dummy verification when user is not found
+const DUMMY_PASSWORD_HASH = '00000000000000000000000000000000:' + '0'.repeat(128);
+
 export async function POST(request: Request) {
   try {
     const { email, password } = await request.json();
@@ -16,17 +19,11 @@ export async function POST(request: Request) {
       where: { email: email.toLowerCase() },
     });
 
-    if (!teacher) {
-      return NextResponse.json(
-        { error: 'Ungültige E-Mail-Adresse oder Passwort.' },
-        { status: 401 }
-      );
-    }
+    // Always run scrypt verification even if teacher is not found to prevent timing-based email enumeration
+    const targetHash = teacher ? teacher.passwordHash : DUMMY_PASSWORD_HASH;
+    const isPasswordValid = await verifyPassword(password, targetHash);
 
-    // Verify the password
-    const isPasswordValid = await verifyPassword(password, teacher.passwordHash);
-
-    if (!isPasswordValid) {
+    if (!teacher || !isPasswordValid) {
       return NextResponse.json(
         { error: 'Ungültige E-Mail-Adresse oder Passwort.' },
         { status: 401 }

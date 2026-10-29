@@ -27,6 +27,10 @@ import {
   Alert,
   Divider,
   Chip,
+  FormControl,
+  InputLabel,
+  Select,
+  MenuItem,
 } from '@mui/material';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import DeleteIcon from '@mui/icons-material/Delete';
@@ -38,8 +42,16 @@ import SchoolIcon from '@mui/icons-material/School';
 import AssignmentIcon from '@mui/icons-material/Assignment';
 import SaveIcon from '@mui/icons-material/Save';
 import PlayArrowIcon from '@mui/icons-material/PlayArrow';
+import QrCodeScannerIcon from '@mui/icons-material/QrCodeScanner';
 import { BarChart } from '@mui/x-charts/BarChart';
 import DashboardLayout from '@/components/DashboardLayout';
+import QrScannerDialog from '@/components/QrScannerDialog';
+import {
+  GRADING_FORMULA_OPTIONS,
+  GRADE_ROUNDING_OPTIONS,
+  type GradingFormula,
+  type GradeRounding,
+} from '@/lib/grading';
 
 interface ExamData {
   id: string;
@@ -49,6 +61,10 @@ interface ExamData {
   subject: string;
   maxPoints: number;
   rubricText?: string;
+  examTemplateText?: string | null;
+  gradingNotes?: string | null;
+  gradingFormula?: string;
+  gradeRounding?: string;
 }
 
 interface ExamStats {
@@ -69,6 +85,7 @@ interface ExamRosterStudent {
   grade: string;
   date: string;
   submissionId?: string;
+  uncertainStepsCount?: number;
 }
 
 export default function ExamDetailsPage() {
@@ -87,9 +104,49 @@ export default function ExamDetailsPage() {
 
   // Rubric Editing
   const [rubricText, setRubricText] = useState('');
+  const [gradingNotes, setGradingNotes] = useState('');
+  const [gradingFormula, setGradingFormula] = useState<GradingFormula>('LINEAR_60');
+  const [gradeRounding, setGradeRounding] = useState<GradeRounding>('0.1');
   const [editingRubric, setEditingRubric] = useState(false);
   const [saveLoading, setSaveLoading] = useState(false);
   const [uploadedFileName, setUploadedFileName] = useState('');
+
+  // QR Scanner Dialog
+  const [qrOpen, setQrOpen] = useState(false);
+  const [qrTargetMode, setQrTargetMode] = useState<'SUBMISSION' | 'RUBRIC'>('SUBMISSION');
+  const [qrStudent, setQrStudent] = useState<{ id: string; name: string } | null>(null);
+
+  const handleExportCsv = () => {
+    if (!exam || roster.length === 0) return;
+    const header = [
+      'Schüler/in',
+      'Status',
+      'Erzielte Punkte',
+      'Maximalpunkte',
+      'Note',
+      'Korrekturdatum',
+      'KI-Unsichere Schritte',
+    ];
+    const rows = roster.map((r) => [
+      `"${r.studentName.replace(/"/g, '""')}"`,
+      r.status === 'COMPLETED' ? 'Abgeschlossen' : r.status === 'DRAFT' ? 'Entwurf' : 'Ungestartet',
+      r.earnedPoints !== 'N/A' ? String(r.earnedPoints) : '',
+      String(exam.maxPoints || ''),
+      r.status === 'COMPLETED' ? String(r.grade) : '',
+      r.date !== '—' ? r.date : '',
+      String(r.uncertainStepsCount ?? 0),
+    ]);
+    const csvContent =
+      '\uFEFF' + [header.join(';'), ...rows.map((row) => row.join(';'))].join('\r\n');
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    const safeTitle = `${exam.className}_${exam.title}`.replace(/[^a-zA-Z0-9äöüÄÖÜ_-]/g, '_');
+    link.download = `Notenliste_${safeTitle}.csv`;
+    link.click();
+    URL.revokeObjectURL(url);
+  };
 
   const handleRubricFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
@@ -150,6 +207,9 @@ export default function ExamDetailsPage() {
       setStats(data.stats);
       setRoster(data.roster || []);
       setRubricText(data.exam.rubricText || '');
+      setGradingNotes(data.exam.gradingNotes || '');
+      setGradingFormula((data.exam.gradingFormula as GradingFormula) || 'LINEAR_60');
+      setGradeRounding((data.exam.gradeRounding as GradeRounding) || '0.1');
       setUploadedFileName('');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Ein unerwarteter Fehler ist aufgetreten.');
@@ -173,14 +233,19 @@ export default function ExamDetailsPage() {
       const res = await fetch(`/api/exams/${examId}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ rubricText }),
+        body: JSON.stringify({
+          rubricText,
+          gradingNotes: gradingNotes || null,
+          gradingFormula,
+          gradeRounding,
+        }),
       });
       if (!res.ok) throw new Error('Musterlösung konnte nicht aktualisiert werden.');
       setEditingRubric(false);
       setUploadedFileName('');
       fetchData();
     } catch (err) {
-      alert(err instanceof Error ? err.message : 'Fehler beim Speichern.');
+      setError(err instanceof Error ? err.message : 'Fehler beim Speichern.');
     } finally {
       setSaveLoading(false);
     }
@@ -194,7 +259,7 @@ export default function ExamDetailsPage() {
       if (!res.ok) throw new Error('Prüfung konnte nicht gelöscht werden.');
       router.push('/exams');
     } catch (err) {
-      alert(err instanceof Error ? err.message : 'Fehler beim Löschen.');
+      setError(err instanceof Error ? err.message : 'Fehler beim Löschen.');
       setSaveLoading(false);
     }
   };
@@ -214,6 +279,13 @@ export default function ExamDetailsPage() {
   const chartData = stats?.gradeDistribution
     ? distributionKeys.map((key) => stats.gradeDistribution[key] || 0)
     : [0, 0, 0, 0, 0];
+
+  const formulaLabel =
+    GRADING_FORMULA_OPTIONS.find((f) => f.value === (exam?.gradingFormula || 'LINEAR_60'))?.label ||
+    'Linear (60% = 4.0)';
+  const roundingLabel =
+    GRADE_ROUNDING_OPTIONS.find((r) => r.value === (exam?.gradeRounding || '0.1'))?.label ||
+    'Zehntelnoten (0.1)';
 
   return (
     <DashboardLayout>
@@ -253,19 +325,39 @@ export default function ExamDetailsPage() {
                 >
                   {exam?.className}
                 </Link>{' '}
-                • Fach: {exam?.subject} • Max. Punkte: {exam?.maxPoints} P.
+                • Fach: {exam?.subject} • Max. Punkte: {exam?.maxPoints} P. • Formel: {formulaLabel}{' '}
+                • Rundung: {roundingLabel}
               </Typography>
             </Box>
 
-            <Button
-              variant="outlined"
-              color="error"
-              startIcon={<DeleteIcon />}
-              onClick={() => setOpenDelete(true)}
-              sx={{ borderRadius: '8px', textTransform: 'none', fontWeight: 650 }}
-            >
-              Prüfung löschen
-            </Button>
+            <Stack direction="row" spacing={1.5} sx={{ flexWrap: 'wrap' }}>
+              <Button
+                variant="contained"
+                startIcon={<QrCodeScannerIcon />}
+                onClick={() => {
+                  setQrTargetMode('SUBMISSION');
+                  setQrStudent(null);
+                  setQrOpen(true);
+                }}
+                sx={{
+                  borderRadius: '8px',
+                  textTransform: 'none',
+                  fontWeight: 700,
+                  backgroundColor: '#1b77d1',
+                }}
+              >
+                Mit Smartphone scannen (QR)
+              </Button>
+              <Button
+                variant="outlined"
+                color="error"
+                startIcon={<DeleteIcon />}
+                onClick={() => setOpenDelete(true)}
+                sx={{ borderRadius: '8px', textTransform: 'none', fontWeight: 650 }}
+              >
+                Prüfung löschen
+              </Button>
+            </Stack>
           </Box>
         </Stack>
 
@@ -370,7 +462,7 @@ export default function ExamDetailsPage() {
             </Card>
           </Grid>
 
-          {/* Card 4: Standard Deviation */}
+          {/* Card 4: Grading Progress (Korrigiert X / Y) */}
           <Grid size={{ xs: 12, sm: 6, md: 3 }}>
             <Card sx={{ borderRadius: '12px', border: '1px solid #e2e8f0', boxShadow: 'none' }}>
               <CardContent sx={{ p: 2.5, display: 'flex', alignItems: 'center', gap: 2 }}>
@@ -390,10 +482,10 @@ export default function ExamDetailsPage() {
                 </Box>
                 <Box>
                   <Typography variant="caption" sx={{ color: 'text.secondary', fontWeight: 600 }}>
-                    Standardabweichung
+                    Korrektur-Fortschritt
                   </Typography>
                   <Typography variant="h5" sx={{ fontWeight: 800, color: '#0f172a' }}>
-                    ±{stats?.stdDev}
+                    {roster.filter((r) => r.status === 'COMPLETED').length} / {roster.length}
                   </Typography>
                 </Box>
               </CardContent>
@@ -490,6 +582,11 @@ export default function ExamDetailsPage() {
                           setEditingRubric(false);
                           setUploadedFileName('');
                           setRubricText(exam?.rubricText || '');
+                          setGradingNotes(exam?.gradingNotes || '');
+                          setGradingFormula(
+                            (exam?.gradingFormula as GradingFormula) || 'LINEAR_60'
+                          );
+                          setGradeRounding((exam?.gradeRounding as GradeRounding) || '0.1');
                         }}
                       >
                         Abbrechen
@@ -510,71 +607,152 @@ export default function ExamDetailsPage() {
                 <Divider sx={{ mb: 2 }} />
 
                 {editingRubric ? (
-                  uploadedFileName || rubricText.startsWith('{"mimeType":') ? (
-                    <Box
-                      sx={{
-                        border: '1px solid #cbd5e1',
-                        padding: '12px 16px',
-                        borderRadius: '8px',
-                        display: 'flex',
-                        justifyContent: 'space-between',
-                        alignItems: 'center',
-                        backgroundColor: '#f8fafc',
-                        mb: 2,
-                      }}
-                    >
-                      <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
-                        <StarsIcon sx={{ color: 'primary.main' }} />
-                        <Typography variant="body2" sx={{ fontWeight: 600, color: 'text.primary' }}>
-                          {uploadedFileName || 'Bild-Musterlösung geladen'}
-                        </Typography>
-                      </Stack>
-                      <Button size="small" color="error" onClick={handleResetRubric}>
-                        Zurücksetzen
-                      </Button>
-                    </Box>
-                  ) : (
-                    <Stack spacing={1.5} sx={{ flexGrow: 1 }}>
-                      <TextField
-                        multiline
-                        rows={7}
-                        fullWidth
-                        variant="outlined"
-                        value={rubricText}
-                        onChange={(e) => setRubricText(e.target.value)}
-                        sx={{ '& .MuiOutlinedInput-root': { borderRadius: '8px' }, flexGrow: 1 }}
-                      />
-                      <Stack direction="row" spacing={1.5} sx={{ alignItems: 'center' }}>
-                        <Typography
-                          variant="caption"
-                          sx={{ color: 'text.secondary', fontWeight: 600 }}
-                        >
-                          Oder lade eine Datei/einen Screenshot hoch:
-                        </Typography>
-                        <input
-                          type="file"
-                          accept="application/pdf,text/plain,image/*"
-                          id="editRubricFile"
-                          onChange={handleRubricFileChange}
-                          style={{ display: 'none' }}
-                        />
-                        <Button
-                          component="label"
-                          htmlFor="editRubricFile"
-                          variant="outlined"
-                          size="small"
-                          sx={{
-                            color: 'text.primary',
-                            borderColor: '#cbd5e1',
-                            fontWeight: 650,
-                            textTransform: 'none',
-                          }}
-                        >
-                          Datei auswählen
+                  <Stack spacing={2} sx={{ flexGrow: 1 }}>
+                    <Grid container spacing={1.5}>
+                      <Grid size={{ xs: 12, sm: 6 }}>
+                        <FormControl fullWidth size="small">
+                          <InputLabel id="edit-formula-label">Notenformel (CH)</InputLabel>
+                          <Select
+                            labelId="edit-formula-label"
+                            value={gradingFormula}
+                            label="Notenformel (CH)"
+                            onChange={(e) => setGradingFormula(e.target.value as GradingFormula)}
+                            sx={{ borderRadius: '8px' }}
+                          >
+                            {GRADING_FORMULA_OPTIONS.map((opt) => (
+                              <MenuItem key={opt.value} value={opt.value}>
+                                {opt.label}
+                              </MenuItem>
+                            ))}
+                          </Select>
+                        </FormControl>
+                      </Grid>
+                      <Grid size={{ xs: 12, sm: 6 }}>
+                        <FormControl fullWidth size="small">
+                          <InputLabel id="edit-rounding-label">Notenrundung</InputLabel>
+                          <Select
+                            labelId="edit-rounding-label"
+                            value={gradeRounding}
+                            label="Notenrundung"
+                            onChange={(e) => setGradeRounding(e.target.value as GradeRounding)}
+                            sx={{ borderRadius: '8px' }}
+                          >
+                            {GRADE_ROUNDING_OPTIONS.map((opt) => (
+                              <MenuItem key={opt.value} value={opt.value}>
+                                {opt.label}
+                              </MenuItem>
+                            ))}
+                          </Select>
+                        </FormControl>
+                      </Grid>
+                    </Grid>
+
+                    {uploadedFileName ||
+                    rubricText.startsWith('{"mimeType":') ||
+                    rubricText.startsWith('[{"mimeType":') ? (
+                      <Box
+                        sx={{
+                          border: '1px solid #cbd5e1',
+                          padding: '12px 16px',
+                          borderRadius: '8px',
+                          display: 'flex',
+                          justifyContent: 'space-between',
+                          alignItems: 'center',
+                          backgroundColor: '#f8fafc',
+                        }}
+                      >
+                        <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
+                          <StarsIcon sx={{ color: 'primary.main' }} />
+                          <Typography
+                            variant="body2"
+                            sx={{ fontWeight: 600, color: 'text.primary' }}
+                          >
+                            {uploadedFileName || 'Bild-Musterlösung geladen'}
+                          </Typography>
+                        </Stack>
+                        <Button size="small" color="error" onClick={handleResetRubric}>
+                          Zurücksetzen
                         </Button>
+                      </Box>
+                    ) : (
+                      <Stack spacing={1.5} sx={{ flexGrow: 1 }}>
+                        <TextField
+                          label="Musterlösung (Stufe 2)"
+                          multiline
+                          rows={5}
+                          fullWidth
+                          variant="outlined"
+                          value={rubricText}
+                          onChange={(e) => setRubricText(e.target.value)}
+                          sx={{ '& .MuiOutlinedInput-root': { borderRadius: '8px' }, flexGrow: 1 }}
+                        />
+                        <Stack
+                          direction="row"
+                          spacing={1.5}
+                          sx={{ alignItems: 'center', flexWrap: 'wrap' }}
+                        >
+                          <Typography
+                            variant="caption"
+                            sx={{ color: 'text.secondary', fontWeight: 600 }}
+                          >
+                            Oder lade eine Datei hoch / fotografiere sie:
+                          </Typography>
+                          <input
+                            type="file"
+                            accept="application/pdf,text/plain,image/*"
+                            id="editRubricFile"
+                            onChange={handleRubricFileChange}
+                            style={{ display: 'none' }}
+                          />
+                          <Button
+                            component="label"
+                            htmlFor="editRubricFile"
+                            variant="outlined"
+                            size="small"
+                            sx={{
+                              color: 'text.primary',
+                              borderColor: '#cbd5e1',
+                              fontWeight: 650,
+                              textTransform: 'none',
+                            }}
+                          >
+                            Datei auswählen
+                          </Button>
+                          <Button
+                            variant="outlined"
+                            size="small"
+                            startIcon={<QrCodeScannerIcon />}
+                            onClick={() => {
+                              setQrTargetMode('RUBRIC');
+                              setQrStudent(null);
+                              setQrOpen(true);
+                            }}
+                            sx={{
+                              color: '#1b77d1',
+                              borderColor: '#1b77d1',
+                              fontWeight: 700,
+                              textTransform: 'none',
+                            }}
+                          >
+                            Per Smartphone scannen (QR)
+                          </Button>
+                        </Stack>
                       </Stack>
-                    </Stack>
-                  )
+                    )}
+
+                    <TextField
+                      label="Unterrichtsmaterial & Bewertungshinweise (Stufe 3, optional)"
+                      placeholder="z.B. Teilpunkte für richtige Formel ohne Einheiten vergeben..."
+                      multiline
+                      rows={2}
+                      fullWidth
+                      size="small"
+                      variant="outlined"
+                      value={gradingNotes}
+                      onChange={(e) => setGradingNotes(e.target.value)}
+                      sx={{ '& .MuiOutlinedInput-root': { borderRadius: '8px' } }}
+                    />
+                  </Stack>
                 ) : (
                   <Box
                     sx={{
@@ -695,8 +873,68 @@ export default function ExamDetailsPage() {
                           return 'Ungültige Musterlösung';
                         }
                       }
+                      if (exam?.rubricText?.startsWith('[{"mimeType":')) {
+                        try {
+                          const pages = JSON.parse(exam.rubricText) as {
+                            mimeType: string;
+                            data: string;
+                          }[];
+                          return (
+                            <Stack spacing={1.5}>
+                              <Typography
+                                variant="caption"
+                                sx={{ fontWeight: 700, color: '#0f172a' }}
+                              >
+                                Mehrseitige Bild-Musterlösung ({pages.length} Seiten)
+                              </Typography>
+                              <Stack
+                                direction="row"
+                                spacing={1.5}
+                                sx={{ overflowX: 'auto', pb: 1 }}
+                              >
+                                {pages.map((p, idx) => (
+                                  // eslint-disable-next-line @next/next/no-img-element
+                                  <img
+                                    key={idx}
+                                    src={`data:${p.mimeType};base64,${p.data}`}
+                                    alt={`Musterlösung Seite ${idx + 1}`}
+                                    style={{
+                                      height: '160px',
+                                      objectFit: 'contain',
+                                      borderRadius: '6px',
+                                      border: '1px solid #cbd5e1',
+                                    }}
+                                  />
+                                ))}
+                              </Stack>
+                            </Stack>
+                          );
+                        } catch {
+                          return 'Ungültige Musterlösung';
+                        }
+                      }
                       return exam?.rubricText || 'Keine Musterlösung hinterlegt.';
                     })()}
+                    {exam?.gradingNotes && (
+                      <Box
+                        sx={{
+                          mt: 2,
+                          pt: 1.5,
+                          borderTop: '1px dashed #cbd5e1',
+                          fontFamily: 'inherit',
+                          fontSize: '0.8rem',
+                          color: '#475569',
+                        }}
+                      >
+                        <Typography
+                          variant="caption"
+                          sx={{ fontWeight: 700, color: '#0f172a', display: 'block', mb: 0.5 }}
+                        >
+                          Bewertungshinweise (Stufe 3):
+                        </Typography>
+                        {exam.gradingNotes}
+                      </Box>
+                    )}
                   </Box>
                 )}
               </CardContent>
@@ -707,14 +945,34 @@ export default function ExamDetailsPage() {
         {/* 3. Class Roster Submissions Tracker */}
         <Card sx={{ borderRadius: '12px', border: '1px solid #e2e8f0', boxShadow: 'none' }}>
           <CardContent sx={{ p: 3 }}>
-            <Stack direction="row" spacing={1.5} sx={{ alignItems: 'center', mb: 2.5 }}>
-              <AssignmentIcon sx={{ color: '#0f172a' }} />
-              <Typography
-                variant="h6"
-                sx={{ fontWeight: 850, color: '#0f172a', letterSpacing: '-0.01em' }}
+            <Stack
+              direction="row"
+              sx={{
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                flexWrap: 'wrap',
+                gap: 1.5,
+                mb: 2.5,
+              }}
+            >
+              <Stack direction="row" spacing={1.5} sx={{ alignItems: 'center' }}>
+                <AssignmentIcon sx={{ color: '#0f172a' }} />
+                <Typography
+                  variant="h6"
+                  sx={{ fontWeight: 850, color: '#0f172a', letterSpacing: '-0.01em' }}
+                >
+                  Korrektur-Status (Klassenliste)
+                </Typography>
+              </Stack>
+              <Button
+                variant="outlined"
+                size="small"
+                onClick={handleExportCsv}
+                disabled={roster.length === 0}
+                sx={{ textTransform: 'none', fontWeight: 700, borderRadius: '8px' }}
               >
-                Korrektur-Status (Klassenliste)
-              </Typography>
+                Notenliste exportieren (CSV)
+              </Button>
             </Stack>
 
             <TableContainer
@@ -775,17 +1033,32 @@ export default function ExamDetailsPage() {
                         </TableCell>
                         <TableCell>
                           {student.status === 'COMPLETED' ? (
-                            <Chip
-                              label={student.grade}
-                              size="small"
-                              sx={{
-                                backgroundColor:
-                                  parseFloat(student.grade) >= 4.0 ? '#1b77d1' : '#dc2626',
-                                color: '#ffffff',
-                                fontWeight: 'bold',
-                                borderRadius: '6px',
-                              }}
-                            />
+                            <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
+                              <Chip
+                                label={student.grade}
+                                size="small"
+                                sx={{
+                                  backgroundColor:
+                                    parseFloat(student.grade) >= 4.0 ? '#1b77d1' : '#dc2626',
+                                  color: '#ffffff',
+                                  fontWeight: 'bold',
+                                  borderRadius: '6px',
+                                }}
+                              />
+                              {(student.uncertainStepsCount ?? 0) > 0 && (
+                                <Chip
+                                  label={`⚠ KI unsicher (${student.uncertainStepsCount})`}
+                                  size="small"
+                                  sx={{
+                                    backgroundColor: '#fef3c7',
+                                    color: '#b45309',
+                                    border: '1px solid #f59e0b',
+                                    fontWeight: 700,
+                                    borderRadius: '6px',
+                                  }}
+                                />
+                              )}
+                            </Stack>
                           ) : (
                             '—'
                           )}
@@ -807,17 +1080,23 @@ export default function ExamDetailsPage() {
                               </Button>
                             </Link>
                           ) : (
-                            <Link href={`/dashboard`} passHref style={{ textDecoration: 'none' }}>
-                              <Button
-                                variant="contained"
-                                color="success"
-                                size="small"
-                                startIcon={<PlayArrowIcon />}
-                                sx={{ textTransform: 'none', fontWeight: 700 }}
-                              >
-                                Arbeit einscannen
-                              </Button>
-                            </Link>
+                            <Button
+                              variant="contained"
+                              color="success"
+                              size="small"
+                              startIcon={<PlayArrowIcon />}
+                              onClick={() => {
+                                setQrTargetMode('SUBMISSION');
+                                setQrStudent({
+                                  id: student.studentId,
+                                  name: student.studentName,
+                                });
+                                setQrOpen(true);
+                              }}
+                              sx={{ textTransform: 'none', fontWeight: 700 }}
+                            >
+                              Arbeit einscannen (QR / Datei)
+                            </Button>
                           )}
                         </TableCell>
                       </TableRow>
@@ -859,6 +1138,26 @@ export default function ExamDetailsPage() {
             </Button>
           </DialogActions>
         </Dialog>
+
+        <QrScannerDialog
+          open={qrOpen}
+          onClose={() => setQrOpen(false)}
+          targetMode={qrTargetMode}
+          classId={exam?.classId}
+          className={exam?.className}
+          examId={exam?.id}
+          examTitle={exam?.title}
+          studentId={qrStudent?.id || null}
+          studentName={qrStudent?.name || null}
+          onRefreshSubmissions={fetchData}
+          onDocumentScanned={(payload, pageCount) => {
+            setUploadedFileName(
+              `Smartphone-Musterlösung (${pageCount} ${pageCount === 1 ? 'Seite' : 'Seiten'})`
+            );
+            setRubricText(payload);
+            fetchData();
+          }}
+        />
       </Box>
     </DashboardLayout>
   );

@@ -4,7 +4,7 @@ import * as React from 'react';
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
-import { useParams } from 'next/navigation';
+import { useParams, useRouter } from 'next/navigation';
 import {
   Box,
   Typography,
@@ -34,10 +34,25 @@ import SaveIcon from '@mui/icons-material/Save';
 import ErrorIcon from '@mui/icons-material/Error';
 import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome';
 import AddIcon from '@mui/icons-material/Add';
+import QrCodeScannerIcon from '@mui/icons-material/QrCodeScanner';
+import QrScannerDialog from '@/components/QrScannerDialog';
 
 import { ExamCorrectionResult, CorrectedTask, CorrectedStep } from '../../../lib/gemini';
+import { calculateSwissGrade, parseStudentExamUrls } from '../../../lib/grading';
+
+interface SiblingSubmissionItem {
+  id: string;
+  studentName: string;
+  status: string;
+  grade: string | null;
+  earnedPoints: number;
+  uncertainStepsCount: number;
+}
 
 interface WorkspaceSubmission extends ExamCorrectionResult {
+  examId?: string;
+  examTitle?: string;
+  siblingSubmissions?: SiblingSubmissionItem[];
   status: 'PENDING' | 'PROCESSING' | 'COMPLETED' | 'FAILED';
   errorMessage?: string | null;
   studentId?: string | null;
@@ -46,6 +61,7 @@ interface WorkspaceSubmission extends ExamCorrectionResult {
 
 export default function CorrectWorkspace() {
   const params = useParams();
+  const router = useRouter();
   const id = params?.id;
   const theme = useTheme();
 
@@ -53,8 +69,10 @@ export default function CorrectWorkspace() {
   const [activeTaskIndex, setActiveTaskIndex] = useState<number>(0);
   const [showSaveToast, setShowSaveToast] = useState<boolean>(false);
   const [noSession, setNoSession] = useState<boolean>(false);
-  const [leftPanelTab, setLeftPanelTab] = useState<'transcript' | 'scan'>('transcript');
+  const [leftPanelTab, setLeftPanelTab] = useState<'transcript' | 'scan'>('scan');
+  const [activeScanPageIndex, setActiveScanPageIndex] = useState<number>(0);
   const [saveStatus, setSaveStatus] = useState<'saved' | 'saving' | 'error'>('saved');
+  const [qrOpen, setQrOpen] = useState<boolean>(false);
 
   const [openAddTask, setOpenAddTask] = useState<boolean>(false);
   const [addTaskTaskId, setAddTaskTaskId] = useState<string>('');
@@ -62,6 +80,24 @@ export default function CorrectWorkspace() {
   const [addTaskMaxPoints, setAddTaskMaxPoints] = useState<number>(5);
   const [addTaskLoading, setAddTaskLoading] = useState<boolean>(false);
   const [addTaskError, setAddTaskError] = useState<string>('');
+
+  // Load submission data from PostgreSQL database
+  const loadSubmission = React.useCallback(async () => {
+    if (!id) return;
+    try {
+      const res = await fetch(`/api/submissions/${id}`);
+      if (!res.ok) {
+        setNoSession(true);
+        return;
+      }
+      const parsed = await res.json();
+      setData(parsed);
+      setLeftPanelTab(parsed.studentExamUrl ? 'scan' : 'transcript');
+    } catch (e) {
+      console.error('Failed to load submission from database', e);
+      setNoSession(true);
+    }
+  }, [id]);
 
   const handleAddTask = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -94,8 +130,8 @@ export default function CorrectWorkspace() {
       setAddTaskTitle('');
       setAddTaskMaxPoints(5);
 
-      // Reload page data
-      window.location.reload();
+      // Refresh state without hard page reload
+      await loadSubmission();
     } catch (err) {
       setAddTaskError(err instanceof Error ? err.message : 'Fehler beim Hinzufügen der Aufgabe.');
     } finally {
@@ -150,25 +186,10 @@ export default function CorrectWorkspace() {
 
   // Initialize data from PostgreSQL database
   useEffect(() => {
-    if (!id) return;
-
-    async function loadSubmission() {
-      try {
-        const res = await fetch(`/api/submissions/${id}`);
-        if (!res.ok) {
-          setNoSession(true);
-          return;
-        }
-        const parsed = await res.json();
-        setData(parsed);
-      } catch (e) {
-        console.error('Failed to load submission from database', e);
-        setNoSession(true);
-      }
-    }
-
-    loadSubmission();
-  }, [id]);
+    Promise.resolve().then(() => {
+      loadSubmission();
+    });
+  }, [loadSubmission]);
 
   // Live polling for PENDING & PROCESSING status updates
   useEffect(() => {
@@ -436,6 +457,10 @@ export default function CorrectWorkspace() {
       step.fehlerTyp = 'SonstigerFehler';
     }
 
+    // Teacher adjustment resolves AI uncertainty
+    step.istUnsicher = false;
+    step.unsicherheitsGrund = '';
+
     steps[stepIndex] = step;
     task.schritte = steps;
 
@@ -452,10 +477,14 @@ export default function CorrectWorkspace() {
     const totalScore =
       Math.round(updatedTasks.reduce((sum, t) => sum + t.erzieltePunkte, 0) * 10) / 10;
 
-    // Recalculate school grade dynamically based on Swiss linear grading scale (6 is best, 4 is passing, rounded to nearest 0.1)
+    // Recalculate school grade dynamically based on exam's Swiss grading formula and rounding step
     const maxScore = data.gesamtmaximalPunkte;
-    const rawGrade = maxScore > 0 ? 5 * (totalScore / maxScore) + 1 : 1;
-    const newGrade = (Math.round(rawGrade * 10) / 10).toFixed(1);
+    const newGrade = calculateSwissGrade(
+      totalScore,
+      maxScore,
+      data.gradingFormula || 'LINEAR_60',
+      data.gradeRounding || '0.1'
+    );
 
     const updatedResult = {
       ...data,
@@ -511,6 +540,8 @@ export default function CorrectWorkspace() {
     const step = { ...steps[stepIndex] };
 
     step.fehlerTyp = newErrorType;
+    step.istUnsicher = false;
+    step.unsicherheitsGrund = '';
 
     steps[stepIndex] = step;
     task.schritte = steps;
@@ -529,8 +560,12 @@ export default function CorrectWorkspace() {
       Math.round(updatedTasks.reduce((sum, t) => sum + t.erzieltePunkte, 0) * 10) / 10;
 
     const maxScore = data.gesamtmaximalPunkte;
-    const rawGrade = maxScore > 0 ? 5 * (totalScore / maxScore) + 1 : 1;
-    const newGrade = (Math.round(rawGrade * 10) / 10).toFixed(1);
+    const newGrade = calculateSwissGrade(
+      totalScore,
+      maxScore,
+      data.gradingFormula || 'LINEAR_60',
+      data.gradeRounding || '0.1'
+    );
 
     const updatedResult = {
       ...data,
@@ -542,6 +577,31 @@ export default function CorrectWorkspace() {
     setData(updatedResult);
     // Auto-save Error Type adjustments directly to PostgreSQL (debounced)
     saveToDatabase(updatedResult);
+  };
+
+  // Handle explicit resolution of AI uncertainty by the teacher
+  const handleResolveStepUncertainty = (taskIndex: number, stepIndex: number) => {
+    if (!data) return;
+
+    const updatedTasks = [...data.aufgaben];
+    const task = { ...updatedTasks[taskIndex] };
+    const steps = [...task.schritte];
+    const step = { ...steps[stepIndex] };
+
+    step.istUnsicher = false;
+    step.unsicherheitsGrund = '';
+
+    steps[stepIndex] = step;
+    task.schritte = steps;
+    updatedTasks[taskIndex] = task;
+
+    const updatedResult = {
+      ...data,
+      aufgaben: updatedTasks,
+    };
+
+    setData(updatedResult);
+    saveToDatabase(updatedResult, true);
   };
 
   // Handle inline comments adjustments by the teacher
@@ -602,7 +662,7 @@ export default function CorrectWorkspace() {
             zIndex: 10,
           }}
         >
-          <Stack direction="row" spacing={2.5} sx={{ alignItems: 'center' }}>
+          <Stack direction="row" spacing={2} sx={{ alignItems: 'center' }}>
             <Link href="/dashboard" passHref style={{ textDecoration: 'none' }}>
               <Button
                 variant="outlined"
@@ -613,15 +673,128 @@ export default function CorrectWorkspace() {
                 Dashboard
               </Button>
             </Link>
+            {data.examId && (
+              <Link href={`/exams/${data.examId}`} passHref style={{ textDecoration: 'none' }}>
+                <Button
+                  variant="text"
+                  size="small"
+                  sx={{
+                    color: '#475569',
+                    fontWeight: 600,
+                    textTransform: 'none',
+                    display: { xs: 'none', lg: 'inline-flex' },
+                  }}
+                >
+                  {data.examTitle || 'Zur Prüfung'}
+                </Button>
+              </Link>
+            )}
             <Divider orientation="vertical" flexItem sx={{ borderColor: '#e2e8f0' }} />
-            <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
-              <Typography variant="body2" sx={{ color: 'text.secondary' }}>
-                Schüler:
-              </Typography>
-              <Typography variant="subtitle2" sx={{ color: '#0f172a', fontWeight: 'bold' }}>
-                {data.schuelerName}
-              </Typography>
-            </Stack>
+
+            {/* Continuous Speed-Grading Student Navigation Bar */}
+            {(() => {
+              const siblings = data.siblingSubmissions || [];
+              const currentIdx = siblings.findIndex((s) => s.id === String(id));
+              if (siblings.length > 1 && currentIdx !== -1) {
+                const prevSib = currentIdx > 0 ? siblings[currentIdx - 1] : null;
+                const nextSib = currentIdx < siblings.length - 1 ? siblings[currentIdx + 1] : null;
+                return (
+                  <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
+                    <Tooltip
+                      title={
+                        prevSib
+                          ? `Vorherige/r: ${prevSib.studentName}`
+                          : 'Erste Arbeit in dieser Prüfung'
+                      }
+                    >
+                      <span>
+                        <Button
+                          size="small"
+                          variant="outlined"
+                          disabled={!prevSib}
+                          onClick={() => prevSib && router.push(`/correct/${prevSib.id}`)}
+                          sx={{
+                            minWidth: 32,
+                            px: 1,
+                            py: 0.4,
+                            borderRadius: '6px',
+                            borderColor: '#cbd5e1',
+                            fontWeight: 800,
+                          }}
+                        >
+                          ‹
+                        </Button>
+                      </span>
+                    </Tooltip>
+
+                    <select
+                      value={String(id)}
+                      onChange={(e) => router.push(`/correct/${e.target.value}`)}
+                      style={{
+                        padding: '5px 10px',
+                        borderRadius: '8px',
+                        border: '1px solid #cbd5e1',
+                        backgroundColor: '#f8fafc',
+                        color: '#0f172a',
+                        fontWeight: 700,
+                        fontSize: '0.85rem',
+                        cursor: 'pointer',
+                        outline: 'none',
+                        fontFamily: 'inherit',
+                      }}
+                    >
+                      {siblings.map((sib, idx) => (
+                        <option key={sib.id} value={sib.id}>
+                          {idx + 1}/{siblings.length}: {sib.studentName}
+                          {sib.grade ? ` (Note ${sib.grade})` : ''}
+                          {sib.uncertainStepsCount > 0
+                            ? ` ⚠ (${sib.uncertainStepsCount} unsicher)`
+                            : ''}
+                        </option>
+                      ))}
+                    </select>
+
+                    <Tooltip
+                      title={
+                        nextSib
+                          ? `Nächste/r: ${nextSib.studentName}`
+                          : 'Letzte Arbeit in dieser Prüfung'
+                      }
+                    >
+                      <span>
+                        <Button
+                          size="small"
+                          variant="outlined"
+                          disabled={!nextSib}
+                          onClick={() => nextSib && router.push(`/correct/${nextSib.id}`)}
+                          sx={{
+                            minWidth: 32,
+                            px: 1,
+                            py: 0.4,
+                            borderRadius: '6px',
+                            borderColor: '#cbd5e1',
+                            fontWeight: 800,
+                          }}
+                        >
+                          ›
+                        </Button>
+                      </span>
+                    </Tooltip>
+                  </Stack>
+                );
+              }
+              return (
+                <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
+                  <Typography variant="body2" sx={{ color: 'text.secondary' }}>
+                    Schüler:
+                  </Typography>
+                  <Typography variant="subtitle2" sx={{ color: '#0f172a', fontWeight: 'bold' }}>
+                    {data.schuelerName}
+                  </Typography>
+                </Stack>
+              );
+            })()}
+
             <Stack
               direction="row"
               spacing={1}
@@ -707,16 +880,36 @@ export default function CorrectWorkspace() {
           >
             <Stack direction="row" sx={{ justifyContent: 'space-between', alignItems: 'center' }}>
               <Typography variant="subtitle1" sx={{ color: 'text.primary', fontWeight: 700 }}>
-                Original Schüler-Arbeit (Multimodale Visualisierung)
+                Schülerarbeit
               </Typography>
 
-              {/* Transcript / Scan switcher tabs */}
+              {/* Scan / Transcript switcher tabs */}
               {data.studentExamUrl && (
                 <Stack
                   direction="row"
                   spacing={0.5}
                   sx={{ backgroundColor: '#e2e8f0', p: '3px', borderRadius: '6px' }}
                 >
+                  <Button
+                    size="small"
+                    onClick={() => setLeftPanelTab('scan')}
+                    sx={{
+                      fontSize: '0.75rem',
+                      py: '2px',
+                      px: '10px',
+                      textTransform: 'none',
+                      borderRadius: '4px',
+                      backgroundColor: leftPanelTab === 'scan' ? '#ffffff' : 'transparent',
+                      color: leftPanelTab === 'scan' ? '#1b77d1' : '#475569',
+                      fontWeight: leftPanelTab === 'scan' ? 700 : 500,
+                      boxShadow: leftPanelTab === 'scan' ? '0 1px 3px rgba(0,0,0,0.1)' : 'none',
+                      '&:hover': {
+                        backgroundColor: leftPanelTab === 'scan' ? '#ffffff' : 'rgba(0,0,0,0.04)',
+                      },
+                    }}
+                  >
+                    Originaler Scan
+                  </Button>
                   <Button
                     size="small"
                     onClick={() => setLeftPanelTab('transcript')}
@@ -739,76 +932,130 @@ export default function CorrectWorkspace() {
                   >
                     Digitales Transkript
                   </Button>
-                  <Button
-                    size="small"
-                    onClick={() => setLeftPanelTab('scan')}
-                    sx={{
-                      fontSize: '0.75rem',
-                      py: '2px',
-                      px: '10px',
-                      textTransform: 'none',
-                      borderRadius: '4px',
-                      backgroundColor: leftPanelTab === 'scan' ? '#ffffff' : 'transparent',
-                      color: leftPanelTab === 'scan' ? '#1b77d1' : '#475569',
-                      fontWeight: leftPanelTab === 'scan' ? 700 : 500,
-                      boxShadow: leftPanelTab === 'scan' ? '0 1px 3px rgba(0,0,0,0.1)' : 'none',
-                      '&:hover': {
-                        backgroundColor: leftPanelTab === 'scan' ? '#ffffff' : 'rgba(0,0,0,0.04)',
-                      },
-                    }}
-                  >
-                    Originaler Scan
-                  </Button>
                 </Stack>
               )}
 
-              <Typography
-                variant="caption"
-                sx={{ color: 'text.secondary', display: { xs: 'none', sm: 'block' } }}
-              >
-                Seite 1 von 1
-              </Typography>
+              {(() => {
+                const scanUrls = parseStudentExamUrls(data.studentExamUrl);
+                const totalPages = Math.max(1, scanUrls.length);
+                const safeIdx = Math.min(activeScanPageIndex, totalPages - 1);
+                return (
+                  <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
+                    {leftPanelTab === 'scan' && totalPages > 1 ? (
+                      <>
+                        <Button
+                          size="small"
+                          variant="outlined"
+                          disabled={safeIdx === 0}
+                          onClick={() => setActiveScanPageIndex(Math.max(0, safeIdx - 1))}
+                          sx={{ minWidth: 28, px: 1, py: 0.25, fontSize: '0.75rem' }}
+                        >
+                          ‹
+                        </Button>
+                        <Typography
+                          variant="caption"
+                          sx={{ color: 'text.secondary', fontWeight: 700 }}
+                        >
+                          Seite {safeIdx + 1} / {totalPages}
+                        </Typography>
+                        <Button
+                          size="small"
+                          variant="outlined"
+                          disabled={safeIdx >= totalPages - 1}
+                          onClick={() =>
+                            setActiveScanPageIndex(Math.min(totalPages - 1, safeIdx + 1))
+                          }
+                          sx={{ minWidth: 28, px: 1, py: 0.25, fontSize: '0.75rem' }}
+                        >
+                          ›
+                        </Button>
+                      </>
+                    ) : (
+                      <Typography
+                        variant="caption"
+                        sx={{ color: 'text.secondary', display: { xs: 'none', sm: 'block' } }}
+                      >
+                        Seite 1 von {totalPages}
+                      </Typography>
+                    )}
+                    <Tooltip title="Fehlende Seite anhängen oder unscharfen Scan per Smartphone/Datei ersetzen">
+                      <Button
+                        size="small"
+                        variant="outlined"
+                        startIcon={<QrCodeScannerIcon sx={{ fontSize: '0.95rem !important' }} />}
+                        onClick={() => setQrOpen(true)}
+                        sx={{
+                          textTransform: 'none',
+                          fontWeight: 700,
+                          fontSize: '0.73rem',
+                          py: 0.35,
+                          px: 1.25,
+                          borderRadius: '6px',
+                          backgroundColor: '#ffffff',
+                          borderColor: '#cbd5e1',
+                          color: '#0f172a',
+                          '&:hover': {
+                            backgroundColor: '#f8fafc',
+                            borderColor: '#1b77d1',
+                            color: '#1b77d1',
+                          },
+                        }}
+                      >
+                        + Seite / Neu scannen
+                      </Button>
+                    </Tooltip>
+                  </Stack>
+                );
+              })()}
             </Stack>
 
             {leftPanelTab === 'scan' && data.studentExamUrl ? (
-              /* Premium Real Scanned Sheet Viewer */
-              <Box
-                sx={{
-                  background: '#f1f5f9',
-                  borderRadius: '8px',
-                  padding: '12px',
-                  minHeight: '680px',
-                  height: '750px',
-                  boxShadow: '0 4px 12px rgba(0, 0, 0, 0.08)',
-                  display: 'flex',
-                  justifyContent: 'center',
-                  alignItems: 'center',
-                  border: '1px solid #cbd5e1',
-                  overflow: 'hidden',
-                  position: 'relative',
-                }}
-              >
-                {data.studentExamUrl.toLowerCase().endsWith('.pdf') ? (
-                  <iframe
-                    src={data.studentExamUrl}
-                    width="100%"
-                    height="100%"
-                    style={{ border: 'none', borderRadius: '8px' }}
-                  />
-                ) : (
-                  <Image
-                    src={data.studentExamUrl}
-                    alt="Original Schülerarbeit Scan"
-                    fill
-                    style={{
-                      objectFit: 'contain',
+              /* Premium Real Scanned Sheet Viewer (Single or Multi-Page) */
+              (() => {
+                const scanUrls = parseStudentExamUrls(data.studentExamUrl);
+                const activeUrl =
+                  scanUrls[Math.min(activeScanPageIndex, Math.max(0, scanUrls.length - 1))] ||
+                  data.studentExamUrl;
+                return (
+                  <Box
+                    sx={{
+                      background: '#f1f5f9',
+                      borderRadius: '8px',
                       padding: '12px',
+                      minHeight: '680px',
+                      height: '750px',
+                      boxShadow: '0 4px 12px rgba(0, 0, 0, 0.08)',
+                      display: 'flex',
+                      justifyContent: 'center',
+                      alignItems: 'center',
+                      border: '1px solid #cbd5e1',
+                      overflow: 'hidden',
+                      position: 'relative',
                     }}
-                    sizes="(max-width: 1200px) 100vw, 50vw"
-                    priority
-                  />
-                )}
-              </Box>
+                  >
+                    {activeUrl.toLowerCase().endsWith('.pdf') ? (
+                      <iframe
+                        src={activeUrl}
+                        width="100%"
+                        height="100%"
+                        style={{ border: 'none', borderRadius: '8px' }}
+                      />
+                    ) : (
+                      <Image
+                        src={activeUrl}
+                        alt="Original Schülerarbeit Scan"
+                        fill
+                        style={{
+                          objectFit: 'contain',
+                          padding: '12px',
+                        }}
+                        sizes="(max-width: 1200px) 100vw, 50vw"
+                        priority
+                      />
+                    )}
+                  </Box>
+                );
+              })()
             ) : (
               /* Premium Simulated Scanned Sheet with red grading ink */
               <Box
@@ -855,7 +1102,7 @@ export default function CorrectWorkspace() {
                   }}
                 >
                   <Box>Name: {data.schuelerName}</Box>
-                  <Box>Klasse: 9b</Box>
+                  <Box>Klasse: {data.className || '—'}</Box>
                   <Box>Datum: {data.datum}</Box>
                 </Box>
 
@@ -909,56 +1156,80 @@ export default function CorrectWorkspace() {
                       {/* Dynamic Digital Red Ink corrections drawn based on real steps! */}
                       <Box sx={{ mt: 1.5, fontFamily: 'sans-serif', fontSize: '0.9rem' }}>
                         {task.schritte.map((step) => {
+                          const uncertaintyBadge = step.istUnsicher ? (
+                            <Box
+                              key={`uncertain-${step.schrittIndex}`}
+                              sx={{
+                                color: '#b45309',
+                                border: '1.5px dashed #f59e0b',
+                                padding: '2px 8px',
+                                borderRadius: '4px',
+                                fontWeight: 'bold',
+                                display: 'inline-block',
+                                backgroundColor: '#fef3c7',
+                                mr: 1,
+                                mb: 1,
+                              }}
+                            >
+                              ⚠ Schritt {step.schrittIndex + 1} – KI unsicher:{' '}
+                              {step.unsicherheitsGrund || 'Bitte manuell prüfen'}
+                            </Box>
+                          ) : null;
+
                           if (
                             step.fehlerTyp === 'Rechenfehler' ||
                             step.fehlerTyp === 'SonstigerFehler'
                           ) {
                             return (
-                              <Box
-                                key={step.schrittIndex}
-                                sx={{
-                                  color: 'error.main',
-                                  border: `1.5px solid ${theme.palette.error.main}`,
-                                  padding: '2px 8px',
-                                  borderRadius: '4px',
-                                  fontWeight: 'bold',
-                                  display: 'inline-block',
-                                  transform: `rotate(${step.schrittIndex % 2 === 0 ? -1 : 1}deg)`,
-                                  backgroundColor: 'rgba(239, 68, 68, 0.05)',
-                                  mr: 1,
-                                  mb: 1,
-                                }}
-                              >
-                                Schritt {step.schrittIndex + 1}: {step.begruendung} ❌ (-
-                                {Math.round((step.maximalPunkte - step.erreichtePunkte) * 10) /
-                                  10}{' '}
-                                P.)
-                              </Box>
+                              <React.Fragment key={step.schrittIndex}>
+                                {uncertaintyBadge}
+                                <Box
+                                  sx={{
+                                    color: 'error.main',
+                                    border: `1.5px solid ${theme.palette.error.main}`,
+                                    padding: '2px 8px',
+                                    borderRadius: '4px',
+                                    fontWeight: 'bold',
+                                    display: 'inline-block',
+                                    transform: `rotate(${step.schrittIndex % 2 === 0 ? -1 : 1}deg)`,
+                                    backgroundColor: 'rgba(239, 68, 68, 0.05)',
+                                    mr: 1,
+                                    mb: 1,
+                                  }}
+                                >
+                                  Schritt {step.schrittIndex + 1}: {step.begruendung} ❌ (-
+                                  {Math.round((step.maximalPunkte - step.erreichtePunkte) * 10) /
+                                    10}{' '}
+                                  P.)
+                                </Box>
+                              </React.Fragment>
                             );
                           } else if (step.fehlerTyp === 'Folgefehler') {
                             return (
-                              <Box
-                                key={step.schrittIndex}
-                                sx={{
-                                  color: 'warning.main',
-                                  border: `1.5px solid ${theme.palette.warning.main}`,
-                                  padding: '2px 8px',
-                                  borderRadius: '4px',
-                                  fontWeight: 'bold',
-                                  display: 'inline-block',
-                                  transform: `rotate(${step.schrittIndex % 2 === 0 ? 1 : -0.5}deg)`,
-                                  backgroundColor: 'rgba(245, 158, 11, 0.05)',
-                                  mr: 1,
-                                  mb: 1,
-                                }}
-                              >
-                                Schritt {step.schrittIndex + 1}: Folgefehler berücksichtigt! ✔️ (
-                                {Math.round(step.erreichtePunkte * 10) / 10}/
-                                {Math.round(step.maximalPunkte * 10) / 10} P.)
-                              </Box>
+                              <React.Fragment key={step.schrittIndex}>
+                                {uncertaintyBadge}
+                                <Box
+                                  sx={{
+                                    color: 'warning.main',
+                                    border: `1.5px solid ${theme.palette.warning.main}`,
+                                    padding: '2px 8px',
+                                    borderRadius: '4px',
+                                    fontWeight: 'bold',
+                                    display: 'inline-block',
+                                    transform: `rotate(${step.schrittIndex % 2 === 0 ? 1 : -0.5}deg)`,
+                                    backgroundColor: 'rgba(245, 158, 11, 0.05)',
+                                    mr: 1,
+                                    mb: 1,
+                                  }}
+                                >
+                                  Schritt {step.schrittIndex + 1}: Folgefehler berücksichtigt! ✔️ (
+                                  {Math.round(step.erreichtePunkte * 10) / 10}/
+                                  {Math.round(step.maximalPunkte * 10) / 10} P.)
+                                </Box>
+                              </React.Fragment>
                             );
                           }
-                          return null;
+                          return uncertaintyBadge;
                         })}
                       </Box>
                     </Typography>
@@ -1037,31 +1308,48 @@ export default function CorrectWorkspace() {
                   },
                 }}
               >
-                {data.aufgaben.map((t, idx) => (
-                  <Tab
-                    key={t.aufgabeId}
-                    label={
-                      <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
-                        <Typography variant="body2" sx={{ fontWeight: 'inherit' }}>
-                          Aufg. {t.aufgabeId}
-                        </Typography>
-                        <Chip
-                          label={`${t.erzieltePunkte.toFixed(1)} P.`}
-                          size="small"
-                          sx={{
-                            height: '20px',
-                            fontSize: '0.75rem',
-                            fontWeight: 700,
-                            backgroundColor: activeTaskIndex === idx ? '#e3f2fd' : '#f1f5f9',
-                            color: activeTaskIndex === idx ? '#1b77d1' : 'text.secondary',
-                            border: activeTaskIndex === idx ? '1px solid #1b77d1' : 'none',
-                            transition: 'all 0.2s ease',
-                          }}
-                        />
-                      </Stack>
-                    }
-                  />
-                ))}
+                {data.aufgaben.map((t, idx) => {
+                  const hasUncertainStep = t.schritte.some((s) => s.istUnsicher);
+                  return (
+                    <Tab
+                      key={t.aufgabeId}
+                      label={
+                        <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
+                          <Typography variant="body2" sx={{ fontWeight: 'inherit' }}>
+                            Aufg. {t.aufgabeId}
+                          </Typography>
+                          <Chip
+                            label={`${t.erzieltePunkte.toFixed(1)} P.`}
+                            size="small"
+                            sx={{
+                              height: '20px',
+                              fontSize: '0.75rem',
+                              fontWeight: 700,
+                              backgroundColor: activeTaskIndex === idx ? '#e3f2fd' : '#f1f5f9',
+                              color: activeTaskIndex === idx ? '#1b77d1' : 'text.secondary',
+                              border: activeTaskIndex === idx ? '1px solid #1b77d1' : 'none',
+                              transition: 'all 0.2s ease',
+                            }}
+                          />
+                          {hasUncertainStep && (
+                            <Chip
+                              label="⚠ KI unsicher"
+                              size="small"
+                              sx={{
+                                height: '20px',
+                                fontSize: '0.7rem',
+                                fontWeight: 700,
+                                backgroundColor: '#fef3c7',
+                                color: '#b45309',
+                                border: '1px solid #f59e0b',
+                              }}
+                            />
+                          )}
+                        </Stack>
+                      }
+                    />
+                  );
+                })}
               </Tabs>
               <Box
                 sx={{
@@ -1101,6 +1389,51 @@ export default function CorrectWorkspace() {
                 gap: '24px',
               }}
             >
+              {/* Global AI Uncertainty Warning Banner */}
+              {(() => {
+                const uncertainStepCount = data.aufgaben.reduce(
+                  (acc, t) => acc + t.schritte.filter((s) => s.istUnsicher).length,
+                  0
+                );
+                const firstUncertainTaskIdx = data.aufgaben.findIndex((t) =>
+                  t.schritte.some((s) => s.istUnsicher)
+                );
+                if (uncertainStepCount === 0) return null;
+                return (
+                  <Alert
+                    severity="warning"
+                    sx={{
+                      borderRadius: '10px',
+                      border: '1px solid #f59e0b',
+                      backgroundColor: '#fffbeb',
+                      color: '#92400e',
+                      flexShrink: 0,
+                      alignItems: 'center',
+                    }}
+                    action={
+                      firstUncertainTaskIdx !== -1 && firstUncertainTaskIdx !== activeTaskIndex ? (
+                        <Button
+                          color="warning"
+                          size="small"
+                          variant="outlined"
+                          onClick={() => setActiveTaskIndex(firstUncertainTaskIdx)}
+                          sx={{ textTransform: 'none', fontWeight: 700 }}
+                        >
+                          Zur Aufgabe springen
+                        </Button>
+                      ) : undefined
+                    }
+                  >
+                    <strong>KI-Unsicherheit erkannt ({uncertainStepCount}):</strong> Die KI war bei{' '}
+                    {uncertainStepCount === 1
+                      ? 'einem Teilschritt'
+                      : `${uncertainStepCount} Teilschritten`}{' '}
+                    unsicher (z. B. schwer lesbare Handschrift oder alternativer Lösungsweg) und hat
+                    eine vorläufige Bewertung vorgeschlagen. Bitte vor Abschluss kurz prüfen.
+                  </Alert>
+                );
+              })()}
+
               {/* Task title */}
               <Box sx={{ flexShrink: 0 }}>
                 <Typography
@@ -1126,19 +1459,61 @@ export default function CorrectWorkspace() {
                     sx={{
                       borderRadius: '12px',
                       borderLeft: `4px solid ${
-                        s.fehlerTyp === 'KeinFehler'
-                          ? theme.palette.success.main
-                          : s.fehlerTyp === 'Folgefehler'
-                            ? theme.palette.warning.main
-                            : theme.palette.error.main
+                        s.istUnsicher
+                          ? '#f59e0b'
+                          : s.fehlerTyp === 'KeinFehler'
+                            ? theme.palette.success.main
+                            : s.fehlerTyp === 'Folgefehler'
+                              ? theme.palette.warning.main
+                              : theme.palette.error.main
                       }`,
-                      backgroundColor: '#ffffff',
-                      border: '1px solid #e2e8f0',
+                      backgroundColor: s.istUnsicher ? '#fffbeb' : '#ffffff',
+                      border: s.istUnsicher ? '1.5px solid #f59e0b' : '1px solid #e2e8f0',
                       boxShadow: '0 1px 3px rgba(0, 0, 0, 0.05)',
                     }}
                   >
                     <CardContent sx={{ padding: '16px !important' }}>
                       <Stack spacing={1.5}>
+                        {s.istUnsicher && (
+                          <Stack
+                            direction={{ xs: 'column', sm: 'row' }}
+                            spacing={1}
+                            sx={{
+                              justifyContent: 'space-between',
+                              alignItems: { xs: 'flex-start', sm: 'center' },
+                              backgroundColor: '#fef3c7',
+                              border: '1px solid #f59e0b',
+                              borderRadius: '8px',
+                              px: 1.5,
+                              py: 1,
+                            }}
+                          >
+                            <Typography
+                              variant="caption"
+                              sx={{ color: '#92400e', fontWeight: 700, fontSize: '0.8rem' }}
+                            >
+                              ⚠ KI unsicher: {s.unsicherheitsGrund || 'Bitte manuell prüfen.'}
+                            </Typography>
+                            <Button
+                              size="small"
+                              variant="contained"
+                              color="warning"
+                              onClick={() => handleResolveStepUncertainty(activeTaskIndex, sIdx)}
+                              sx={{
+                                textTransform: 'none',
+                                fontWeight: 700,
+                                fontSize: '0.75rem',
+                                py: 0.25,
+                                px: 1.25,
+                                borderRadius: '6px',
+                                flexShrink: 0,
+                                boxShadow: 'none',
+                              }}
+                            >
+                              Als geprüft bestätigen ✓
+                            </Button>
+                          </Stack>
+                        )}
                         <Stack
                           direction="row"
                           sx={{ justifyContent: 'space-between', alignItems: 'center' }}
@@ -1437,46 +1812,95 @@ export default function CorrectWorkspace() {
                 {saveStatus === 'saving' && 'Änderungen werden gespeichert...'}
                 {saveStatus === 'error' && 'Fehler beim Speichern – Verbindung prüfen'}
               </Typography>
-              <Button
-                onClick={() => {
-                  saveToDatabase(data, true);
-                }}
-                disabled={saveStatus === 'saving'}
-                className="glow-button"
-                variant="contained"
-                size="small"
-                startIcon={
-                  saveStatus === 'saving' ? (
-                    <CircularProgress size={16} sx={{ color: 'inherit' }} />
-                  ) : (
-                    <SaveIcon />
-                  )
-                }
-                sx={{
-                  borderRadius: '8px',
-                  padding: '8px 16px',
-                  backgroundColor:
-                    saveStatus === 'error'
-                      ? 'error.main'
-                      : saveStatus === 'saving'
-                        ? 'warning.main'
-                        : 'primary.main',
-                  '&:hover': {
-                    backgroundColor:
-                      saveStatus === 'error'
-                        ? 'error.dark'
-                        : saveStatus === 'saving'
-                          ? 'warning.dark'
-                          : 'primary.dark',
-                  },
-                }}
-              >
-                {saveStatus === 'error' ? 'Erneut versuchen' : 'Änderungen speichern'}
-              </Button>
+              <Stack direction="row" spacing={1.5} sx={{ alignItems: 'center' }}>
+                {saveStatus === 'error' && (
+                  <Button
+                    onClick={() => {
+                      saveToDatabase(data, true);
+                    }}
+                    variant="contained"
+                    color="error"
+                    size="small"
+                    startIcon={<SaveIcon />}
+                    sx={{
+                      borderRadius: '8px',
+                      padding: '8px 14px',
+                      textTransform: 'none',
+                      fontWeight: 700,
+                    }}
+                  >
+                    Erneut speichern
+                  </Button>
+                )}
+
+                {(() => {
+                  const siblings = data.siblingSubmissions || [];
+                  const currentIdx = siblings.findIndex((s) => s.id === String(id));
+                  const nextSib =
+                    currentIdx !== -1 && currentIdx < siblings.length - 1
+                      ? siblings[currentIdx + 1]
+                      : null;
+                  if (nextSib) {
+                    return (
+                      <Button
+                        variant="contained"
+                        size="small"
+                        onClick={() => router.push(`/correct/${nextSib.id}`)}
+                        sx={{
+                          borderRadius: '8px',
+                          padding: '8px 16px',
+                          textTransform: 'none',
+                          fontWeight: 700,
+                          backgroundColor: '#1b77d1',
+                          '&:hover': {
+                            backgroundColor: '#1565c0',
+                          },
+                        }}
+                      >
+                        Nächste/r ({nextSib.studentName}) →
+                      </Button>
+                    );
+                  }
+                  if (data.examId) {
+                    return (
+                      <Button
+                        variant="outlined"
+                        size="small"
+                        onClick={() => router.push(`/exams/${data.examId}`)}
+                        sx={{
+                          borderRadius: '8px',
+                          padding: '8px 16px',
+                          textTransform: 'none',
+                          fontWeight: 700,
+                          borderColor: '#cbd5e1',
+                          color: '#0f172a',
+                        }}
+                      >
+                        Zur Prüfungsübersicht
+                      </Button>
+                    );
+                  }
+                  return null;
+                })()}
+              </Stack>
             </Box>
           </Box>
         </Box>
       </Box>
+
+      {/* QR Re-Scan / Page Append Dialog */}
+      <QrScannerDialog
+        open={qrOpen}
+        onClose={() => setQrOpen(false)}
+        targetMode="APPEND_SUBMISSION"
+        examId={data.examId}
+        examTitle={data.examTitle}
+        classId={data.classId || undefined}
+        className={data.className}
+        submissionId={String(id)}
+        studentName={data.schuelerName}
+        onRefreshSubmissions={loadSubmission}
+      />
 
       {/* Toast Notification */}
       <Snackbar
@@ -1589,7 +2013,7 @@ export default function CorrectWorkspace() {
                 margin: '6px 0 0 0',
               }}
             >
-              Fach: {data.fach} | Klasse: 9b
+              Fach: {data.fach} | Klasse: {data.className || '—'}
             </p>
           </div>
           <div style={{ textAlign: 'right', fontSize: '10pt', color: '#334155' }}>

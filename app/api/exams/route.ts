@@ -18,6 +18,15 @@ export async function GET() {
       },
       include: {
         class: true,
+        tasks: {
+          orderBy: {
+            orderIndex: 'asc',
+          },
+        },
+        submissions: {
+          where: { status: 'COMPLETED' },
+          select: { gradeRaw: true },
+        },
         _count: {
           select: {
             submissions: true,
@@ -29,17 +38,35 @@ export async function GET() {
       },
     });
 
-    const formatted = exams.map((ex) => ({
-      id: ex.id,
-      title: ex.title,
-      subject: ex.subject,
-      maxPoints: ex.maxPoints,
-      rubricText: ex.rubricText,
-      classId: ex.classId,
-      className: ex.class.name,
-      createdAt: ex.createdAt.toLocaleDateString('de-CH'),
-      submissionsCount: ex._count.submissions,
-    }));
+    const formatted = exams.map((ex) => {
+      const completedGrades = ex.submissions.map((s) => s.gradeRaw);
+      const averageGrade =
+        completedGrades.length > 0
+          ? (completedGrades.reduce((a, b) => a + b, 0) / completedGrades.length).toFixed(2)
+          : 'N/A';
+
+      return {
+        id: ex.id,
+        title: ex.title,
+        subject: ex.subject,
+        maxPoints: ex.maxPoints,
+        rubricText: ex.rubricText,
+        examTemplateText: ex.examTemplateText,
+        gradingNotes: ex.gradingNotes,
+        gradingFormula: ex.gradingFormula,
+        gradeRounding: ex.gradeRounding,
+        classId: ex.classId,
+        className: ex.class.name,
+        createdAt: ex.createdAt.toLocaleDateString('de-CH'),
+        submissionsCount: ex._count.submissions,
+        averageGrade,
+        tasks: ex.tasks.map((t) => ({
+          taskId: t.taskId,
+          title: t.title,
+          maxPoints: t.maxPoints,
+        })),
+      };
+    });
 
     return NextResponse.json({ exams: formatted });
   } catch (error) {
@@ -57,7 +84,18 @@ export async function POST(request: Request) {
     }
 
     const body = await request.json();
-    const { title, subject, rubricText, maxPoints, classId, tasks } = body;
+    const {
+      title,
+      subject,
+      rubricText,
+      examTemplateText,
+      gradingNotes,
+      gradingFormula,
+      gradeRounding,
+      maxPoints,
+      classId,
+      tasks,
+    } = body;
 
     if (!title || typeof title !== 'string' || title.trim() === '') {
       return NextResponse.json({ error: 'Prüfungstitel ist erforderlich.' }, { status: 400 });
@@ -99,6 +137,10 @@ export async function POST(request: Request) {
           title: title.trim(),
           subject: subject.trim(),
           rubricText: rubricText || 'Standard Musterlösung',
+          examTemplateText: examTemplateText || null,
+          gradingNotes: gradingNotes?.trim() || null,
+          gradingFormula: gradingFormula || 'LINEAR_60',
+          gradeRounding: gradeRounding || '0.1',
           maxPoints: finalMaxPoints,
           classId,
         },

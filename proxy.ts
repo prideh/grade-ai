@@ -80,8 +80,19 @@ export async function proxy(request: NextRequest) {
   const payload = session ? await verifyJWT(session) : null;
   const user = payload ? { userId: payload.userId } : null;
 
-  // Protect Dashboard and Correction Workspace routes
-  if (!user && (pathname.startsWith('/dashboard') || pathname.startsWith('/correct'))) {
+  // Protect all authenticated application routes at the edge level
+  const protectedPrefixes = [
+    '/dashboard',
+    '/correct',
+    '/classes',
+    '/exams',
+    '/students',
+    '/submissions',
+    '/logs',
+  ];
+  const isProtectedRoute = protectedPrefixes.some((prefix) => pathname.startsWith(prefix));
+
+  if (!user && isProtectedRoute) {
     const response = NextResponse.redirect(new URL('/login', request.url));
     // Purge the old/invalid session cookie from the browser
     response.cookies.delete(SESSION_COOKIE_NAME);

@@ -35,7 +35,16 @@ import StarIcon from '@mui/icons-material/Star';
 import ContentCopyIcon from '@mui/icons-material/ContentCopy';
 import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome';
 import CloseIcon from '@mui/icons-material/Close';
+import QrCodeScannerIcon from '@mui/icons-material/QrCodeScanner';
 import DashboardLayout from '@/components/DashboardLayout';
+import QrScannerDialog from '@/components/QrScannerDialog';
+import {
+  GRADING_FORMULA_OPTIONS,
+  GRADE_ROUNDING_OPTIONS,
+  SUBJECT_PROFILES,
+  type GradingFormula,
+  type GradeRounding,
+} from '@/lib/grading';
 
 interface SimpleClass {
   id: string;
@@ -53,7 +62,12 @@ interface PrismaExamItem {
   classId: string;
   className: string;
   rubricText: string;
+  examTemplateText?: string | null;
+  gradingNotes?: string | null;
+  gradingFormula?: string;
+  gradeRounding?: string;
   submissionsCount: number;
+  tasks?: { taskId: string; title: string; maxPoints: number }[];
 }
 
 interface ExamListItem extends PrismaExamItem {
@@ -75,6 +89,7 @@ export default function ExamsPage() {
 
   // Dialog State
   const [openCreate, setOpenCreate] = useState(false);
+  const [qrRubricOpen, setQrRubricOpen] = useState(false);
   const [examTitle, setExamTitle] = useState('');
 
   // Copy Exam State
@@ -84,12 +99,18 @@ export default function ExamsPage() {
   const [copySubject, setCopySubject] = useState('');
   const [copyMaxPoints, setCopyMaxPoints] = useState<number>(20);
   const [copyRubric, setCopyRubric] = useState('');
+  const [copyGradingNotes, setCopyGradingNotes] = useState('');
+  const [copyGradingFormula, setCopyGradingFormula] = useState<GradingFormula>('LINEAR_60');
+  const [copyGradeRounding, setCopyGradeRounding] = useState<GradeRounding>('0.1');
   const [copyTargetClassId, setCopyTargetClassId] = useState('');
   const [copyLoading, setCopyLoading] = useState(false);
   const [copyError, setCopyError] = useState('');
   const [examSubject, setExamSubject] = useState('Mathematik');
   const [examMaxPoints, setExamMaxPoints] = useState<number>(20);
   const [examRubric, setExamRubric] = useState('');
+  const [examGradingNotes, setExamGradingNotes] = useState('');
+  const [examGradingFormula, setExamGradingFormula] = useState<GradingFormula>('LINEAR_60');
+  const [examGradeRounding, setExamGradeRounding] = useState<GradeRounding>('0.1');
   const [uploadedFileName, setUploadedFileName] = useState('');
   const [parsingRubric, setParsingRubric] = useState(false);
   const [parsedTasks, setParsedTasks] = useState<
@@ -172,65 +193,40 @@ export default function ExamsPage() {
   // Fetch all exams & classes
   const fetchData = React.useCallback(async () => {
     try {
-      // Fetch classes
-      const classesRes = await fetch('/api/classes');
+      const [classesRes, examsRes] = await Promise.all([
+        fetch('/api/classes'),
+        fetch('/api/exams'),
+      ]);
       setError('');
 
       let loadedClasses: SimpleClass[] = [];
       if (classesRes.ok) {
         const classesData = await classesRes.json();
-        loadedClasses = await Promise.all(
-          (classesData.classes || []).map(
-            async (cls: { id: string; name: string; _count?: { students?: number } }) => {
-              try {
-                const detailRes = await fetch(`/api/classes/${cls.id}`);
-                if (detailRes.ok) {
-                  const detailData = await detailRes.json();
-                  return {
-                    id: cls.id,
-                    name: cls.name,
-                    studentsCount: cls._count?.students || 0,
-                    totalExams: detailData.exams?.length || 0,
-                    averageGrade: detailData.stats?.averageGrade || 'N/A',
-                  };
-                }
-              } catch (e) {
-                console.error('Error fetching details for class', cls.id, e);
-              }
-              return {
-                id: cls.id,
-                name: cls.name,
-                studentsCount: cls._count?.students || 0,
-                totalExams: 0,
-                averageGrade: 'N/A',
-              };
-            }
-          )
+        loadedClasses = (classesData.classes || []).map(
+          (cls: {
+            id: string;
+            name: string;
+            _count?: { students?: number };
+            totalExams?: number;
+            averageGrade?: string;
+          }) => ({
+            id: cls.id,
+            name: cls.name,
+            studentsCount: cls._count?.students || 0,
+            totalExams: cls.totalExams ?? 0,
+            averageGrade: cls.averageGrade || 'N/A',
+          })
         );
         setClasses(loadedClasses);
       }
 
-      // Fetch exams
-      const examsRes = await fetch('/api/exams');
       if (!examsRes.ok) throw new Error('Fehler beim Laden der Prüfungen.');
       const examsData = await examsRes.json();
 
-      // Fetch details for each exam to calculate and display class averages
-      const detailedExams = await Promise.all(
-        (examsData.exams || []).map(async (ex: PrismaExamItem) => {
-          try {
-            const detailRes = await fetch(`/api/exams/${ex.id}`);
-            if (detailRes.ok) {
-              const detailData = await detailRes.json();
-              return {
-                ...ex,
-                averageGrade: detailData.stats?.averageGrade || 'N/A',
-              };
-            }
-          } catch (e) {
-            console.error('Error fetching details for exam', ex.id, e);
-          }
-          return { ...ex, averageGrade: 'N/A' };
+      const detailedExams: ExamListItem[] = (examsData.exams || []).map(
+        (ex: PrismaExamItem & { averageGrade?: string }) => ({
+          ...ex,
+          averageGrade: ex.averageGrade || 'N/A',
         })
       );
 
@@ -288,6 +284,9 @@ export default function ExamsPage() {
           subject: examSubject,
           maxPoints: Number(examMaxPoints),
           rubricText: examRubric || 'Standard Musterlösung',
+          gradingNotes: examGradingNotes || null,
+          gradingFormula: examGradingFormula,
+          gradeRounding: examGradeRounding,
           classId: selectedClassId,
           tasks: parsedTasks.length > 0 ? parsedTasks : undefined,
         }),
@@ -301,6 +300,7 @@ export default function ExamsPage() {
       setOpenCreate(false);
       setExamTitle('');
       setExamRubric('');
+      setExamGradingNotes('');
       setUploadedFileName('');
       setParsedTasks([]);
       setActiveClassId(selectedClassId); // Automatically select the tab of the class for the new exam
@@ -318,6 +318,9 @@ export default function ExamsPage() {
     setCopySubject(exam.subject);
     setCopyMaxPoints(exam.maxPoints);
     setCopyRubric(exam.rubricText || 'Standard Musterlösung');
+    setCopyGradingNotes(exam.gradingNotes || '');
+    setCopyGradingFormula((exam.gradingFormula as GradingFormula) || 'LINEAR_60');
+    setCopyGradeRounding((exam.gradeRounding as GradeRounding) || '0.1');
 
     const otherClasses = classes.filter((c) => c.id !== exam.classId);
     if (otherClasses.length > 0) {
@@ -349,7 +352,15 @@ export default function ExamsPage() {
           subject: copySubject,
           maxPoints: Number(copyMaxPoints),
           rubricText: copyRubric,
+          examTemplateText: copySourceExam?.examTemplateText || null,
+          gradingNotes: copyGradingNotes || null,
+          gradingFormula: copyGradingFormula,
+          gradeRounding: copyGradeRounding,
           classId: copyTargetClassId,
+          tasks:
+            copySourceExam?.tasks && copySourceExam.tasks.length > 0
+              ? copySourceExam.tasks
+              : undefined,
         }),
       });
 
@@ -805,18 +816,19 @@ export default function ExamsPage() {
                   </Grid>
                   <Grid size={{ xs: 12, sm: 4 }}>
                     <FormControl fullWidth>
-                      <InputLabel id="subject-label">Fach</InputLabel>
+                      <InputLabel id="subject-label">Fach (KI-Profil)</InputLabel>
                       <Select
                         labelId="subject-label"
                         value={examSubject}
-                        label="Fach"
+                        label="Fach (KI-Profil)"
                         onChange={(e) => setExamSubject(e.target.value)}
                         sx={{ borderRadius: '8px' }}
                       >
-                        <MenuItem value="Mathematik">Mathematik</MenuItem>
-                        <MenuItem value="Physik">Physik</MenuItem>
-                        <MenuItem value="Chemie">Chemie</MenuItem>
-                        <MenuItem value="Geometrie">Geometrie</MenuItem>
+                        {SUBJECT_PROFILES.map((s) => (
+                          <MenuItem key={s.value} value={s.value}>
+                            {s.label}
+                          </MenuItem>
+                        ))}
                       </Select>
                     </FormControl>
                   </Grid>
@@ -857,7 +869,48 @@ export default function ExamsPage() {
                   </Grid>
                 </Grid>
 
-                {uploadedFileName || examRubric.startsWith('{"mimeType":') ? (
+                <Grid container spacing={2}>
+                  <Grid size={{ xs: 12, sm: 6 }}>
+                    <FormControl fullWidth size="small">
+                      <InputLabel id="create-formula-label">Notenformel (CH)</InputLabel>
+                      <Select
+                        labelId="create-formula-label"
+                        value={examGradingFormula}
+                        label="Notenformel (CH)"
+                        onChange={(e) => setExamGradingFormula(e.target.value as GradingFormula)}
+                        sx={{ borderRadius: '8px' }}
+                      >
+                        {GRADING_FORMULA_OPTIONS.map((opt) => (
+                          <MenuItem key={opt.value} value={opt.value}>
+                            {opt.label}
+                          </MenuItem>
+                        ))}
+                      </Select>
+                    </FormControl>
+                  </Grid>
+                  <Grid size={{ xs: 12, sm: 6 }}>
+                    <FormControl fullWidth size="small">
+                      <InputLabel id="create-rounding-label">Notenrundung</InputLabel>
+                      <Select
+                        labelId="create-rounding-label"
+                        value={examGradeRounding}
+                        label="Notenrundung"
+                        onChange={(e) => setExamGradeRounding(e.target.value as GradeRounding)}
+                        sx={{ borderRadius: '8px' }}
+                      >
+                        {GRADE_ROUNDING_OPTIONS.map((opt) => (
+                          <MenuItem key={opt.value} value={opt.value}>
+                            {opt.label}
+                          </MenuItem>
+                        ))}
+                      </Select>
+                    </FormControl>
+                  </Grid>
+                </Grid>
+
+                {uploadedFileName ||
+                examRubric.startsWith('{"mimeType":') ||
+                examRubric.startsWith('[{"mimeType":') ? (
                   <Box
                     sx={{
                       border: '1px solid #cbd5e1',
@@ -893,12 +946,16 @@ export default function ExamsPage() {
                       onBlur={() => autoParseRubric(examRubric)}
                       sx={{ '& .MuiOutlinedInput-root': { borderRadius: '8px' } }}
                     />
-                    <Stack direction="row" spacing={1.5} sx={{ alignItems: 'center' }}>
+                    <Stack
+                      direction="row"
+                      spacing={1.5}
+                      sx={{ alignItems: 'center', flexWrap: 'wrap' }}
+                    >
                       <Typography
                         variant="caption"
                         sx={{ color: 'text.secondary', fontWeight: 600 }}
                       >
-                        Oder lade eine Datei/einen Screenshot hoch:
+                        Oder lade eine Datei hoch / fotografiere sie:
                       </Typography>
                       <input
                         type="file"
@@ -921,9 +978,36 @@ export default function ExamsPage() {
                       >
                         Datei auswählen
                       </Button>
+                      <Button
+                        variant="outlined"
+                        size="small"
+                        startIcon={<QrCodeScannerIcon />}
+                        onClick={() => setQrRubricOpen(true)}
+                        sx={{
+                          color: '#1b77d1',
+                          borderColor: '#1b77d1',
+                          fontWeight: 700,
+                          textTransform: 'none',
+                        }}
+                      >
+                        Per Smartphone scannen (QR)
+                      </Button>
                     </Stack>
                   </Stack>
                 )}
+
+                <TextField
+                  label="Unterrichtsmaterial & Bewertungshinweise (Stufe 3, optional)"
+                  placeholder="z.B. Teilpunkte für richtige Formel ohne Einheiten vergeben..."
+                  multiline
+                  rows={2}
+                  fullWidth
+                  size="small"
+                  variant="outlined"
+                  value={examGradingNotes}
+                  onChange={(e) => setExamGradingNotes(e.target.value)}
+                  sx={{ '& .MuiOutlinedInput-root': { borderRadius: '8px' } }}
+                />
 
                 {examRubric && parsedTasks.length === 0 && !parsingRubric && (
                   <Button
@@ -1119,19 +1203,20 @@ export default function ExamsPage() {
                   </Grid>
                   <Grid size={{ xs: 12, sm: 4 }}>
                     <FormControl fullWidth>
-                      <InputLabel id="copy-subject-label">Fach</InputLabel>
+                      <InputLabel id="copy-subject-label">Fach (KI-Profil)</InputLabel>
                       <Select
                         labelId="copy-subject-label"
                         value={copySubject}
-                        label="Fach"
+                        label="Fach (KI-Profil)"
                         onChange={(e) => setCopySubject(e.target.value)}
                         sx={{ borderRadius: '8px' }}
                         MenuProps={{ disablePortal: true }}
                       >
-                        <MenuItem value="Mathematik">Mathematik</MenuItem>
-                        <MenuItem value="Physik">Physik</MenuItem>
-                        <MenuItem value="Chemie">Chemie</MenuItem>
-                        <MenuItem value="Geometrie">Geometrie</MenuItem>
+                        {SUBJECT_PROFILES.map((s) => (
+                          <MenuItem key={s.value} value={s.value}>
+                            {s.label}
+                          </MenuItem>
+                        ))}
                       </Select>
                     </FormControl>
                   </Grid>
@@ -1172,6 +1257,47 @@ export default function ExamsPage() {
                   </Grid>
                 </Grid>
 
+                <Grid container spacing={2}>
+                  <Grid size={{ xs: 12, sm: 6 }}>
+                    <FormControl fullWidth size="small">
+                      <InputLabel id="copy-formula-label">Notenformel (CH)</InputLabel>
+                      <Select
+                        labelId="copy-formula-label"
+                        value={copyGradingFormula}
+                        label="Notenformel (CH)"
+                        onChange={(e) => setCopyGradingFormula(e.target.value as GradingFormula)}
+                        sx={{ borderRadius: '8px' }}
+                        MenuProps={{ disablePortal: true }}
+                      >
+                        {GRADING_FORMULA_OPTIONS.map((opt) => (
+                          <MenuItem key={opt.value} value={opt.value}>
+                            {opt.label}
+                          </MenuItem>
+                        ))}
+                      </Select>
+                    </FormControl>
+                  </Grid>
+                  <Grid size={{ xs: 12, sm: 6 }}>
+                    <FormControl fullWidth size="small">
+                      <InputLabel id="copy-rounding-label">Notenrundung</InputLabel>
+                      <Select
+                        labelId="copy-rounding-label"
+                        value={copyGradeRounding}
+                        label="Notenrundung"
+                        onChange={(e) => setCopyGradeRounding(e.target.value as GradeRounding)}
+                        sx={{ borderRadius: '8px' }}
+                        MenuProps={{ disablePortal: true }}
+                      >
+                        {GRADE_ROUNDING_OPTIONS.map((opt) => (
+                          <MenuItem key={opt.value} value={opt.value}>
+                            {opt.label}
+                          </MenuItem>
+                        ))}
+                      </Select>
+                    </FormControl>
+                  </Grid>
+                </Grid>
+
                 <TextField
                   label="Erwartungshorizont / Musterlösung"
                   multiline
@@ -1180,6 +1306,18 @@ export default function ExamsPage() {
                   variant="outlined"
                   value={copyRubric}
                   onChange={(e) => setCopyRubric(e.target.value)}
+                  sx={{ '& .MuiOutlinedInput-root': { borderRadius: '8px' } }}
+                />
+
+                <TextField
+                  label="Unterrichtsmaterial & Bewertungshinweise (Stufe 3, optional)"
+                  multiline
+                  rows={2}
+                  fullWidth
+                  size="small"
+                  variant="outlined"
+                  value={copyGradingNotes}
+                  onChange={(e) => setCopyGradingNotes(e.target.value)}
                   sx={{ '& .MuiOutlinedInput-root': { borderRadius: '8px' } }}
                 />
               </Stack>
@@ -1207,6 +1345,22 @@ export default function ExamsPage() {
             </DialogActions>
           </form>
         </Dialog>
+
+        <QrScannerDialog
+          open={qrRubricOpen}
+          onClose={() => setQrRubricOpen(false)}
+          targetMode="RUBRIC"
+          classId={selectedClassId}
+          className={classes.find((c) => c.id === selectedClassId)?.name || null}
+          examTitle={examTitle || 'Neue Prüfung'}
+          onDocumentScanned={(payload, pageCount) => {
+            setUploadedFileName(
+              `Smartphone-Musterlösung (${pageCount} ${pageCount === 1 ? 'Seite' : 'Seiten'})`
+            );
+            setExamRubric(payload);
+            autoParseRubric(payload);
+          }}
+        />
       </Box>
     </DashboardLayout>
   );

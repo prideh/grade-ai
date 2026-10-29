@@ -29,7 +29,6 @@ import GroupIcon from '@mui/icons-material/Group';
 import AssignmentIcon from '@mui/icons-material/Assignment';
 import HistoryIcon from '@mui/icons-material/History';
 import LogoutIcon from '@mui/icons-material/Logout';
-import ReceiptLongIcon from '@mui/icons-material/ReceiptLong';
 import { getCachedTeacher, setCachedTeacher, clearSessionCache } from '@/lib/sessionCache';
 
 const drawerWidth = 260;
@@ -129,7 +128,6 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
     { text: 'Klassen', icon: <GroupIcon />, path: '/classes' },
     { text: 'Prüfungen', icon: <AssignmentIcon />, path: '/exams' },
     { text: 'Korrekturen', icon: <HistoryIcon />, path: '/submissions' },
-    { text: 'Protokoll', icon: <ReceiptLongIcon />, path: '/logs' },
   ];
 
   const drawerContent = (

@@ -78,7 +78,7 @@ async function main() {
 
   // 4. Create 2 Exams
   // Exam 1: Klasse 9a Math 1
-  await prisma.exam.create({
+  const exam1 = await prisma.exam.create({
     data: {
       title: 'Mathematik Klassenarbeit 1: Lineare Gleichungen',
       subject: 'Mathematik',
@@ -103,7 +103,117 @@ async function main() {
 
   console.log('📝 Exams created.');
 
-  // 6. Mock Submissions removed for clean, unseeded student exam states.
+  // 5. Seed 2 Completed Submissions for Exam 1 (for Speed-Grading & Uncertainty Review E2E tests)
+  await prisma.submission.create({
+    data: {
+      examId: exam1.id,
+      studentId: enrolledStudents[0].id,
+      status: 'COMPLETED',
+      earnedPoints: 15,
+      gradeRaw: 4.75,
+      gradeRounded: '4.8',
+      strengths: ['Sichere Äquivalenzumformungen bei linearen Gleichungen'],
+      weaknesses: ['Vorzeichenfehler beim Einsetzen in Gleichungssystemen'],
+      helpfulTip: 'Prüfe deine Lösung immer durch Einsetzen in die Ausgangsgleichung.',
+      exerciseRecommendation: 'Übungsblatt 3: Lineare Gleichungssysteme (Aufgaben 1–4).',
+      tasks: {
+        create: [
+          {
+            taskId: '1',
+            title: 'Aufgabe 1: Lineare Gleichung',
+            studentAnswer: '3x - 5 = 10 | +5\n3x = 15 | :3\nx = 5',
+            erzieltePunkte: 5,
+            maximalPunkte: 5,
+            status: 'Korrekt',
+            lehrerKommentar: 'Vorbildlicher Lösungsweg.',
+            orderIndex: 0,
+            schritte: {
+              create: [
+                {
+                  schrittIndex: 0,
+                  schrittText: '3x = 15 -> x = 5',
+                  istKorrekt: true,
+                  fehlerTyp: 'KeinFehler',
+                  erreichtePunkte: 5,
+                  maximalPunkte: 5,
+                  begruendung: 'Äquivalenzumformung und Endergebnis komplett korrekt.',
+                  istUnsicher: false,
+                },
+              ],
+            },
+          },
+          {
+            taskId: '2',
+            title: 'Aufgabe 2: Klammergleichung',
+            studentAnswer: '2(x+3) = 14\n2x + 6 = 14\n2x = 8 -> x = 4',
+            erzieltePunkte: 10,
+            maximalPunkte: 15,
+            status: 'Folgefehler',
+            lehrerKommentar: 'Zwischenschritt leicht unleserlich, Folgeschritt korrekt.',
+            orderIndex: 1,
+            schritte: {
+              create: [
+                {
+                  schrittIndex: 0,
+                  schrittText: '2x + 6 = 14 -> x = 4',
+                  istKorrekt: false,
+                  fehlerTyp: 'Folgefehler',
+                  erreichtePunkte: 10,
+                  maximalPunkte: 15,
+                  begruendung: 'Handschrift bei Ziffer 6 schwer lesbar, Ergebnis stimmt.',
+                  istUnsicher: true,
+                  unsicherheitsGrund: 'Handschrift bei Zwischenschritt schwer entzifferbar',
+                },
+              ],
+            },
+          },
+        ],
+      },
+    },
+  });
+
+  await prisma.submission.create({
+    data: {
+      examId: exam1.id,
+      studentId: enrolledStudents[1].id,
+      status: 'COMPLETED',
+      earnedPoints: 18,
+      gradeRaw: 5.5,
+      gradeRounded: '5.5',
+      strengths: ['Sehr strukturierte Darstellung aller Rechenschritte'],
+      weaknesses: ['Kleiner Flüchtigkeitsfehler bei Aufgabe 3'],
+      helpfulTip: 'Achte bei Textaufgaben auf die Antwortsätze.',
+      exerciseRecommendation: 'Zusatzaufgaben Kapitel 4.',
+      tasks: {
+        create: [
+          {
+            taskId: '1',
+            title: 'Aufgabe 1: Lineare Gleichung',
+            studentAnswer: '3x = 15 -> x = 5',
+            erzieltePunkte: 18,
+            maximalPunkte: 20,
+            status: 'Korrekt',
+            lehrerKommentar: 'Sehr gut gelöst!',
+            orderIndex: 0,
+            schritte: {
+              create: [
+                {
+                  schrittIndex: 0,
+                  schrittText: '3x = 15 -> x = 5',
+                  istKorrekt: true,
+                  fehlerTyp: 'KeinFehler',
+                  erreichtePunkte: 18,
+                  maximalPunkte: 20,
+                  begruendung: 'Fast volle Punktzahl erreicht.',
+                  istUnsicher: false,
+                },
+              ],
+            },
+          },
+        ],
+      },
+    },
+  });
 
   console.log('✅ Submissions, task corrections, and step corrections successfully seeded.');
   console.log('🎉 Simplified Database Seeding finished successfully!');

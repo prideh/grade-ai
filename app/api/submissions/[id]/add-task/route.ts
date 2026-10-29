@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { getSession } from '@/lib/session';
+import { calculateRawSwissGrade, calculateSwissGrade } from '@/lib/grading';
 import crypto from 'crypto';
 
 export async function POST(request: Request, { params }: { params: Promise<{ id: string }> }) {
@@ -117,29 +118,39 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
         include: { tasks: true },
       });
 
-      for (const sibling of siblingSubmissions) {
-        let siblingEarned = sibling.tasks.reduce((sum, t) => sum + t.erzieltePunkte, 0);
+      await Promise.all(
+        siblingSubmissions.map((sibling) => {
+          let siblingEarned = sibling.tasks.reduce((sum, t) => sum + t.erzieltePunkte, 0);
 
-        // If it is the current submission, include the new task we just added (currently has 0 points)
-        if (sibling.id === submissionId) {
-          // The task correction we created above is already linked in the DB but sibling.tasks might not have it yet in memory
-          if (!sibling.tasks.some((t) => t.taskId === String(taskId))) {
-            siblingEarned += 0.0;
+          // If it is the current submission, include the new task we just added (currently has 0 points)
+          if (sibling.id === submissionId) {
+            if (!sibling.tasks.some((t) => t.taskId === String(taskId))) {
+              siblingEarned += 0.0;
+            }
           }
-        }
 
-        const rawGrade = totalExamMaxPoints > 0 ? 5 * (siblingEarned / totalExamMaxPoints) + 1 : 1;
-        const roundedGrade = (Math.round(rawGrade * 10) / 10).toFixed(1);
+          const rawGrade = calculateRawSwissGrade(
+            siblingEarned,
+            totalExamMaxPoints,
+            submission.exam.gradingFormula
+          );
+          const roundedGrade = calculateSwissGrade(
+            siblingEarned,
+            totalExamMaxPoints,
+            submission.exam.gradingFormula,
+            submission.exam.gradeRounding
+          );
 
-        await tx.submission.update({
-          where: { id: sibling.id },
-          data: {
-            earnedPoints: siblingEarned,
-            gradeRaw: rawGrade,
-            gradeRounded: roundedGrade,
-          },
-        });
-      }
+          return tx.submission.update({
+            where: { id: sibling.id },
+            data: {
+              earnedPoints: siblingEarned,
+              gradeRaw: rawGrade,
+              gradeRounded: roundedGrade,
+            },
+          });
+        })
+      );
     });
 
     return NextResponse.json({ success: true });

@@ -1,0 +1,267 @@
+// Swiss Grading Formula, Rounding, Subject Profile, and Student Matching Utilities
+
+export type GradingFormula = 'LINEAR_60' | 'KNICK_50' | 'KNICK_66';
+export type GradeRounding = '0.1' | '0.25' | '0.5';
+
+export const GRADING_FORMULA_OPTIONS: {
+  value: GradingFormula;
+  label: string;
+  description: string;
+}[] = [
+  {
+    value: 'LINEAR_60',
+    label: 'Linear (Note 4.0 bei 60%)',
+    description: 'Schweizer Standardformel: Note = 1 + 5 * (Punkte / MaxPunkte)',
+  },
+  {
+    value: 'KNICK_50',
+    label: 'Knick 50% (Note 4.0 ab 50%)',
+    description: 'Milder Massstab: Note 4.0 wird bereits bei 50% der Maximalpunktzahl erreicht',
+  },
+  {
+    value: 'KNICK_66',
+    label: 'Knick 66.7% (Note 4.0 ab 2/3)',
+    description: 'Strenger Massstab: Note 4.0 wird erst ab 66.7% der Maximalpunktzahl erreicht',
+  },
+];
+
+export const GRADE_ROUNDING_OPTIONS: {
+  value: GradeRounding;
+  label: string;
+}[] = [
+  { value: '0.1', label: 'Zehntelnoten (0.1 – z. B. 4.3)' },
+  { value: '0.25', label: 'Viertelnoten (0.25 – z. B. 4.25)' },
+  { value: '0.5', label: 'Halbnoten (0.5 – z. B. 4.5)' },
+];
+
+export const SUBJECT_PROFILES: {
+  value: string;
+  label: string;
+  profileFocus: string;
+}[] = [
+  {
+    value: 'Mathematik',
+    label: 'Mathematik',
+    profileFocus: 'Rechenwege, Zwischenschritte, Äquivalenzumformungen & Folgefehler',
+  },
+  {
+    value: 'Geometrie',
+    label: 'Geometrie',
+    profileFocus: 'Konstruktionsschritte, Winkel-/Längenbeziehungen, Skizzen & Masseinheiten',
+  },
+  {
+    value: 'Physik',
+    label: 'Physik',
+    profileFocus: 'Physikalische Formeln, Einheiten, Grössenordnungen & Vorzeichen',
+  },
+  {
+    value: 'Chemie',
+    label: 'Chemie',
+    profileFocus: 'Reaktionsgleichungen, Stöchiometrie, Wertigkeiten & Molberechnungen',
+  },
+  {
+    value: 'Biologie',
+    label: 'Biologie',
+    profileFocus: 'Fachterminologie, biologische Prozesse & Ursache-Wirkungs-Ketten',
+  },
+  {
+    value: 'Informatik',
+    label: 'Informatik / ICT',
+    profileFocus: 'Algorithmische Logik, Kontrollstrukturen, Randfälle & Code-Korrektheit',
+  },
+  {
+    value: 'Wirtschaft',
+    label: 'Wirtschaft & Recht',
+    profileFocus: 'Fachbegriffe, Buchungssätze, Kennzahlen & strukturierte Argumentation',
+  },
+  {
+    value: 'Sprache',
+    label: 'Sprache / Deutsch',
+    profileFocus: 'Inhaltliche Präzision, Textverständnis, Ausdruck & Orthographie',
+  },
+];
+
+/**
+ * Calculates the unrounded raw Swiss school grade (1.0 to 6.0) using the configured formula.
+ */
+export function calculateRawSwissGrade(
+  earnedPoints: number,
+  maxPoints: number,
+  formula: GradingFormula | string = 'LINEAR_60'
+): number {
+  if (maxPoints <= 0) return 1.0;
+
+  const ratio = Math.max(0, Math.min(1, earnedPoints / maxPoints));
+  let rawGrade = 1.0;
+
+  if (formula === 'KNICK_50') {
+    if (ratio < 0.5) {
+      rawGrade = 1.0 + 3.0 * (ratio / 0.5);
+    } else {
+      rawGrade = 4.0 + 2.0 * ((ratio - 0.5) / 0.5);
+    }
+  } else if (formula === 'KNICK_66') {
+    const passRatio = 2 / 3;
+    if (ratio < passRatio) {
+      rawGrade = 1.0 + 3.0 * (ratio / passRatio);
+    } else {
+      rawGrade = 4.0 + 2.0 * ((ratio - passRatio) / (1 - passRatio));
+    }
+  } else {
+    // Default LINEAR_60: 1 + 5 * (earned / max) -> 4.0 at 60%
+    rawGrade = 1.0 + 5.0 * ratio;
+  }
+
+  return Math.min(6.0, Math.max(1.0, rawGrade));
+}
+
+/**
+ * Calculates a Swiss school grade (1.0 to 6.0) using the configured formula and rounding step.
+ */
+export function calculateSwissGrade(
+  earnedPoints: number,
+  maxPoints: number,
+  formula: GradingFormula | string = 'LINEAR_60',
+  rounding: GradeRounding | string = '0.1'
+): string {
+  const clamped = calculateRawSwissGrade(earnedPoints, maxPoints, formula);
+
+  if (rounding === '0.5') {
+    const rounded = Math.round(clamped * 2) / 2;
+    return rounded.toFixed(1);
+  }
+
+  if (rounding === '0.25') {
+    const rounded = Math.round(clamped * 4) / 4;
+    // Format as X.0, X.25, X.5, X.75
+    return Number.isInteger(rounded * 2) ? rounded.toFixed(1) : rounded.toFixed(2);
+  }
+
+  // Default 0.1 rounding
+  const rounded = Math.round(clamped * 10) / 10;
+  return rounded.toFixed(1);
+}
+
+export interface StudentMatchResult {
+  matchedStudentId: string | null;
+  suggestedStudentId: string | null;
+  confidence: 'HIGH' | 'LOW' | 'NONE';
+}
+
+/**
+ * Matches an AI-extracted student name against a class roster with explicit confidence calibration.
+ * - HIGH: Unique exact normalized name match and AI did not flag the name OCR as uncertain.
+ * - LOW: Partial/substring/token match, or exact match where AI flagged handwritten name as uncertain.
+ * - NONE: No plausible match or multiple ambiguous matches.
+ */
+export function matchStudentByNameWithConfidence(
+  extractedName: string,
+  students: { id: string; name: string }[],
+  isAiNameUncertain = false
+): StudentMatchResult {
+  const normalize = (s: string) =>
+    s
+      .toLowerCase()
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .replace(/[^a-z0-9\s]/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+
+  const cleanExtracted = normalize(extractedName);
+  if (
+    !cleanExtracted ||
+    cleanExtracted === 'unbekannt' ||
+    cleanExtracted === 'nicht lesbar' ||
+    cleanExtracted === 'kein name'
+  ) {
+    return { matchedStudentId: null, suggestedStudentId: null, confidence: 'NONE' };
+  }
+
+  const compact = (s: string) => s.replace(/\s+/g, '');
+  const compactExtracted = compact(cleanExtracted);
+
+  // 1. Exact full-name match (normalized or token-order-invariant)
+  const extractedTokens = cleanExtracted.split(' ').filter(Boolean);
+  const exactMatches = students.filter((s) => {
+    const normDb = normalize(s.name);
+    if (compact(normDb) === compactExtracted) return true;
+    const dbTokens = normDb.split(' ').filter(Boolean);
+    if (
+      dbTokens.length === extractedTokens.length &&
+      dbTokens.length > 0 &&
+      dbTokens.every((t) => extractedTokens.includes(t))
+    ) {
+      return true;
+    }
+    return false;
+  });
+
+  if (exactMatches.length === 1) {
+    if (isAiNameUncertain) {
+      return {
+        matchedStudentId: null,
+        suggestedStudentId: exactMatches[0].id,
+        confidence: 'LOW',
+      };
+    }
+    return {
+      matchedStudentId: exactMatches[0].id,
+      suggestedStudentId: exactMatches[0].id,
+      confidence: 'HIGH',
+    };
+  }
+
+  // 2. Substring / partial match -> always LOW confidence (requires teacher confirmation)
+  const partialMatches = students.filter((s) => {
+    const compactDb = compact(normalize(s.name));
+    return (
+      compactExtracted.length >= 3 &&
+      (compactDb.includes(compactExtracted) || compactExtracted.includes(compactDb))
+    );
+  });
+  if (partialMatches.length === 1) {
+    return {
+      matchedStudentId: null,
+      suggestedStudentId: partialMatches[0].id,
+      confidence: 'LOW',
+    };
+  }
+
+  // 3. Token match (e.g. first name or last name matches uniquely) -> LOW confidence
+  const tokenMatches = students.filter((s) => {
+    const dbTokens = normalize(s.name)
+      .split(' ')
+      .filter((t) => t.length >= 3);
+    return dbTokens.some((t) => extractedTokens.includes(t));
+  });
+  if (tokenMatches.length === 1) {
+    return {
+      matchedStudentId: null,
+      suggestedStudentId: tokenMatches[0].id,
+      confidence: 'LOW',
+    };
+  }
+
+  return { matchedStudentId: null, suggestedStudentId: null, confidence: 'NONE' };
+}
+
+/**
+ * Parses `studentExamUrl` which can be either a single URL string (e.g. "/uploads/exams/abc.jpg")
+ * or a JSON array of URL strings for multi-page mobile camera captures (e.g. '["/uploads/exams/p1.jpg","/uploads/exams/p2.jpg"]').
+ */
+export function parseStudentExamUrls(rawUrl?: string | null): string[] {
+  if (!rawUrl) return [];
+  const trimmed = rawUrl.trim();
+  if (trimmed.startsWith('[')) {
+    try {
+      const parsed = JSON.parse(trimmed);
+      if (Array.isArray(parsed)) {
+        return parsed.filter((u): u is string => typeof u === 'string' && u.length > 0);
+      }
+    } catch {
+      // Fallback to single string
+    }
+  }
+  return [trimmed];
+}

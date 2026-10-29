@@ -255,7 +255,7 @@ export default function ClassDetailsPage() {
       if (!res.ok) throw new Error('Klasse konnte nicht gelöscht werden.');
       router.push('/classes');
     } catch (err) {
-      alert(err instanceof Error ? err.message : 'Fehler beim Löschen der Klasse.');
+      setError(err instanceof Error ? err.message : 'Fehler beim Löschen der Klasse.');
       setStudentActionLoading(false);
     }
   };
@@ -276,7 +276,7 @@ export default function ClassDetailsPage() {
       setOpenEditClass(false);
       fetchData();
     } catch (err) {
-      alert(err instanceof Error ? err.message : 'Fehler beim Ändern des Namens.');
+      setError(err instanceof Error ? err.message : 'Fehler beim Ändern des Namens.');
     } finally {
       setStudentActionLoading(false);
     }
@@ -329,7 +329,7 @@ export default function ClassDetailsPage() {
                 {classData?.name}
               </Typography>
               <Typography variant="body2" sx={{ color: 'text.secondary', fontWeight: 600 }}>
-                Erstellt am {classData?.createdAt} • {students.length} Schüler enrolled
+                Erstellt am {classData?.createdAt} • {students.length} Schüler/innen eingeschrieben
               </Typography>
             </Box>
 
@@ -645,7 +645,7 @@ export default function ClassDetailsPage() {
                 variant="body2"
                 sx={{ color: 'text.secondary', fontStyle: 'italic', py: 4, textAlign: 'center' }}
               >
-                Bisher sind keine Schüler enrolled.
+                Bisher sind keine Schüler/innen eingeschrieben.
               </Typography>
             ) : (
               <TableContainer

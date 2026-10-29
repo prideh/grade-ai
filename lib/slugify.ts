@@ -1,7 +1,7 @@
 /**
  * Sanitizes a string and converts it to a URL-friendly, SEO-safe slug.
  * Specially optimized for German language apps by mapping German umlauts (ä, ö, ü)
- * and eszett (ß) to their standard standard typographic representations (ae, oe, ue, ss).
+ * and sharp s (\u00df) to their standard typographic representations (ae, oe, ue, ss).
  *
  * It also normalizes other unicode accents/diacritics (e.g., é -> e, ç -> c)
  * and strips out any remaining non-alphanumeric characters.
@@ -15,11 +15,11 @@ export function slugify(text: string): string {
   return (
     text
       .toLowerCase()
-      // 1. Convert German umlauts and eszett
+      // 1. Convert German umlauts and sharp s
       .replace(/ä/g, 'ae')
       .replace(/ö/g, 'oe')
       .replace(/ü/g, 'ue')
-      .replace(/ß/g, 'ss')
+      .replace(/\u00df/g, 'ss')
       // 2. Normalize and strip other diacritics/accents (e.g. é -> e, ô -> o)
       .normalize('NFD')
       .replace(/[\u0300-\u036f]/g, '')

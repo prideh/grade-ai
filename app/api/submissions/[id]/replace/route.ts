@@ -1,47 +1,29 @@
 import { NextResponse, after } from 'next/server';
 import { db } from '@/lib/db';
 import { getSession } from '@/lib/session';
-import { runLiveGeminiCorrection } from '@/lib/gemini';
+import { DEFAULT_GEMINI_MODEL, runLiveGeminiCorrection } from '@/lib/gemini';
+import {
+  calculateRawSwissGrade,
+  calculateSwissGrade,
+  matchStudentByNameWithConfidence,
+  parseStudentExamUrls,
+} from '@/lib/grading';
 import fs from 'fs/promises';
 import path from 'path';
 import crypto from 'crypto';
 
-// Helper to fuzzy match student names against class student database
-function matchStudentByName(
-  extractedName: string,
-  students: { id: string; name: string }[]
-): string | null {
-  const clean = (s: string) =>
-    s
-      .toLowerCase()
-      .replace(/[^a-z0-9]/g, '')
-      .trim();
-  const cleanExtracted = clean(extractedName);
-  if (!cleanExtracted) return null;
-
-  // 1. Exact match after cleaning
-  let matches = students.filter((s) => clean(s.name) === cleanExtracted);
-  if (matches.length === 1) return matches[0].id;
-
-  // 2. Part match: database name contains extracted name, or vice versa
-  matches = students.filter((s) => {
-    const cleanDb = clean(s.name);
-    return cleanDb.includes(cleanExtracted) || cleanExtracted.includes(cleanDb);
-  });
-  if (matches.length === 1) return matches[0].id;
-
-  // 3. Token-based matching (e.g. "Max Mustermann" matches "Max" or "Mustermann" if unique)
-  const extractedTokens = cleanExtracted.split(/\s+/).filter(Boolean);
-  matches = students.filter((s) => {
-    const dbTokens = clean(s.name).split(/\s+/).filter(Boolean);
-    return (
-      dbTokens.some((t) => extractedTokens.includes(t)) ||
-      extractedTokens.some((t) => dbTokens.includes(t))
-    );
-  });
-  if (matches.length === 1) return matches[0].id;
-
-  return null;
+function parseStoredMaterial(
+  rawText?: string | null
+): string | { mimeType: string; data: string } | null {
+  if (!rawText) return null;
+  if (rawText.startsWith('{"mimeType":')) {
+    try {
+      return JSON.parse(rawText);
+    } catch {
+      return rawText;
+    }
+  }
+  return rawText;
 }
 
 export async function POST(request: Request, { params }: { params: Promise<{ id: string }> }) {
@@ -92,6 +74,9 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       }
     }
 
+    const modelToUse = DEFAULT_GEMINI_MODEL;
+    const actionType = submission.status === 'FAILED' ? 'NEUSTART' : 'ERSETZT';
+
     // Reset status to PROCESSING to display active loading spinner
     await db.submission.update({
       where: { id: submissionId },
@@ -106,9 +91,9 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
         className: submission.exam.class.name,
         examTitle: submission.exam.title,
         studentName: resolvedStudentName,
-        modelUsed: 'gemini-3.5-flash',
+        modelUsed: modelToUse,
         status: 'PROCESSING', // Starts directly in PROCESSING
-        actionType: 'ERSETZT',
+        actionType,
       },
     });
 
@@ -118,24 +103,37 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       let finalStudentName = resolvedStudentName;
 
       try {
-        // Read file from disk and convert to base64
-        const filePath = path.join(process.cwd(), 'public', submission.studentExamUrl!);
-        const studentBytes = await fs.readFile(filePath);
-        const studentBase64 = studentBytes.toString('base64');
-        const fileExtension = submission.studentExamUrl!.split('.').pop() || 'jpg';
-        const mimeType = fileExtension === 'pdf' ? 'application/pdf' : 'image/jpeg';
-
-        // Load rubric context
-        let rubricParam: string | { mimeType: string; data: string } = '';
-        if (submission.exam.rubricText.startsWith('{"mimeType":')) {
-          try {
-            rubricParam = JSON.parse(submission.exam.rubricText);
-          } catch {
-            rubricParam = submission.exam.rubricText;
-          }
-        } else {
-          rubricParam = submission.exam.rubricText;
+        // Read single or multi-page files from disk and convert to base64
+        const pageUrls = parseStudentExamUrls(submission.studentExamUrl);
+        if (pageUrls.length === 0) {
+          throw new Error('Keine Prüfungsdateien für diese Abgabe gefunden.');
         }
+
+        const pagePayloads: { mimeType: string; data: string }[] = [];
+        for (const relUrl of pageUrls) {
+          const filePath = path.join(process.cwd(), 'public', relUrl);
+          const studentBytes = await fs.readFile(filePath);
+          const ext = (relUrl.split('.').pop() || 'jpg').toLowerCase();
+          const mimeType =
+            ext === 'pdf'
+              ? 'application/pdf'
+              : ext === 'png'
+                ? 'image/png'
+                : ext === 'webp'
+                  ? 'image/webp'
+                  : 'image/jpeg';
+          pagePayloads.push({
+            mimeType,
+            data: studentBytes.toString('base64'),
+          });
+        }
+
+        const [firstPage, ...extraPages] = pagePayloads;
+
+        // Load rubric and 3-tier context
+        const rubricParam =
+          parseStoredMaterial(submission.exam.rubricText) || submission.exam.rubricText;
+        const examTemplateParam = parseStoredMaterial(submission.exam.examTemplateText);
 
         // Fetch predefined tasks if available
         const examTasks = await db.examTask.findMany({
@@ -154,52 +152,66 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
 
         // Run live Gemini OCR and correction analysis
         const result = await runLiveGeminiCorrection(
-          studentBase64,
+          firstPage.data,
           rubricParam,
-          'gemini-3.5-flash',
+          modelToUse,
           process.env.GEMINI_API_KEY,
-          mimeType,
-          predefinedTasks
+          firstPage.mimeType,
+          predefinedTasks,
+          submission.exam.subject,
+          {
+            examTemplate: examTemplateParam,
+            gradingNotes: submission.exam.gradingNotes,
+            additionalStudentPages: extraPages,
+          }
         );
 
-        // Resolve student ID via auto-matching if student was not manually set previously
+        // Resolve student ID via calibrated auto-matching if student was not manually set previously
         let matchedStudentId = submission.studentId;
-        if (!matchedStudentId && result.schuelerName) {
+        let suggestedStudentId = submission.suggestedStudentId;
+        let isStudentMatchUncertain = false;
+        const extractedStudentName =
+          (result.schuelerName || '').trim() || submission.extractedStudentName;
+
+        if (!matchedStudentId && extractedStudentName) {
           const classStudents = await db.student.findMany({
             where: { classId: submission.exam.classId },
           });
-          matchedStudentId = matchStudentByName(result.schuelerName, classStudents);
-          if (matchedStudentId) {
+          const matchResult = matchStudentByNameWithConfidence(
+            extractedStudentName,
+            classStudents,
+            Boolean(result.istNameUnsicher)
+          );
+          suggestedStudentId = matchResult.suggestedStudentId;
+          if (matchResult.confidence === 'HIGH' && matchResult.matchedStudentId) {
+            matchedStudentId = matchResult.matchedStudentId;
             const matchedRec = classStudents.find((s) => s.id === matchedStudentId);
             if (matchedRec) {
               finalStudentName = matchedRec.name;
             }
           } else {
-            finalStudentName = `${result.schuelerName} (Nicht zugeordnet)`;
+            isStudentMatchUncertain = true;
+            finalStudentName = `${extractedStudentName} (Nicht zugeordnet)`;
           }
-        }
-
-        if (!matchedStudentId) {
-          throw new Error(
-            'Der Schülername auf dem Scan konnte keinem Schüler in der Klasse eindeutig zugeordnet werden.'
-          );
         }
 
         // Execute transaction to delete duplicate submission and save the new correction
         await db.$transaction(async (tx) => {
-          // Delete existing completed/duplicate submission for the matched student to overwrite it
-          const existingSubmission = await tx.submission.findFirst({
-            where: {
-              examId: submission.examId,
-              studentId: matchedStudentId,
-              id: { not: submissionId }, // Exclude current record
-            },
-          });
-
-          if (existingSubmission) {
-            await tx.submission.delete({
-              where: { id: existingSubmission.id },
+          if (matchedStudentId) {
+            // Delete existing completed/duplicate submission for the matched student to overwrite it
+            const existingSubmission = await tx.submission.findFirst({
+              where: {
+                examId: submission.examId,
+                studentId: matchedStudentId,
+                id: { not: submissionId }, // Exclude current record
+              },
             });
+
+            if (existingSubmission) {
+              await tx.submission.delete({
+                where: { id: existingSubmission.id },
+              });
+            }
           }
 
           // Delete any legacy task corrections that were partially generated
@@ -207,25 +219,11 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
             where: { submissionId },
           });
 
-          // Update current submission with new completed correction results
-          await tx.submission.update({
-            where: { id: submissionId },
-            data: {
-              studentId: matchedStudentId,
-              status: 'COMPLETED',
-              earnedPoints: result.gesamterzieltePunkte,
-              gradeRaw: parseFloat(result.note),
-              gradeRounded: result.note,
-              strengths: result.schuelerFeedback.staerken,
-              weaknesses: result.schuelerFeedback.schwaechen,
-              helpfulTip: result.schuelerFeedback.hilfreicherTipp,
-              exerciseRecommendation: result.schuelerFeedback.uebungsEmpfehlung,
-            },
-          });
-
-          // Insert Task and Step corrections
+          // Prepare Task and Step corrections first to calculate deterministic server-side totals
           const taskCorrectionsData = [];
           const stepCorrectionsData = [];
+          let serverTotalEarnedPoints = 0;
+          let serverTotalMaxPoints = 0;
 
           for (let tIdx = 0; tIdx < result.aufgaben.length; tIdx++) {
             const task = result.aufgaben[tIdx];
@@ -244,6 +242,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
 
                 calculatedTaskPoints += clampedStepEarned;
 
+                const isStepUncertain = Boolean(step.istUnsicher);
                 stepCorrectionsData.push({
                   id: crypto.randomUUID(),
                   taskCorrectionId: taskCorrectionId,
@@ -258,6 +257,10 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
                   erreichtePunkte: clampedStepEarned,
                   maximalPunkte: clampedStepMax,
                   begruendung: step.begruendung || '',
+                  istUnsicher: isStepUncertain,
+                  unsicherheitsGrund: isStepUncertain
+                    ? step.unsicherheitsGrund || 'Bitte diesen Teilschritt manuell überprüfen.'
+                    : null,
                 });
               }
             }
@@ -266,6 +269,10 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
             const finalTaskPoints = hasSteps
               ? Math.round(calculatedTaskPoints * 10) / 10
               : Math.max(0, Math.min(clampedTaskMax, Number(task.erzieltePunkte || 0)));
+
+            serverTotalEarnedPoints =
+              Math.round((serverTotalEarnedPoints + finalTaskPoints) * 10) / 10;
+            serverTotalMaxPoints = Math.round((serverTotalMaxPoints + clampedTaskMax) * 10) / 10;
 
             taskCorrectionsData.push({
               id: taskCorrectionId,
@@ -280,6 +287,40 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
               orderIndex: tIdx,
             });
           }
+
+          const effectiveMaxPoints =
+            submission.exam.maxPoints > 0 ? submission.exam.maxPoints : serverTotalMaxPoints;
+          const rawGrade = calculateRawSwissGrade(
+            serverTotalEarnedPoints,
+            effectiveMaxPoints,
+            submission.exam.gradingFormula
+          );
+          const roundedGrade = calculateSwissGrade(
+            serverTotalEarnedPoints,
+            effectiveMaxPoints,
+            submission.exam.gradingFormula,
+            submission.exam.gradeRounding
+          );
+
+          // Update current submission with deterministic server-calculated correction results
+          await tx.submission.update({
+            where: { id: submissionId },
+            data: {
+              studentId: matchedStudentId,
+              extractedStudentName,
+              suggestedStudentId,
+              isStudentMatchUncertain,
+              isExamMatchUncertain: false,
+              status: 'COMPLETED',
+              earnedPoints: serverTotalEarnedPoints,
+              gradeRaw: rawGrade,
+              gradeRounded: roundedGrade,
+              strengths: result.schuelerFeedback.staerken,
+              weaknesses: result.schuelerFeedback.schwaechen,
+              helpfulTip: result.schuelerFeedback.hilfreicherTipp,
+              exerciseRecommendation: result.schuelerFeedback.uebungsEmpfehlung,
+            },
+          });
 
           if (taskCorrectionsData.length > 0) {
             await tx.taskCorrection.createMany({
@@ -312,7 +353,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
           error && typeof error === 'object' && 'code' in error && error.code === 'P2025';
 
         if (isCancelled) {
-          console.log(
+          console.info(
             `Background replace for submission ${submissionId} was cancelled by the user (record deleted).`
           );
 
@@ -364,7 +405,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
           if (!isDbErrCancelled) {
             console.error(`Failed to set FAILED status on submission ${submissionId}:`, dbErr);
           } else {
-            console.log(
+            console.info(
               `Failed to set FAILED status: submission ${submissionId} was already deleted (cancelled).`
             );
           }

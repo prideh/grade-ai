@@ -13,11 +13,8 @@ import {
   CardContent,
   Stack,
   TextField,
-  Radio,
-  RadioGroup,
   CircularProgress,
   Alert,
-  Divider,
   MenuItem,
   Select,
   FormControl,
@@ -53,8 +50,17 @@ import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome';
 import ErrorIcon from '@mui/icons-material/Error';
 import StarIcon from '@mui/icons-material/Star';
 import StarBorderIcon from '@mui/icons-material/StarBorder';
+import QrCodeScannerIcon from '@mui/icons-material/QrCodeScanner';
 import DashboardLayout from '@/components/DashboardLayout';
+import QrScannerDialog from '@/components/QrScannerDialog';
 import { getCachedTeacher, setCachedTeacher } from '@/lib/sessionCache';
+import {
+  GRADING_FORMULA_OPTIONS,
+  GRADE_ROUNDING_OPTIONS,
+  SUBJECT_PROFILES,
+  type GradingFormula,
+  type GradeRounding,
+} from '@/lib/grading';
 
 interface DashboardClass {
   id: string;
@@ -79,7 +85,13 @@ interface DashboardExam {
 interface DashboardSubmission {
   id: string;
   studentName: string;
+  extractedStudentName?: string | null;
+  suggestedStudentId?: string | null;
+  isStudentMatchUncertain?: boolean;
+  isExamMatchUncertain?: boolean;
+  examId: string;
   examTitle: string;
+  classId: string;
   className: string;
   subject: string;
   points: string;
@@ -87,6 +99,15 @@ interface DashboardSubmission {
   date: string;
   status: 'PENDING' | 'PROCESSING' | 'COMPLETED' | 'FAILED';
   errorMessage?: string | null;
+  uncertainStepsCount?: number;
+}
+
+interface GlobalExamOption {
+  id: string;
+  title: string;
+  subject: string;
+  classId: string;
+  className: string;
 }
 
 export default function Dashboard() {
@@ -101,8 +122,10 @@ export default function Dashboard() {
   // Database lists
   const [classes, setClasses] = useState<DashboardClass[]>([]);
   const [students, setStudents] = useState<DashboardStudent[]>([]);
+  const [studentsByClass, setStudentsByClass] = useState<Record<string, DashboardStudent[]>>({});
   const [exams, setExams] = useState<DashboardExam[]>([]);
   const [recentSubmissions, setRecentSubmissions] = useState<DashboardSubmission[]>([]);
+  const [cancelTargetId, setCancelTargetId] = useState<string | null>(null);
   const [dismissedSubmissionIds, setDismissedSubmissionIds] = useState<string[]>(() => {
     if (typeof window !== 'undefined') {
       const stored = localStorage.getItem('gradeai_dismissed_submission_ids');
@@ -117,6 +140,19 @@ export default function Dashboard() {
     return [];
   });
 
+  const executeCancelSubmission = async (subId: string) => {
+    try {
+      const res = await fetch(`/api/submissions/${subId}`, { method: 'DELETE' });
+      if (!res.ok) {
+        throw new Error('Abbrechen fehlgeschlagen.');
+      }
+      fetchRecentSubmissions();
+    } catch (err) {
+      console.error('Error canceling/deleting submission on dismiss:', err);
+      setError('Fehler beim Abbrechen der Korrektur.');
+    }
+  };
+
   const handleDismissSubmission = async (subId: string) => {
     const sub = recentSubmissions.find((s) => s.id === subId);
 
@@ -125,23 +161,12 @@ export default function Dashboard() {
 
     if (isCancelOrFailure) {
       if (sub.status === 'PENDING' || sub.status === 'PROCESSING') {
-        if (!confirm('Möchtest du diese aktive Korrektur wirklich abbrechen und löschen?')) {
-          return;
-        }
+        setCancelTargetId(subId);
+        return;
       }
 
-      try {
-        const res = await fetch(`/api/submissions/${subId}`, { method: 'DELETE' });
-        if (!res.ok) {
-          throw new Error('Abbrechen fehlgeschlagen.');
-        }
-        fetchRecentSubmissions(); // Neu laden aus DB, damit der Eintrag verschwindet
-        return;
-      } catch (err) {
-        console.error('Error canceling/deleting submission on dismiss:', err);
-        setError('Fehler beim Abbrechen der Korrektur.');
-        return;
-      }
+      await executeCancelSubmission(subId);
+      return;
     }
 
     // Für COMPLETED Einträge: Nur lokal ausblenden, in DB belassen
@@ -166,13 +191,27 @@ export default function Dashboard() {
   const [examSubject, setExamSubject] = useState<string>('Mathematik');
   const [rubricText, setRubricText] = useState<string>('');
   const [rubricFile, setRubricFile] = useState<File | null>(null);
+  const [rubricScannedPages, setRubricScannedPages] = useState<number>(0);
+  const [examTemplateFile, setExamTemplateFile] = useState<File | null>(null);
+  const [examTemplateScannedPayload, setExamTemplateScannedPayload] = useState<string>('');
+  const [examTemplateScannedPages, setExamTemplateScannedPages] = useState<number>(0);
+  const [gradingNotes, setGradingNotes] = useState<string>('');
+  const [gradingFormula, setGradingFormula] = useState<GradingFormula>('LINEAR_60');
+  const [gradeRounding, setGradeRounding] = useState<GradeRounding>('0.1');
+  const [showAdvancedExamOptions, setShowAdvancedExamOptions] = useState<boolean>(false);
 
   // Correction configs
-  const [model, setModel] = useState<'gemini-3.5-flash' | 'gemini-3.1-pro-preview'>(
-    'gemini-3.5-flash'
-  );
   const [studentFiles, setStudentFiles] = useState<File[]>([]); // Supports bulk uploads
   const [assignState, setAssignState] = useState<Record<string, string>>({}); // Inline student assignments
+  const [examAssignState, setExamAssignState] = useState<Record<string, string>>({}); // Inline exam reassignments
+  const [allExams, setAllExams] = useState<GlobalExamOption[]>([]);
+
+  // QR Mobile Camera Relay Dialog state
+  const [qrDialogOpen, setQrDialogOpen] = useState<boolean>(false);
+  const [qrDialogMode, setQrDialogMode] = useState<'universal' | 'contextual'>('universal');
+  const [qrTargetMode, setQrTargetMode] = useState<'SUBMISSION' | 'RUBRIC' | 'EXAM_TEMPLATE'>(
+    'SUBMISSION'
+  );
 
   // Loading & Error states
   const [loading, setLoading] = useState<boolean>(false);
@@ -248,14 +287,27 @@ export default function Dashboard() {
       const res = await fetch('/api/submissions');
       if (res.ok) {
         const data = await res.json();
-        setRecentSubmissions(data.submissions || []);
-      }
-
-      // Refresh global exams count dynamically
-      const examsRes = await fetch('/api/exams');
-      if (examsRes.ok) {
-        const examsData = await examsRes.json();
-        setGlobalExamsCount(examsData.exams?.length || 0);
+        const subs: DashboardSubmission[] = data.submissions || [];
+        setRecentSubmissions(subs);
+        if (data.studentsByClass) {
+          setStudentsByClass(data.studentsByClass);
+        }
+        if (Array.isArray(data.allExams)) {
+          setAllExams(data.allExams);
+        }
+        if (typeof data.totalExamsCount === 'number') {
+          setGlobalExamsCount(data.totalExamsCount);
+        }
+        // Pre-populate suggestedStudentId in assignState if not already chosen by teacher
+        setAssignState((prev) => {
+          const next = { ...prev };
+          for (const s of subs) {
+            if (s.studentName === 'Nicht zugeordnet' && s.suggestedStudentId && !next[s.id]) {
+              next[s.id] = s.suggestedStudentId;
+            }
+          }
+          return next;
+        });
       }
     } catch (err) {
       console.error('Error fetching recent submissions or global exams count:', err);
@@ -372,22 +424,38 @@ export default function Dashboard() {
   const handleManualAssign = async (submissionId: string) => {
     const studentId = assignState[submissionId];
     if (!studentId) return;
+    const targetExamId = examAssignState[submissionId];
 
     try {
       const res = await fetch(`/api/submissions/${submissionId}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ studentId }),
+        body: JSON.stringify({
+          studentId,
+          examId: targetExamId || undefined,
+        }),
       });
 
+      const resData = await res.json();
       if (!res.ok) {
-        const errData = await res.json();
-        throw new Error(errData.error || 'Zuweisung fehlgeschlagen');
+        throw new Error(resData.error || 'Zuweisung fehlgeschlagen');
+      }
+
+      // If the teacher reassigned the submission to a different Exam, re-run correction against that Exam's rubric
+      if (resData.examChanged) {
+        await fetch(`/api/submissions/${submissionId}/replace`, {
+          method: 'POST',
+        });
       }
 
       // Refresh submissions
       fetchRecentSubmissions();
       setAssignState((prev) => {
+        const copy = { ...prev };
+        delete copy[submissionId];
+        return copy;
+      });
+      setExamAssignState((prev) => {
         const copy = { ...prev };
         delete copy[submissionId];
         return copy;
@@ -449,7 +517,6 @@ export default function Dashboard() {
         const formData = new FormData();
         formData.append('classId', selectedClassId);
         formData.append('studentExam', file);
-        formData.append('model', model);
 
         if (shouldOverwrite) {
           formData.append('overwrite', 'true');
@@ -460,6 +527,16 @@ export default function Dashboard() {
         } else if (selectedExamId === 'NEW') {
           formData.append('examTitle', examTitle);
           formData.append('examSubject', examSubject);
+          formData.append('gradingFormula', gradingFormula);
+          formData.append('gradeRounding', gradeRounding);
+          if (examTemplateFile) {
+            formData.append('examTemplate', examTemplateFile);
+          } else if (examTemplateScannedPayload) {
+            formData.append('examTemplate', examTemplateScannedPayload);
+          }
+          if (gradingNotes.trim()) {
+            formData.append('gradingNotes', gradingNotes.trim());
+          }
           if (rubricFile) {
             formData.append('rubric', rubricFile);
           } else {
@@ -684,13 +761,10 @@ export default function Dashboard() {
           </Grid>
         </Grid>
 
-        {/* Active Corrections Queue Tracker */}
+        {/* Active Corrections Queue Tracker (only shown while jobs are active or failed) */}
         {recentSubmissions.some(
           (sub) =>
-            (sub.status === 'PENDING' ||
-              sub.status === 'PROCESSING' ||
-              sub.status === 'FAILED' ||
-              sub.status === 'COMPLETED') &&
+            (sub.status === 'PENDING' || sub.status === 'PROCESSING' || sub.status === 'FAILED') &&
             !dismissedSubmissionIds.includes(sub.id)
         ) && (
           <Card
@@ -716,7 +790,7 @@ export default function Dashboard() {
                       {activeCount > 0 ? (
                         <CircularProgress size={22} thickness={5} sx={{ color: '#0284c7' }} />
                       ) : (
-                        <CheckCircleIcon sx={{ color: '#0369a1', fontSize: '1.5rem' }} />
+                        <ErrorIcon sx={{ color: '#dc2626', fontSize: '1.5rem' }} />
                       )}
                       <Typography
                         variant="h6"
@@ -724,14 +798,14 @@ export default function Dashboard() {
                       >
                         {activeCount > 0
                           ? 'Aktive Korrekturen in der Warteschlange'
-                          : 'Kürzliche Korrekturen'}
+                          : 'Fehlgeschlagene Korrekturen'}
                       </Typography>
                     </Stack>
                     <Chip
                       label={`${activeCount} aktiv`}
                       size="small"
                       sx={{
-                        backgroundColor: activeCount > 0 ? '#0284c7' : '#0369a1',
+                        backgroundColor: activeCount > 0 ? '#0284c7' : '#dc2626',
                         color: '#ffffff',
                         fontWeight: 'bold',
                       }}
@@ -746,8 +820,7 @@ export default function Dashboard() {
                     (sub) =>
                       (sub.status === 'PENDING' ||
                         sub.status === 'PROCESSING' ||
-                        sub.status === 'FAILED' ||
-                        sub.status === 'COMPLETED') &&
+                        sub.status === 'FAILED') &&
                       !dismissedSubmissionIds.includes(sub.id)
                   )
                   .slice(0, 5) // Show top 5
@@ -930,24 +1003,58 @@ export default function Dashboard() {
           </Card>
         )}
 
-        {/* Wizard Start Title */}
-        <Box>
-          <Typography
-            variant="h4"
-            component="h2"
+        {/* Wizard Start Title & Universal QR Mobile Relay Action */}
+        <Stack
+          direction={{ xs: 'column', md: 'row' }}
+          spacing={2}
+          sx={{ justifyContent: 'space-between', alignItems: { xs: 'flex-start', md: 'center' } }}
+        >
+          <Box>
+            <Typography
+              variant="h4"
+              component="h2"
+              sx={{
+                fontWeight: 800,
+                color: '#0f172a',
+                marginBottom: '8px',
+                letterSpacing: '-0.02em',
+              }}
+            >
+              Prüfungskorrektur starten
+            </Typography>
+            <Typography variant="body1" sx={{ color: 'text.secondary', fontWeight: 550 }}>
+              Wähle eine Klasse und eine/n Schüler/in aus, wähle eine Prüfung und lade den Scan hoch
+              – oder fotografiere direkt per Smartphone.
+            </Typography>
+          </Box>
+          <Button
+            variant="outlined"
+            size="large"
+            startIcon={<QrCodeScannerIcon />}
+            onClick={() => {
+              setQrDialogMode('universal');
+              setQrTargetMode('SUBMISSION');
+              setQrDialogOpen(true);
+            }}
             sx={{
+              borderRadius: '10px',
+              textTransform: 'none',
               fontWeight: 800,
-              color: '#0f172a',
-              marginBottom: '8px',
-              letterSpacing: '-0.02em',
+              px: 2.5,
+              py: 1.25,
+              borderColor: '#1b77d1',
+              color: '#1b77d1',
+              backgroundColor: '#f0f7ff',
+              '&:hover': {
+                backgroundColor: '#e0f2fe',
+                borderColor: '#0284c7',
+              },
+              flexShrink: 0,
             }}
           >
-            Prüfungskorrektur starten
-          </Typography>
-          <Typography variant="body1" sx={{ color: 'text.secondary', fontWeight: 550 }}>
-            Wähle eine Klasse und eine/n Schüler/in aus, wähle eine Prüfung und lade den Scan hoch.
-          </Typography>
-        </Box>
+            Smartphone-Kamera (Universal-QR-Scan)
+          </Button>
+        </Stack>
 
         {error && (
           <Alert severity="error" sx={{ borderRadius: '12px' }}>
@@ -957,8 +1064,8 @@ export default function Dashboard() {
 
         {/* Main interactive grid */}
         <Grid container spacing={4}>
-          {/* Left Column: Form Setup */}
-          <Grid size={{ xs: 12, md: 8 }}>
+          {/* Form Setup */}
+          <Grid size={{ xs: 12 }}>
             <Stack spacing={4}>
               {/* Step 1: Select Class & Student */}
               <Card sx={{ borderRadius: '12px', border: '1px solid #e2e8f0', boxShadow: 'none' }}>
@@ -981,10 +1088,10 @@ export default function Dashboard() {
                     Klasse & Schüler/in auswählen
                   </Typography>
 
-                  <Grid container spacing={3}>
+                  <Grid container spacing={2.5} sx={{ alignItems: 'center' }}>
                     {/* Class Selector Dropdown */}
-                    <Grid size={{ xs: 12 }}>
-                      <Stack direction="row" spacing={2} sx={{ alignItems: 'center' }}>
+                    <Grid size={{ xs: 12, md: selectedClassId ? 6 : 12 }}>
+                      <Stack direction="row" spacing={1.5} sx={{ alignItems: 'center' }}>
                         <FormControl fullWidth size="medium">
                           <InputLabel id="class-select-label">Klasse auswählen</InputLabel>
                           <Select
@@ -1002,152 +1109,76 @@ export default function Dashboard() {
                           </Select>
                         </FormControl>
                         {selectedClassId && (
-                          <Button
-                            variant={defaultClassId === selectedClassId ? 'contained' : 'outlined'}
-                            color="primary"
-                            onClick={handleSetDefaultClass}
-                            startIcon={
-                              defaultClassId === selectedClassId ? (
-                                <StarIcon sx={{ color: '#ffffff' }} />
-                              ) : (
-                                <StarBorderIcon />
-                              )
+                          <Tooltip
+                            title={
+                              defaultClassId === selectedClassId
+                                ? 'Als Standardklasse gespeichert'
+                                : 'Als Standardklasse festlegen'
                             }
-                            sx={{
-                              height: '56px',
-                              borderRadius: '8px',
-                              px: 3,
-                              textTransform: 'none',
-                              whiteSpace: 'nowrap',
-                              flexShrink: 0,
-                            }}
                           >
-                            {defaultClassId === selectedClassId
-                              ? 'Standardklasse'
-                              : 'Als Standard setzen'}
-                          </Button>
+                            <Button
+                              variant={
+                                defaultClassId === selectedClassId ? 'contained' : 'outlined'
+                              }
+                              color="primary"
+                              onClick={handleSetDefaultClass}
+                              startIcon={
+                                defaultClassId === selectedClassId ? (
+                                  <StarIcon sx={{ color: '#ffffff' }} />
+                                ) : (
+                                  <StarBorderIcon />
+                                )
+                              }
+                              sx={{
+                                height: '56px',
+                                borderRadius: '8px',
+                                px: 2,
+                                textTransform: 'none',
+                                whiteSpace: 'nowrap',
+                                flexShrink: 0,
+                              }}
+                            >
+                              {defaultClassId === selectedClassId ? 'Standard' : 'Standard setzen'}
+                            </Button>
+                          </Tooltip>
                         )}
                       </Stack>
                     </Grid>
 
-                    {/* Student Selector Cards */}
+                    {/* Compact Student Assignment Dropdown (replaces 25-card wall) */}
                     {selectedClassId && (
-                      <Grid size={{ xs: 12 }}>
-                        <Typography
-                          variant="subtitle2"
-                          sx={{ fontWeight: 650, color: 'text.primary', mb: 1.5 }}
-                        >
-                          Schüler/in auswählen:
-                        </Typography>
-                        {students.length === 0 ? (
-                          <Typography
-                            variant="body2"
-                            sx={{ color: 'text.secondary', fontStyle: 'italic' }}
+                      <Grid size={{ xs: 12, md: 6 }}>
+                        <FormControl fullWidth size="medium">
+                          <InputLabel id="student-select-label">Schüler-Zuordnung</InputLabel>
+                          <Select
+                            labelId="student-select-label"
+                            value={selectedStudentId}
+                            label="Schüler-Zuordnung"
+                            onChange={(e) => {
+                              setSelectedStudentId(e.target.value);
+                              setError('');
+                              setStudentFiles([]);
+                            }}
+                            sx={{ borderRadius: '8px' }}
                           >
-                            Keine Schüler in dieser Klasse gefunden.
-                          </Typography>
-                        ) : (
-                          <Grid container spacing={2}>
-                            {/* Option A (Recommended Default): AI Auto-Matching */}
-                            <Grid size={{ xs: 6, sm: 4 }} key="AUTO">
-                              <Box
-                                onClick={() => {
-                                  setSelectedStudentId('AUTO');
-                                  setError('');
-                                  setStudentFiles([]); // Reset uploads
-                                }}
-                                sx={{
-                                  border:
-                                    selectedStudentId === 'AUTO'
-                                      ? '2.5px solid #1b77d1'
-                                      : '1px solid #e2e8f0',
-                                  borderRadius: '12px',
-                                  padding: '16px',
-                                  textAlign: 'center',
-                                  cursor: 'pointer',
-                                  backgroundColor:
-                                    selectedStudentId === 'AUTO' ? '#f0f7ff' : '#ffffff',
-                                  transition: 'all 0.2s ease',
-                                  boxShadow:
-                                    selectedStudentId === 'AUTO'
-                                      ? '0 4px 12px rgba(27, 119, 209, 0.08)'
-                                      : 'none',
-                                  '&:hover': {
-                                    borderColor: '#1b77d1',
-                                    backgroundColor:
-                                      selectedStudentId === 'AUTO' ? '#f0f7ff' : '#f8fafc',
-                                  },
-                                }}
-                              >
-                                <AutoAwesomeIcon
-                                  sx={{
-                                    fontSize: '2rem',
-                                    color:
-                                      selectedStudentId === 'AUTO' ? '#1b77d1' : 'text.secondary',
-                                    mb: 1,
-                                  }}
-                                />
+                            <MenuItem value="AUTO">
+                              <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
+                                <AutoAwesomeIcon sx={{ color: '#1b77d1', fontSize: '1.1rem' }} />
                                 <Typography
                                   variant="body2"
-                                  sx={{
-                                    fontWeight: selectedStudentId === 'AUTO' ? 700 : 500,
-                                    color:
-                                      selectedStudentId === 'AUTO' ? '#1b77d1' : 'text.primary',
-                                  }}
+                                  sx={{ fontWeight: 700, color: '#1b77d1' }}
                                 >
-                                  Auto-Match (🤖)
+                                  Automatische Namenserkennung (Bulk / QR — Empfohlen)
                                 </Typography>
-                              </Box>
-                            </Grid>
-
-                            {students.map((student) => {
-                              const isSelected = selectedStudentId === student.id;
-                              return (
-                                <Grid size={{ xs: 6, sm: 4 }} key={student.id}>
-                                  <Box
-                                    onClick={() => {
-                                      setSelectedStudentId(student.id);
-                                      setError('');
-                                      setStudentFiles([]); // Reset uploads
-                                    }}
-                                    sx={{
-                                      border: isSelected
-                                        ? '2.5px solid #1b77d1'
-                                        : '1px solid #e2e8f0',
-                                      borderRadius: '12px',
-                                      padding: '16px',
-                                      textAlign: 'center',
-                                      cursor: 'pointer',
-                                      backgroundColor: isSelected ? '#f0f7ff' : '#ffffff',
-                                      transition: 'all 0.2s ease',
-                                      '&:hover': {
-                                        borderColor: '#1b77d1',
-                                        backgroundColor: isSelected ? '#f0f7ff' : '#f8fafc',
-                                      },
-                                    }}
-                                  >
-                                    <PersonIcon
-                                      sx={{
-                                        fontSize: '2rem',
-                                        color: isSelected ? '#1b77d1' : 'text.secondary',
-                                        mb: 1,
-                                      }}
-                                    />
-                                    <Typography
-                                      variant="body2"
-                                      sx={{
-                                        fontWeight: isSelected ? 700 : 500,
-                                        color: isSelected ? '#1b77d1' : 'text.primary',
-                                      }}
-                                    >
-                                      {student.name}
-                                    </Typography>
-                                  </Box>
-                                </Grid>
-                              );
-                            })}
-                          </Grid>
-                        )}
+                              </Stack>
+                            </MenuItem>
+                            {students.map((student) => (
+                              <MenuItem key={student.id} value={student.id}>
+                                {student.name} (Manuelle Einzelzuordnung)
+                              </MenuItem>
+                            ))}
+                          </Select>
+                        </FormControl>
                       </Grid>
                     )}
                   </Grid>
@@ -1212,13 +1243,6 @@ export default function Dashboard() {
                       {/* Input fields for NEW Exam */}
                       {selectedExamId === 'NEW' && (
                         <Stack spacing={2.5} sx={{ borderLeft: '3px solid #1b77d1', pl: 2, py: 1 }}>
-                          <Typography
-                            variant="subtitle2"
-                            sx={{ fontWeight: 650, color: 'primary.main' }}
-                          >
-                            Prüfungsdetails für die neue Prüfung:
-                          </Typography>
-
                           <Grid container spacing={2}>
                             <Grid size={{ xs: 12, sm: 8 }}>
                               <TextField
@@ -1239,23 +1263,27 @@ export default function Dashboard() {
                                   label="Fach"
                                   onChange={(e) => setExamSubject(e.target.value)}
                                 >
-                                  <MenuItem value="Mathematik">Mathematik</MenuItem>
-                                  <MenuItem value="Physik">Physik</MenuItem>
-                                  <MenuItem value="Chemie">Chemie</MenuItem>
-                                  <MenuItem value="Geometrie">Geometrie</MenuItem>
+                                  {SUBJECT_PROFILES.map((sp) => (
+                                    <MenuItem key={sp.value} value={sp.value}>
+                                      {sp.label}
+                                    </MenuItem>
+                                  ))}
                                 </Select>
                               </FormControl>
                             </Grid>
                           </Grid>
 
-                          <Stack spacing={1.5}>
+                          {/* Primary Field: Musterlösung */}
+                          <Stack spacing={1.25}>
                             <Typography
                               variant="caption"
-                              sx={{ fontWeight: 600, color: 'text.secondary' }}
+                              sx={{ fontWeight: 700, color: 'text.secondary' }}
                             >
-                              Vorgaben für Erwartungshorizont / Musterlösung:
+                              Musterlösung / Erwartungshorizont:
                             </Typography>
-                            {rubricFile ? (
+                            {rubricFile ||
+                            rubricText.startsWith('{"mimeType":') ||
+                            rubricText.startsWith('[{"mimeType":') ? (
                               <Box
                                 sx={{
                                   border: '1px solid #e2e8f0',
@@ -1268,18 +1296,24 @@ export default function Dashboard() {
                                 }}
                               >
                                 <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
-                                  <DescriptionIcon sx={{ color: 'text.secondary' }} />
+                                  <DescriptionIcon sx={{ color: 'primary.main' }} />
                                   <Typography
                                     variant="body2"
                                     sx={{ color: 'text.primary', fontWeight: 600 }}
                                   >
-                                    {rubricFile.name}
+                                    {rubricFile
+                                      ? rubricFile.name
+                                      : `Smartphone-Musterlösung geladen (${rubricScannedPages || 1} ${(rubricScannedPages || 1) === 1 ? 'Seite' : 'Seiten'})`}
                                   </Typography>
                                 </Stack>
                                 <Button
                                   size="small"
                                   color="error"
-                                  onClick={() => setRubricFile(null)}
+                                  onClick={() => {
+                                    setRubricFile(null);
+                                    setRubricText('');
+                                    setRubricScannedPages(0);
+                                  }}
                                 >
                                   Löschen
                                 </Button>
@@ -1294,10 +1328,11 @@ export default function Dashboard() {
                                   onChange={(e) => setRubricText(e.target.value)}
                                   fullWidth
                                 />
-                                <Stack direction="row" spacing={1.5} sx={{ alignItems: 'center' }}>
-                                  <Typography variant="caption" sx={{ color: 'text.secondary' }}>
-                                    Oder lade eine Datei hoch:
-                                  </Typography>
+                                <Stack
+                                  direction="row"
+                                  spacing={1.5}
+                                  sx={{ alignItems: 'center', flexWrap: 'wrap' }}
+                                >
                                   <input
                                     type="file"
                                     accept="application/pdf,text/plain,image/*"
@@ -1318,14 +1353,213 @@ export default function Dashboard() {
                                       color: 'text.primary',
                                       borderColor: '#e2e8f0',
                                       fontWeight: 600,
+                                      textTransform: 'none',
                                     }}
                                   >
-                                    Datei auswählen
+                                    Datei auswählen (PDF/Bild)
+                                  </Button>
+                                  <Button
+                                    variant="outlined"
+                                    size="small"
+                                    startIcon={<QrCodeScannerIcon />}
+                                    onClick={() => {
+                                      setQrDialogMode('contextual');
+                                      setQrTargetMode('RUBRIC');
+                                      setQrDialogOpen(true);
+                                    }}
+                                    sx={{
+                                      borderColor: '#1b77d1',
+                                      color: '#1b77d1',
+                                      fontWeight: 700,
+                                      textTransform: 'none',
+                                    }}
+                                  >
+                                    Per Smartphone scannen (QR)
                                   </Button>
                                 </Stack>
                               </>
                             )}
                           </Stack>
+
+                          {/* Collapsible Advanced Options (Notenformel, Rundung, Vorlage, Hinweise) */}
+                          <Box>
+                            <Button
+                              size="small"
+                              variant="text"
+                              onClick={() => setShowAdvancedExamOptions((prev) => !prev)}
+                              sx={{
+                                textTransform: 'none',
+                                fontWeight: 700,
+                                color: '#475569',
+                                px: 1,
+                                py: 0.5,
+                              }}
+                            >
+                              {showAdvancedExamOptions ? '▾' : '▸'} Erweiterte Optionen
+                              (Notenformel, Vorlagenblatt & Bewertungshinweise)
+                            </Button>
+
+                            {showAdvancedExamOptions && (
+                              <Stack
+                                spacing={2}
+                                sx={{
+                                  mt: 1.5,
+                                  p: 2,
+                                  borderRadius: '10px',
+                                  backgroundColor: '#f8fafc',
+                                  border: '1px solid #e2e8f0',
+                                }}
+                              >
+                                <Grid container spacing={2}>
+                                  <Grid size={{ xs: 12, sm: 6 }}>
+                                    <FormControl fullWidth size="small">
+                                      <InputLabel>Notenformel (Schweizer Skala 1–6)</InputLabel>
+                                      <Select
+                                        value={gradingFormula}
+                                        label="Notenformel (Schweizer Skala 1–6)"
+                                        onChange={(e) =>
+                                          setGradingFormula(e.target.value as GradingFormula)
+                                        }
+                                      >
+                                        {GRADING_FORMULA_OPTIONS.map((opt) => (
+                                          <MenuItem key={opt.value} value={opt.value}>
+                                            {opt.label}
+                                          </MenuItem>
+                                        ))}
+                                      </Select>
+                                    </FormControl>
+                                  </Grid>
+                                  <Grid size={{ xs: 12, sm: 6 }}>
+                                    <FormControl fullWidth size="small">
+                                      <InputLabel>Notenrundung</InputLabel>
+                                      <Select
+                                        value={gradeRounding}
+                                        label="Notenrundung"
+                                        onChange={(e) =>
+                                          setGradeRounding(e.target.value as GradeRounding)
+                                        }
+                                      >
+                                        {GRADE_ROUNDING_OPTIONS.map((opt) => (
+                                          <MenuItem key={opt.value} value={opt.value}>
+                                            {opt.label}
+                                          </MenuItem>
+                                        ))}
+                                      </Select>
+                                    </FormControl>
+                                  </Grid>
+                                </Grid>
+
+                                <Stack spacing={1}>
+                                  <Typography
+                                    variant="caption"
+                                    sx={{ fontWeight: 700, color: 'text.secondary' }}
+                                  >
+                                    Leeres Aufgabenblatt / Vorlagenprüfung (optional):
+                                  </Typography>
+                                  {examTemplateFile || examTemplateScannedPayload ? (
+                                    <Stack
+                                      direction="row"
+                                      spacing={1}
+                                      sx={{
+                                        alignItems: 'center',
+                                        justifyContent: 'space-between',
+                                        border: '1px solid #e2e8f0',
+                                        p: '8px 12px',
+                                        borderRadius: '8px',
+                                        backgroundColor: '#ffffff',
+                                      }}
+                                    >
+                                      <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                                        {examTemplateFile
+                                          ? examTemplateFile.name
+                                          : `Smartphone-Vorlage geladen (${examTemplateScannedPages} ${examTemplateScannedPages === 1 ? 'Seite' : 'Seiten'})`}
+                                      </Typography>
+                                      <Button
+                                        size="small"
+                                        color="error"
+                                        onClick={() => {
+                                          setExamTemplateFile(null);
+                                          setExamTemplateScannedPayload('');
+                                          setExamTemplateScannedPages(0);
+                                        }}
+                                      >
+                                        Entfernen
+                                      </Button>
+                                    </Stack>
+                                  ) : (
+                                    <Stack
+                                      direction="row"
+                                      spacing={1.5}
+                                      sx={{ alignItems: 'center', flexWrap: 'wrap' }}
+                                    >
+                                      <input
+                                        type="file"
+                                        accept="application/pdf,text/plain,image/*"
+                                        id="examTemplateFile"
+                                        onChange={(e) => {
+                                          if (e.target.files && e.target.files[0]) {
+                                            setExamTemplateFile(e.target.files[0]);
+                                          }
+                                        }}
+                                        style={{ display: 'none' }}
+                                      />
+                                      <Button
+                                        component="label"
+                                        htmlFor="examTemplateFile"
+                                        variant="outlined"
+                                        size="small"
+                                        sx={{
+                                          color: 'text.primary',
+                                          borderColor: '#cbd5e1',
+                                          backgroundColor: '#ffffff',
+                                          fontWeight: 600,
+                                          textTransform: 'none',
+                                        }}
+                                      >
+                                        Aufgabenblatt hochladen (PDF/Bild)
+                                      </Button>
+                                      <Button
+                                        variant="outlined"
+                                        size="small"
+                                        startIcon={<QrCodeScannerIcon />}
+                                        onClick={() => {
+                                          setQrDialogMode('contextual');
+                                          setQrTargetMode('EXAM_TEMPLATE');
+                                          setQrDialogOpen(true);
+                                        }}
+                                        sx={{
+                                          borderColor: '#1b77d1',
+                                          color: '#1b77d1',
+                                          backgroundColor: '#ffffff',
+                                          fontWeight: 700,
+                                          textTransform: 'none',
+                                        }}
+                                      >
+                                        Vorlage per Smartphone scannen (QR)
+                                      </Button>
+                                    </Stack>
+                                  )}
+                                </Stack>
+
+                                <Stack spacing={1}>
+                                  <Typography
+                                    variant="caption"
+                                    sx={{ fontWeight: 700, color: 'text.secondary' }}
+                                  >
+                                    Zusätzliche Bewertungshinweise für die KI (optional):
+                                  </Typography>
+                                  <TextField
+                                    placeholder="z. B. 'Fehlende Masseinheiten geben 0.5 P. Abzug; auch grafische Lösung bei Aufgabe 2 voll gültig'"
+                                    value={gradingNotes}
+                                    onChange={(e) => setGradingNotes(e.target.value)}
+                                    size="small"
+                                    fullWidth
+                                    sx={{ backgroundColor: '#ffffff' }}
+                                  />
+                                </Stack>
+                              </Stack>
+                            )}
+                          </Box>
                         </Stack>
                       )}
                     </Stack>
@@ -1337,25 +1571,103 @@ export default function Dashboard() {
               {selectedStudentId && (
                 <Card sx={{ borderRadius: '12px', border: '1px solid #e2e8f0', boxShadow: 'none' }}>
                   <CardContent sx={{ padding: '24px' }}>
-                    <Typography
-                      variant="h6"
-                      component="h3"
+                    <Stack
+                      direction={{ xs: 'column', sm: 'row' }}
+                      spacing={1.5}
                       sx={{
-                        color: '#0f172a',
-                        fontWeight: 700,
+                        justifyContent: 'space-between',
+                        alignItems: { xs: 'flex-start', sm: 'center' },
                         marginBottom: '16px',
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: '8px',
                       }}
                     >
-                      <Box component="span" sx={{ color: 'primary.main', fontWeight: 'bold' }}>
-                        ③
-                      </Box>{' '}
-                      {selectedStudentId === 'AUTO'
-                        ? 'Schülerarbeiten hochladen (Bulk-Upload)'
-                        : 'Schülerarbeit hochladen (Scans/Fotos/PDF)'}
-                    </Typography>
+                      <Typography
+                        variant="h6"
+                        component="h3"
+                        sx={{
+                          color: '#0f172a',
+                          fontWeight: 700,
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '8px',
+                        }}
+                      >
+                        <Box component="span" sx={{ color: 'primary.main', fontWeight: 'bold' }}>
+                          ③
+                        </Box>{' '}
+                        {selectedStudentId === 'AUTO'
+                          ? 'Schülerarbeiten hochladen (Bulk-Upload)'
+                          : 'Schülerarbeit hochladen (Scans/Fotos/PDF)'}
+                      </Typography>
+
+                      <Button
+                        variant="outlined"
+                        size="small"
+                        startIcon={<QrCodeScannerIcon />}
+                        onClick={async () => {
+                          if (selectedExamId === 'NEW' && selectedClassId) {
+                            if (!examTitle.trim()) {
+                              setError(
+                                'Bitte gib in Schritt ② zuerst einen Prüfungstitel ein, bevor du den QR-Scanner für diese neue Prüfung startest.'
+                              );
+                              return;
+                            }
+                            try {
+                              let resolvedRubric = rubricText || 'Standard Musterlösung';
+                              if (rubricFile) {
+                                const dataUrl = await new Promise<string>((resolve) => {
+                                  const r = new FileReader();
+                                  r.onload = (ev) => resolve((ev.target?.result as string) || '');
+                                  r.readAsDataURL(rubricFile);
+                                });
+                                if (dataUrl.includes(',')) {
+                                  resolvedRubric = JSON.stringify({
+                                    mimeType: rubricFile.type || 'image/jpeg',
+                                    data: dataUrl.split(',')[1],
+                                  });
+                                }
+                              }
+                              const res = await fetch('/api/exams', {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({
+                                  title: examTitle.trim(),
+                                  subject: examSubject,
+                                  maxPoints: 0,
+                                  rubricText: resolvedRubric,
+                                  examTemplateText: examTemplateScannedPayload || null,
+                                  gradingNotes: gradingNotes.trim() || null,
+                                  gradingFormula,
+                                  gradeRounding,
+                                  classId: selectedClassId,
+                                }),
+                              });
+                              const created = await res.json();
+                              if (!res.ok) {
+                                setError(created.error || 'Prüfung konnte nicht angelegt werden.');
+                                return;
+                              }
+                              setExams((prev) => [created.exam, ...prev]);
+                              setSelectedExamId(created.exam.id);
+                            } catch {
+                              setError('Fehler beim Anlegen der Prüfung für den QR-Scan.');
+                              return;
+                            }
+                          }
+                          setQrDialogMode('contextual');
+                          setQrTargetMode('SUBMISSION');
+                          setQrDialogOpen(true);
+                        }}
+                        sx={{
+                          borderRadius: '8px',
+                          textTransform: 'none',
+                          fontWeight: 700,
+                          borderColor: '#1b77d1',
+                          color: '#1b77d1',
+                        }}
+                      >
+                        Mit Smartphone scannen (QR)
+                      </Button>
+                    </Stack>
 
                     <Box
                       onDragOver={handleDragOver}
@@ -1535,137 +1847,31 @@ export default function Dashboard() {
                         </Stack>
                       )}
                     </Box>
+
+                    {/* Start Button */}
+                    <Button
+                      onClick={() => startAnalysis(false)}
+                      className="glow-button"
+                      variant="contained"
+                      fullWidth
+                      size="large"
+                      endIcon={<FlashOnIcon />}
+                      disabled={!selectedStudentId || studentFiles.length === 0 || loading}
+                      sx={{
+                        padding: '14px',
+                        borderRadius: '8px',
+                        fontSize: '1rem',
+                        fontWeight: 700,
+                        marginTop: '20px',
+                        backgroundColor: '#1b77d1',
+                      }}
+                    >
+                      Korrektur starten!
+                    </Button>
                   </CardContent>
                 </Card>
               )}
             </Stack>
-          </Grid>
-
-          {/* Right Column: Settings Panel */}
-          <Grid size={{ xs: 12, md: 4 }}>
-            <Card
-              sx={{
-                borderRadius: '12px',
-                border: '1px solid #e2e8f0',
-                boxShadow: 'none',
-                height: '100%',
-              }}
-            >
-              <CardContent
-                sx={{ padding: '24px', display: 'flex', flexDirection: 'column', gap: '20px' }}
-              >
-                <Typography
-                  variant="h6"
-                  component="h3"
-                  sx={{
-                    color: '#0f172a',
-                    fontWeight: 700,
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '10px',
-                  }}
-                >
-                  <SettingsIcon sx={{ color: 'primary.main', fontSize: '1.25rem' }} /> Optionen
-                </Typography>
-                <Divider />
-
-                {/* Model selection */}
-                <Stack spacing={1.5}>
-                  <Typography variant="subtitle2" sx={{ fontWeight: 650, color: 'text.primary' }}>
-                    KI-Modell
-                  </Typography>
-                  <RadioGroup
-                    value={model}
-                    onChange={(e) => {
-                      setModel(e.target.value as 'gemini-3.5-flash' | 'gemini-3.1-pro-preview');
-                    }}
-                  >
-                    <Stack spacing={1.5}>
-                      <Box
-                        sx={{
-                          display: 'flex',
-                          alignItems: 'center',
-                          gap: '10px',
-                          padding: '12px',
-                          borderRadius: '8px',
-                          border:
-                            model === 'gemini-3.5-flash'
-                              ? '1.5px solid #1b77d1'
-                              : '1px solid #e2e8f0',
-                          background: model === 'gemini-3.5-flash' ? '#f0f7ff' : '#ffffff',
-                          cursor: 'pointer',
-                          '&:hover': { borderColor: '#1b77d1' },
-                        }}
-                      >
-                        <Radio value="gemini-3.5-flash" size="small" />
-                        <Box>
-                          <Typography variant="body2" sx={{ fontWeight: 700 }}>
-                            Gemini 3.5 Flash
-                          </Typography>
-                          <Typography
-                            variant="caption"
-                            sx={{ color: 'text.secondary', display: 'block' }}
-                          >
-                            Schnell & Exzellente OCR
-                          </Typography>
-                        </Box>
-                      </Box>
-
-                      <Box
-                        sx={{
-                          display: 'flex',
-                          alignItems: 'center',
-                          gap: '10px',
-                          padding: '12px',
-                          borderRadius: '8px',
-                          border:
-                            model === 'gemini-3.1-pro-preview'
-                              ? '1.5px solid #1b77d1'
-                              : '1px solid #e2e8f0',
-                          background: model === 'gemini-3.1-pro-preview' ? '#f0f7ff' : '#ffffff',
-                          cursor: 'pointer',
-                          '&:hover': { borderColor: '#1b77d1' },
-                        }}
-                      >
-                        <Radio value="gemini-3.1-pro-preview" size="small" />
-                        <Box>
-                          <Typography variant="body2" sx={{ fontWeight: 700 }}>
-                            Gemini 3.1 Pro (Preview)
-                          </Typography>
-                          <Typography
-                            variant="caption"
-                            sx={{ color: 'text.secondary', display: 'block' }}
-                          >
-                            Tiefes Folgefehler-Tracking
-                          </Typography>
-                        </Box>
-                      </Box>
-                    </Stack>
-                  </RadioGroup>
-                </Stack>
-
-                {/* Start Button */}
-                <Button
-                  onClick={() => startAnalysis(false)}
-                  className="glow-button"
-                  variant="contained"
-                  fullWidth
-                  size="large"
-                  endIcon={<FlashOnIcon />}
-                  disabled={!selectedStudentId || studentFiles.length === 0 || loading}
-                  sx={{
-                    padding: '14px',
-                    borderRadius: '8px',
-                    fontSize: '1rem',
-                    fontWeight: 700,
-                    marginTop: '10px',
-                    backgroundColor: '#1b77d1',
-                  }}
-                >
-                  Korrektur starten!
-                </Button>
-              </CardContent>
-            </Card>
           </Grid>
         </Grid>
 
@@ -1701,7 +1907,16 @@ export default function Dashboard() {
                   {recentSubmissions
                     .filter((sub) => sub.status === 'COMPLETED')
                     .map((sub) => {
-                      const isUnassigned = sub.studentName === 'Nicht zugeordnet';
+                      const isUnassigned =
+                        sub.studentName === 'Nicht zugeordnet' ||
+                        Boolean(sub.isExamMatchUncertain) ||
+                        Boolean(sub.isStudentMatchUncertain);
+                      const activeExamIdForAssign = examAssignState[sub.id] || sub.examId;
+                      const activeExamOption = allExams.find((e) => e.id === activeExamIdForAssign);
+                      const activeClassIdForAssign = activeExamOption?.classId || sub.classId;
+                      const availableStudentsForAssign =
+                        studentsByClass[activeClassIdForAssign] || students;
+
                       return (
                         <TableRow
                           key={sub.id}
@@ -1714,25 +1929,75 @@ export default function Dashboard() {
                           }}
                         >
                           <TableCell sx={{ fontWeight: 600 }}>
-                            {sub.studentName !== 'Nicht zugeordnet' ? (
+                            {!isUnassigned ? (
                               sub.studentName
                             ) : (
                               <Stack spacing={1} sx={{ py: 1 }}>
-                                <Chip
-                                  label="Zuordnung ausstehend"
-                                  size="small"
-                                  sx={{
-                                    backgroundColor: '#fef3c7',
-                                    color: '#d97706',
-                                    fontWeight: 'bold',
-                                    alignSelf: 'flex-start',
-                                    borderRadius: '6px',
-                                  }}
-                                />
-                                <Box
-                                  sx={{ display: 'flex', alignItems: 'center', gap: '8px' }}
+                                <Stack
+                                  direction="row"
+                                  spacing={1}
+                                  sx={{ alignItems: 'center', flexWrap: 'wrap' }}
+                                >
+                                  <Chip
+                                    label={
+                                      sub.isExamMatchUncertain
+                                        ? '⚠ Klasse/Prüfung & Schüler prüfen'
+                                        : 'Zuordnung ausstehend'
+                                    }
+                                    size="small"
+                                    sx={{
+                                      backgroundColor: '#fef3c7',
+                                      color: '#d97706',
+                                      fontWeight: 'bold',
+                                      borderRadius: '6px',
+                                    }}
+                                  />
+                                  {sub.extractedStudentName && (
+                                    <Typography
+                                      variant="caption"
+                                      sx={{ color: '#92400e', fontWeight: 700 }}
+                                    >
+                                      KI gelesen: &quot;{sub.extractedStudentName}&quot;
+                                    </Typography>
+                                  )}
+                                </Stack>
+                                <Stack
+                                  direction={{ xs: 'column', sm: 'row' }}
+                                  spacing={1}
+                                  sx={{ alignItems: { xs: 'stretch', sm: 'center' } }}
                                   onClick={(e) => e.stopPropagation()}
                                 >
+                                  {allExams.length > 1 && (
+                                    <FormControl size="small" sx={{ minWidth: '180px' }}>
+                                      <Select
+                                        value={activeExamIdForAssign}
+                                        onChange={(e) => {
+                                          const newExId = e.target.value;
+                                          setExamAssignState((prev) => ({
+                                            ...prev,
+                                            [sub.id]: newExId,
+                                          }));
+                                          // Clear student selection if class changed
+                                          setAssignState((prev) => ({
+                                            ...prev,
+                                            [sub.id]: '',
+                                          }));
+                                        }}
+                                        sx={{
+                                          height: '32px',
+                                          fontSize: '0.8rem',
+                                          borderRadius: '6px',
+                                          backgroundColor: '#ffffff',
+                                        }}
+                                      >
+                                        {allExams.map((ex) => (
+                                          <MenuItem key={ex.id} value={ex.id}>
+                                            {ex.className} · {ex.title}
+                                          </MenuItem>
+                                        ))}
+                                      </Select>
+                                    </FormControl>
+                                  )}
                                   <FormControl size="small" sx={{ minWidth: '160px' }}>
                                     <Select
                                       value={assignState[sub.id] || ''}
@@ -1747,12 +2012,13 @@ export default function Dashboard() {
                                         height: '32px',
                                         fontSize: '0.85rem',
                                         borderRadius: '6px',
+                                        backgroundColor: '#ffffff',
                                       }}
                                     >
                                       <MenuItem value="" disabled>
-                                        <em>Schüler auswählen...</em>
+                                        <em>Schüler/in wählen...</em>
                                       </MenuItem>
-                                      {students.map((st) => (
+                                      {availableStudentsForAssign.map((st) => (
                                         <MenuItem key={st.id} value={st.id}>
                                           {st.name}
                                         </MenuItem>
@@ -1776,7 +2042,7 @@ export default function Dashboard() {
                                   >
                                     Zuordnen
                                   </Button>
-                                </Box>
+                                </Stack>
                               </Stack>
                             )}
                           </TableCell>
@@ -1790,17 +2056,32 @@ export default function Dashboard() {
                           </TableCell>
                           <TableCell sx={{ fontWeight: 600 }}>{sub.points}</TableCell>
                           <TableCell>
-                            <Chip
-                              label={sub.grade}
-                              size="small"
-                              sx={{
-                                backgroundColor:
-                                  parseFloat(sub.grade) >= 4.0 ? '#1b77d1' : '#dc2626',
-                                color: '#ffffff',
-                                fontWeight: 'bold',
-                                borderRadius: '6px',
-                              }}
-                            />
+                            <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
+                              <Chip
+                                label={sub.grade}
+                                size="small"
+                                sx={{
+                                  backgroundColor:
+                                    parseFloat(sub.grade) >= 4.0 ? '#1b77d1' : '#dc2626',
+                                  color: '#ffffff',
+                                  fontWeight: 'bold',
+                                  borderRadius: '6px',
+                                }}
+                              />
+                              {(sub.uncertainStepsCount ?? 0) > 0 && (
+                                <Chip
+                                  label={`⚠ KI unsicher (${sub.uncertainStepsCount})`}
+                                  size="small"
+                                  sx={{
+                                    backgroundColor: '#fef3c7',
+                                    color: '#b45309',
+                                    border: '1px solid #f59e0b',
+                                    fontWeight: 700,
+                                    borderRadius: '6px',
+                                  }}
+                                />
+                              )}
+                            </Stack>
                           </TableCell>
                           <TableCell>{sub.date}</TableCell>
                           <TableCell sx={{ textAlign: 'right' }}>
@@ -1942,6 +2223,104 @@ export default function Dashboard() {
           </Button>
         </DialogActions>
       </Dialog>
+
+      {/* Dialog for Cancel Active Submission Confirmation */}
+      <Dialog
+        open={Boolean(cancelTargetId)}
+        onClose={() => setCancelTargetId(null)}
+        maxWidth="xs"
+        fullWidth
+        slotProps={{
+          paper: {
+            sx: {
+              borderRadius: '12px',
+              padding: '8px',
+            },
+          },
+        }}
+      >
+        <DialogTitle sx={{ fontWeight: 800, color: '#0f172a', letterSpacing: '-0.01em' }}>
+          Korrektur abbrechen?
+        </DialogTitle>
+        <DialogContent>
+          <Typography variant="body2" sx={{ color: 'text.secondary', lineHeight: 1.5 }}>
+            Möchtest du diese aktive Korrektur wirklich abbrechen und aus der Warteschlange löschen?
+          </Typography>
+        </DialogContent>
+        <DialogActions sx={{ p: 2, pt: 1 }}>
+          <Button
+            onClick={() => setCancelTargetId(null)}
+            sx={{ textTransform: 'none', fontWeight: 650 }}
+          >
+            Zurück
+          </Button>
+          <Button
+            onClick={async () => {
+              const target = cancelTargetId;
+              setCancelTargetId(null);
+              if (target) {
+                await executeCancelSubmission(target);
+              }
+            }}
+            variant="contained"
+            color="error"
+            sx={{
+              textTransform: 'none',
+              fontWeight: 700,
+              borderRadius: '8px',
+            }}
+          >
+            Ja, abbrechen
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* QR Code Mobile Camera Relay Dialog */}
+      <QrScannerDialog
+        open={qrDialogOpen}
+        onClose={() => setQrDialogOpen(false)}
+        targetMode={qrTargetMode}
+        classId={qrDialogMode === 'contextual' ? selectedClassId : null}
+        className={
+          qrDialogMode === 'contextual'
+            ? classes.find((c) => c.id === selectedClassId)?.name || null
+            : null
+        }
+        examId={qrDialogMode === 'contextual' && selectedExamId !== 'NEW' ? selectedExamId : null}
+        examTitle={
+          qrDialogMode === 'contextual'
+            ? exams.find((e) => e.id === selectedExamId)?.title || examTitle || null
+            : null
+        }
+        studentId={
+          qrDialogMode === 'contextual' &&
+          qrTargetMode === 'SUBMISSION' &&
+          selectedStudentId &&
+          selectedStudentId !== 'AUTO'
+            ? selectedStudentId
+            : null
+        }
+        studentName={
+          qrDialogMode === 'contextual' &&
+          qrTargetMode === 'SUBMISSION' &&
+          selectedStudentId &&
+          selectedStudentId !== 'AUTO'
+            ? students.find((s) => s.id === selectedStudentId)?.name || null
+            : null
+        }
+        onRefreshSubmissions={fetchRecentSubmissions}
+        onDocumentScanned={(payload, pageCount, mode) => {
+          if (mode === 'RUBRIC') {
+            setRubricFile(null);
+            setRubricText(payload);
+            setRubricScannedPages(pageCount);
+          } else if (mode === 'EXAM_TEMPLATE') {
+            setExamTemplateFile(null);
+            setExamTemplateScannedPayload(payload);
+            setExamTemplateScannedPages(pageCount);
+          }
+        }}
+      />
     </DashboardLayout>
   );
 }

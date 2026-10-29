@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { getSession } from '@/lib/session';
+import { calculateRawSwissGrade, calculateSwissGrade } from '@/lib/grading';
 
 // GET: Fetch a submission by ID and map to standard ExamCorrectionResult
 export async function GET(request: Request, { params }: { params: Promise<{ id: string }> }) {
@@ -41,19 +42,65 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
       return NextResponse.json({ error: 'Nicht autorisiert.' }, { status: 403 });
     }
 
+    // Fetch all sibling submissions for the same exam so the teacher can speed-grade across the class
+    const rawSiblings = await db.submission.findMany({
+      where: { examId: submission.examId },
+      include: {
+        student: { select: { name: true } },
+        tasks: {
+          include: {
+            schritte: { select: { istUnsicher: true } },
+          },
+        },
+      },
+      orderBy: { createdAt: 'asc' },
+    });
+
+    const siblingSubmissions = rawSiblings
+      .map((sib) => ({
+        id: sib.id,
+        studentName:
+          sib.student?.name ||
+          (sib.extractedStudentName
+            ? `${sib.extractedStudentName} (Nicht zugeordnet)`
+            : 'Nicht zugeordnet'),
+        status: sib.status,
+        grade: sib.gradeRounded,
+        earnedPoints: sib.earnedPoints,
+        uncertainStepsCount: sib.tasks.reduce(
+          (acc, t) => acc + t.schritte.filter((s) => s.istUnsicher).length,
+          0
+        ),
+      }))
+      .sort((a, b) => a.studentName.localeCompare(b.studentName, 'de-CH'));
+
     // Map DB relational model to ExamCorrectionResult frontend format
     const responseData = {
       id: submission.id,
+      examId: submission.examId,
+      examTitle: submission.exam.title,
+      siblingSubmissions,
       status: submission.status,
       errorMessage: submission.errorMessage,
-      schuelerName: submission.student?.name || 'Nicht zugeordnet',
+      schuelerName:
+        submission.student?.name ||
+        (submission.extractedStudentName
+          ? `${submission.extractedStudentName} (Nicht zugeordnet)`
+          : 'Nicht zugeordnet'),
+      extractedStudentName: submission.extractedStudentName,
+      suggestedStudentId: submission.suggestedStudentId,
+      isStudentMatchUncertain: submission.isStudentMatchUncertain,
+      isExamMatchUncertain: submission.isExamMatchUncertain,
       studentId: submission.studentId,
       classId: submission.exam.classId,
+      className: submission.exam.class.name,
       fach: submission.exam.subject,
       datum: submission.createdAt.toLocaleDateString('de-CH'),
       gesamterzieltePunkte: submission.earnedPoints,
       gesamtmaximalPunkte: submission.exam.maxPoints,
       note: submission.gradeRounded,
+      gradingFormula: submission.exam.gradingFormula,
+      gradeRounding: submission.exam.gradeRounding,
       studentExamUrl: submission.studentExamUrl,
       aufgaben: submission.tasks.map((task) => ({
         aufgabeId: task.taskId,
@@ -73,6 +120,8 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
             erreichtePunkte: step.erreichtePunkte,
             maximalPunkte: step.maximalPunkte,
             begruendung: step.begruendung,
+            istUnsicher: step.istUnsicher,
+            unsicherheitsGrund: step.unsicherheitsGrund || '',
           }))
           .sort((a, b) => a.schrittIndex - b.schrittIndex),
       })),
@@ -131,11 +180,13 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     // Run dynamic point updates and Swiss grade recalculation in a single transaction
     const updatedSubmission = await db.$transaction(async (tx) => {
       let totalEarnedPoints = 0;
+      const stepUpdatePromises: Promise<unknown>[] = [];
+      const taskUpdatePromises: Promise<unknown>[] = [];
 
       for (const updatedTask of aufgaben) {
         let taskPoints = Math.round((updatedTask.erzieltePunkte || 0) * 10) / 10;
 
-        // 1. Update individual steps
+        // 1. Update individual steps (scoped to this submissionId to prevent cross-submission IDOR)
         if (Array.isArray(updatedTask.schritte) && updatedTask.schritte.length > 0) {
           let stepSum = 0;
           for (const updatedStep of updatedTask.schritte) {
@@ -148,16 +199,33 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
             );
             stepSum += clampedPoints;
 
-            // If step ID is present, update in DB
+            // If step ID is present, scope update to steps belonging to this submission
             if (updatedStep.id) {
-              await tx.stepCorrection.update({
-                where: { id: updatedStep.id },
-                data: {
-                  erreichtePunkte: clampedPoints,
-                  begruendung: updatedStep.begruendung,
-                  fehlerTyp: updatedStep.fehlerTyp,
-                },
-              });
+              stepUpdatePromises.push(
+                tx.stepCorrection.updateMany({
+                  where: {
+                    id: updatedStep.id,
+                    taskCorrection: {
+                      submissionId: submissionId,
+                    },
+                  },
+                  data: {
+                    erreichtePunkte: clampedPoints,
+                    begruendung: updatedStep.begruendung,
+                    fehlerTyp: updatedStep.fehlerTyp,
+                    istUnsicher:
+                      updatedStep.istUnsicher !== undefined
+                        ? Boolean(updatedStep.istUnsicher)
+                        : undefined,
+                    unsicherheitsGrund:
+                      updatedStep.istUnsicher !== undefined
+                        ? updatedStep.istUnsicher
+                          ? updatedStep.unsicherheitsGrund || null
+                          : null
+                        : undefined,
+                  },
+                })
+              );
             }
           }
           taskPoints = Math.round(stepSum * 10) / 10;
@@ -166,25 +234,36 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
         totalEarnedPoints = Math.round((totalEarnedPoints + taskPoints) * 10) / 10;
 
         // 2. Update parent TaskCorrection
-        await tx.taskCorrection.updateMany({
-          where: {
-            submissionId: submissionId,
-            taskId: updatedTask.aufgabeId,
-          },
-          data: {
-            erzieltePunkte: taskPoints,
-            lehrerKommentar: updatedTask.lehrerKommentar || '',
-            status: updatedTask.status,
-          },
-        });
+        taskUpdatePromises.push(
+          tx.taskCorrection.updateMany({
+            where: {
+              submissionId: submissionId,
+              taskId: updatedTask.aufgabeId,
+            },
+            data: {
+              erzieltePunkte: taskPoints,
+              lehrerKommentar: updatedTask.lehrerKommentar || '',
+              status: updatedTask.status,
+            },
+          })
+        );
       }
 
-      // 3. Recalculate Schweizer Schulnote
-      // Formel: Note = 5 * (erzieltePunkte / maximalPunkte) + 1
+      await Promise.all([...stepUpdatePromises, ...taskUpdatePromises]);
+
+      // 3. Recalculate Schweizer Schulnote using exam's configured formula and rounding
       const maxScore = submission.exam.maxPoints;
-      const rawGrade = maxScore > 0 ? 5 * (totalEarnedPoints / maxScore) + 1 : 1;
-      // Round to nearest 0.1 (e.g. 5.64 -> 5.6, 5.66 -> 5.7, etc.)
-      const roundedGrade = (Math.round(rawGrade * 10) / 10).toFixed(1);
+      const rawGrade = calculateRawSwissGrade(
+        totalEarnedPoints,
+        maxScore,
+        submission.exam.gradingFormula
+      );
+      const roundedGrade = calculateSwissGrade(
+        totalEarnedPoints,
+        maxScore,
+        submission.exam.gradingFormula,
+        submission.exam.gradeRounding
+      );
 
       // 4. Update the Submission details
       const finalSubmission = await tx.submission.update({
@@ -218,7 +297,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   }
 }
 
-// PATCH: Update studentId for manual mapping / AI Auto-Matching override
+// PATCH: Update studentId (and optionally examId) for manual mapping / AI Auto-Matching override
 export async function PATCH(request: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
     const session = await getSession();
@@ -228,7 +307,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
 
     const { id: submissionId } = await params;
     const body = await request.json();
-    const { studentId } = body;
+    const { studentId, examId: newExamId } = body;
 
     if (!studentId) {
       return NextResponse.json({ error: 'Schüler-ID fehlt.' }, { status: 400 });
@@ -255,19 +334,40 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
       return NextResponse.json({ error: 'Nicht autorisiert.' }, { status: 403 });
     }
 
-    // Verify student exists in the same class
+    let targetExamId = submission.examId;
+    let targetClassId = submission.exam.classId;
+    let examChanged = false;
+
+    if (newExamId && newExamId !== submission.examId) {
+      const targetExam = await db.exam.findFirst({
+        where: {
+          id: newExamId,
+          class: {
+            teacherId: session.userId,
+          },
+        },
+      });
+      if (!targetExam) {
+        return NextResponse.json({ error: 'Zielprüfung nicht gefunden.' }, { status: 404 });
+      }
+      targetExamId = targetExam.id;
+      targetClassId = targetExam.classId;
+      examChanged = true;
+    }
+
+    // Verify student exists in the target class
     const student = await db.student.findUnique({
       where: { id: studentId },
     });
 
-    if (!student || student.classId !== submission.exam.classId) {
+    if (!student || student.classId !== targetClassId) {
       return NextResponse.json({ error: 'Ungültiger Schüler für diese Klasse.' }, { status: 400 });
     }
 
     // Check if a submission already exists for this exam and student
     const existingSubmission = await db.submission.findFirst({
       where: {
-        examId: submission.examId,
+        examId: targetExamId,
         studentId: studentId,
         id: { not: submissionId },
       },
@@ -283,10 +383,15 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
       );
     }
 
-    // Update studentId
+    // Update studentId (and examId if reassigned) and clear uncertainty flags
     const updated = await db.submission.update({
       where: { id: submissionId },
-      data: { studentId },
+      data: {
+        examId: targetExamId,
+        studentId,
+        isStudentMatchUncertain: false,
+        isExamMatchUncertain: false,
+      },
       include: { student: true },
     });
 
@@ -294,6 +399,8 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
       success: true,
       studentId: updated.studentId,
       studentName: updated.student?.name,
+      examId: updated.examId,
+      examChanged,
     });
   } catch (error) {
     console.error('Error assigning student to submission:', error);

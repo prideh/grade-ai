@@ -1,7 +1,10 @@
-import { GoogleGenAI } from '@google/genai';
+import { GoogleGenAI, Type, ThinkingLevel, type Schema } from '@google/genai';
+
+export const DEFAULT_GEMINI_MODEL = 'gemini-3.8-flash';
 
 // Interface for structured grading response
 export interface CorrectedStep {
+  id?: string;
   schrittIndex: number;
   schrittText: string;
   istKorrekt: boolean;
@@ -9,6 +12,8 @@ export interface CorrectedStep {
   erreichtePunkte: number;
   maximalPunkte: number;
   begruendung: string;
+  istUnsicher?: boolean;
+  unsicherheitsGrund?: string;
 }
 
 export interface CorrectedTask {
@@ -24,12 +29,26 @@ export interface CorrectedTask {
 
 export interface ExamCorrectionResult {
   id?: string;
+  examId?: string;
+  examTitle?: string;
+  status?: string;
+  errorMessage?: string | null;
   schuelerName: string;
+  istNameUnsicher?: boolean;
+  extractedStudentName?: string | null;
+  suggestedStudentId?: string | null;
+  isStudentMatchUncertain?: boolean;
+  isExamMatchUncertain?: boolean;
+  studentId?: string | null;
+  classId?: string | null;
+  className?: string;
   fach: string;
   datum: string;
   gesamterzieltePunkte: number;
   gesamtmaximalPunkte: number;
   note: string;
+  gradingFormula?: string;
+  gradeRounding?: string;
   studentExamUrl?: string;
   aufgaben: CorrectedTask[];
   schuelerFeedback: {
@@ -40,128 +59,394 @@ export interface ExamCorrectionResult {
   };
 }
 
-// System prompt to instruct Gemini on OCR, math analysis, and Folgefehler calculations
-const SYSTEM_PROMPT = `
-Du bist ein professioneller, empathischer Lehrer und ein hochpräzises KI-Korrektur-System.
-Deine Aufgabe ist es, handschriftliche Prüfungen von Schülern zu korrigieren, zu bewerten und ein detailliertes Feedback zu geben.
-
-WICHTIGSTE REGELN FÜR DIE BEWERTUNG:
-1. Handschrifterkennung: Lies die eingereichten Scans sorgfältig. Tolerierte leichte Schreibungenauigkeiten bei Kindern, solange die mathematische oder textuelle Aussage klar erkennbar ist.
-2. Teilpunktvergabe (Partial Credits): Vergib Teilpunkte für jeden richtigen Teilschritt, auch wenn das Endergebnis falsch ist.
-3. Folgefehler (Consequential/Carry-over Errors) - BESONDERS WICHTIG FÜR MATHE:
-   - Wenn sich ein Schüler in Schritt N verrechnet (Rechenfehler), erhält er für diesen Teilschritt Punktabzug.
-   - Wenn der Schüler in den nachfolgenden Schritten (Schritt N+1, N+2...) mit diesem FEHLERHAFTEN Wert (Folgewert) mathematisch vollkommen KORREKT weiterrechnet, darfst du für diese Folgeschritte KEINEN weiteren Punktabzug vornehmen!
-   - Markiere solche Folge-Schritte explizit als "Folgefehler" (fehlerTyp: "Folgefehler") und vergib dafür die VOLLEN Teilpunkte des Teilschritts, da die logische Formelanwendung und das Prinzip korrekt waren.
-4. Schweizer Notensystem: Berechne die Schulnote ("note") zwingend nach der offiziellen Schweizer Formel:
-   Note = 5 * (gesamterzieltePunkte / gesamtmaximalPunkte) + 1.
-   Runde das Ergebnis kaufmännisch auf die nächste Zehntelnote (z.B. 6.0, 5.7, 5.6, 5.0, 4.3, 4.0 etc.).
-   Die beste Note ist 6.0 (hervorragend), die genügende Note (Bestehensgrenze) ist 4.0, und die schlechteste Note ist 1.0.
-5. Vollständigkeit (Jede Aufgabe bewerten): Analysiere das gesamte eingereichte Blatt vollständig von oben nach unten. Identifiziere, transkribiere und korrigiere JEDE einzelne Aufgabe (z.B. Aufgabe 1, Aufgabe 2, Aufgabe 3 etc.), die auf dem Prüfungsblatt gelöst wurde. Lass niemals Aufgaben aus! Das "aufgaben" Array in deiner JSON-Rückgabe MUSS für jede auf dem Blatt vorhandene Aufgabe ein eigenes Objekt enthalten.
-
-Deine Rückgabe MUSS ein valides, geparstes JSON-Objekt sein, das exakt dem folgenden TypeScript-Interface entspricht. Gib KEINEN Markdown-Wrapper (wie \`\`\`json) und keinen zusätzlichen Text aus. Nur das nackte JSON.
-
-Schnittstellenstruktur:
-{
-  "schuelerName": "Name des Schülers",
-  "fach": "Fach der Prüfung (z.B. Mathematik)",
-  "datum": "Datum",
-  "gesamterzieltePunkte": 21,
-  "gesamtmaximalPunkte": 28,
-  "note": "Schweizer Schulnote (z.B. 5.0 oder 5.5)",
-  "aufgaben": [
-    {
-      "aufgabeId": "1",
-      "titel": "Aufgabe 1",
-      "schuelerAntwort": "Transkription der Schülerantwort für Aufgabe 1",
-      "erzieltePunkte": 4,
-      "maximalPunkte": 5,
-      "status": "Folgefehler", // "Korrekt" | "Folgefehler" | "Fehler"
-      "schritte": [
-        {
-          "schrittIndex": 1,
-          "schrittText": "4x = 16",
-          "istKorrekt": false,
-          "fehlerTyp": "Rechenfehler", // "KeinFehler" | "Rechenfehler" | "Folgefehler" | "SonstigerFehler"
-          "erreichtePunkte": 0,
-          "maximalPunkte": 1,
-          "begruendung": "Es wurde fälschlicherweise 12 subtrahiert statt addiert."
-        },
-        {
-          "schrittIndex": 2,
-          "schrittText": "x = 4",
-          "istKorrekt": true,
-          "fehlerTyp": "Folgefehler",
-          "erreichtePunkte": 2,
-          "maximalPunkte": 2,
-          "begruendung": "Folgefehler: Richtig durch 4 geteilt basierend auf dem falschen Zwischenschritt."
-        }
-      ],
-      "lehrerKommentar": "Guter Rechenweg, leider ein kleiner Vorzeichenfehler zu Beginn, danach sauber weitergerechnet."
-    },
-    {
-      "aufgabeId": "2",
-      "titel": "Aufgabe 2",
-      "schuelerAntwort": "Transkription der Schülerantwort für Aufgabe 2",
-      "erzieltePunkte": 5,
-      "maximalPunkte": 5,
-      "status": "Korrekt",
-      "schritte": [
-        {
-          "schrittIndex": 1,
-          "schrittText": "2x = 10",
-          "istKorrekt": true,
-          "fehlerTyp": "KeinFehler",
-          "erreichtePunkte": 2.5,
-          "maximalPunkte": 2.5,
-          "begruendung": "Sehr gut vereinfacht."
-        },
-        {
-          "schrittIndex": 2,
-          "schrittText": "x = 5",
-          "istKorrekt": true,
-          "fehlerTyp": "KeinFehler",
-          "erreichtePunkte": 2.5,
-          "maximalPunkte": 2.5,
-          "begruendung": "Korrekt nach x aufgelöst."
-        }
-      ],
-      "lehrerKommentar": "Aufgabe fehlerfrei gelöst. Weiter so!"
-    }
-  ],
-  "schuelerFeedback": {
-    "staerken": ["Stärke 1", "Stärke 2"],
-    "schwaechen": ["Schwäche 1", "Schwäche 2"],
-    "hilfreicherTipp": "Konkreter Tipp zur Fehlervermeidung",
-    "uebungsEmpfehlung": "Konkrete Übungsaufgabe"
-  }
-}
-`;
 export interface PredefinedTask {
   taskId: string;
   title: string;
   maxPoints: number;
 }
 
+export type ReferenceMaterialInput =
+  | string
+  | { mimeType: string; data: string }
+  | { mimeType: string; data: string }[];
+
+export interface CorrectionMaterialOptions {
+  examTemplate?: ReferenceMaterialInput | null;
+  gradingNotes?: string | null;
+  additionalStudentPages?: { mimeType: string; data: string }[];
+}
+
+export function appendReferenceMaterialToContents(
+  contents: (string | { inlineData: { mimeType: string; data: string } })[],
+  material: ReferenceMaterialInput
+): void {
+  if (typeof material === 'string') {
+    const trimmed = material.trim();
+    if (trimmed.startsWith('[{"mimeType":') || trimmed.startsWith('{"mimeType":')) {
+      try {
+        const parsed = JSON.parse(trimmed);
+        if (Array.isArray(parsed)) {
+          parsed.forEach((item, idx) => {
+            if (item && typeof item.mimeType === 'string' && typeof item.data === 'string') {
+              if (parsed.length > 1) {
+                contents.push(`--- Referenzdokument Seite ${idx + 1} ---`);
+              }
+              contents.push({ inlineData: { mimeType: item.mimeType, data: item.data } });
+            }
+          });
+          return;
+        }
+        if (parsed && typeof parsed.mimeType === 'string' && typeof parsed.data === 'string') {
+          contents.push({ inlineData: { mimeType: parsed.mimeType, data: parsed.data } });
+          return;
+        }
+      } catch {
+        // Fall through to plain text
+      }
+    }
+    contents.push(material);
+  } else if (Array.isArray(material)) {
+    material.forEach((item, idx) => {
+      if (material.length > 1) {
+        contents.push(`--- Referenzdokument Seite ${idx + 1} ---`);
+      }
+      contents.push({ inlineData: { mimeType: item.mimeType, data: item.data } });
+    });
+  } else {
+    contents.push({
+      inlineData: {
+        mimeType: material.mimeType,
+        data: material.data,
+      },
+    });
+  }
+}
+
+// Native @google/genai constrained decoding schema
+const CORRECTION_RESPONSE_SCHEMA: Schema = {
+  type: Type.OBJECT,
+  properties: {
+    schuelerName: {
+      type: Type.STRING,
+      description:
+        'Abgelesener Name der Schülerin oder des Schülers auf dem Blatt (oder leerer String, falls keiner erkennbar ist).',
+    },
+    istNameUnsicher: {
+      type: Type.BOOLEAN,
+      description:
+        'True, wenn der abgelesene Schülername auf dem Blatt fehlt, unvollständig ist (z. B. nur Vorname oder Initialen) oder handschriftlich schwer lesbar ist; sonst false.',
+    },
+    fach: {
+      type: Type.STRING,
+      description: 'Unterrichtsfach der Prüfung (z. B. Mathematik, Physik, Chemie, Geometrie).',
+    },
+    datum: {
+      type: Type.STRING,
+      description: 'Abgelesenes Prüfungsdatum oder leerer String.',
+    },
+    gesamterzieltePunkte: {
+      type: Type.NUMBER,
+      description: 'Summe aller erzielten Punkte über sämtliche Aufgaben.',
+    },
+    gesamtmaximalPunkte: {
+      type: Type.NUMBER,
+      description: 'Summe aller maximal erreichbaren Punkte über sämtliche Aufgaben.',
+    },
+    note: {
+      type: Type.STRING,
+      description:
+        'Schweizer Schulnote zwischen 1.0 und 6.0 auf eine Dezimalstelle gerundet (Formel: 5 * (gesamterzieltePunkte / gesamtmaximalPunkte) + 1).',
+    },
+    aufgaben: {
+      type: Type.ARRAY,
+      description: 'Vollständige Liste aller bewerteten Aufgaben der Prüfung.',
+      items: {
+        type: Type.OBJECT,
+        properties: {
+          aufgabeId: {
+            type: Type.STRING,
+            description: 'Eindeutige Aufgabennummer (z. B. "1", "2", "3a").',
+          },
+          titel: {
+            type: Type.STRING,
+            description: 'Lesbarer Titel der Aufgabe (z. B. "Aufgabe 1").',
+          },
+          schuelerAntwort: {
+            type: Type.STRING,
+            description:
+              'Buchstaben- und zeichengetreue Transkription des gesamten handschriftlichen Lösungswegs dieser Aufgabe. Unleserliche Zeichen als [?] markieren.',
+          },
+          erzieltePunkte: {
+            type: Type.NUMBER,
+            description: 'Exakte Summe der erreichtePunkte aller schritte dieser Aufgabe.',
+          },
+          maximalPunkte: {
+            type: Type.NUMBER,
+            description: 'Exakte Summe der maximalPunkte aller schritte dieser Aufgabe.',
+          },
+          status: {
+            type: Type.STRING,
+            enum: ['Korrekt', 'Folgefehler', 'Fehler'],
+            description:
+              '"Korrekt" bei voller Punktzahl ohne Fehler, "Folgefehler" wenn ein Folgefehler vorliegt, sonst "Fehler".',
+          },
+          lehrerKommentar: {
+            type: Type.STRING,
+            description:
+              'Prägnanter, konstruktiver Kommentar zur Gesamtlösung dieser Aufgabe in Schweizer Hochdeutsch (immer "ss" statt Eszett).',
+          },
+          schritte: {
+            type: Type.ARRAY,
+            description: 'Zerlegung des Lösungswegs in einzelne bewertbare Teilschritte.',
+            items: {
+              type: Type.OBJECT,
+              properties: {
+                schrittIndex: {
+                  type: Type.INTEGER,
+                  description: 'Fortlaufende Nummer des Teilschritts ab 1.',
+                },
+                schrittText: {
+                  type: Type.STRING,
+                  description:
+                    'Wörtliche Transkription dieses einzelnen Rechen- oder Lösungsschritts (unleserliche Stellen als [?] markieren).',
+                },
+                istKorrekt: {
+                  type: Type.BOOLEAN,
+                  description:
+                    'True, wenn dieser Schritt fachlich korrekt ist oder ein mathematisch konsistenter Folgefehler ist; sonst false.',
+                },
+                fehlerTyp: {
+                  type: Type.STRING,
+                  enum: ['KeinFehler', 'Rechenfehler', 'Folgefehler', 'SonstigerFehler'],
+                  description: 'Klassifikation des Schritts.',
+                },
+                erreichtePunkte: {
+                  type: Type.NUMBER,
+                  description:
+                    'Erreichte Punkte für diesen Teilschritt (in 0.5er- oder 1.0er-Schritten, zwischen 0 und maximalPunkte). Bei Unsicherheit dennoch besten Schätzwert vergeben.',
+                },
+                maximalPunkte: {
+                  type: Type.NUMBER,
+                  description: 'Maximal mögliche Punkte für diesen Teilschritt.',
+                },
+                begruendung: {
+                  type: Type.STRING,
+                  description:
+                    'Klare fachliche Begründung der Punktevergabe (bei Folgefehlern mit expliziter Nachrechnung des übernommenen Zwischenwerts).',
+                },
+                istUnsicher: {
+                  type: Type.BOOLEAN,
+                  description:
+                    'True NUR dann, wenn Handschrift unleserlich ([?]), ein alternativer Lösungsweg mehrdeutig bepunktbar ist, ein Folgefehler die Aufgabe stark vereinfacht oder die Zuordnung unklar ist.',
+                },
+                unsicherheitsGrund: {
+                  type: Type.STRING,
+                  description:
+                    'Falls istUnsicher=true: Konkreter 1-Satz-Hinweis für die Lehrperson, was genau geprüft werden muss und welche Annahme vorläufig getroffen wurde. Falls istUnsicher=false: leerer String "".',
+                },
+              },
+              required: [
+                'schrittIndex',
+                'schrittText',
+                'istKorrekt',
+                'fehlerTyp',
+                'erreichtePunkte',
+                'maximalPunkte',
+                'begruendung',
+                'istUnsicher',
+                'unsicherheitsGrund',
+              ],
+            },
+          },
+        },
+        required: [
+          'aufgabeId',
+          'titel',
+          'schuelerAntwort',
+          'erzieltePunkte',
+          'maximalPunkte',
+          'status',
+          'lehrerKommentar',
+          'schritte',
+        ],
+      },
+    },
+    schuelerFeedback: {
+      type: Type.OBJECT,
+      properties: {
+        staerken: {
+          type: Type.ARRAY,
+          items: { type: Type.STRING },
+          description: '2 bis 3 konkrete fachliche Stärken aus dieser Prüfung.',
+        },
+        schwaechen: {
+          type: Type.ARRAY,
+          items: { type: Type.STRING },
+          description: '1 bis 3 konkrete Verbesserungspotenziale.',
+        },
+        hilfreicherTipp: {
+          type: Type.STRING,
+          description: 'Direkt umsetzbarer Lerntipp für die Schülerin / den Schüler (Du-Form).',
+        },
+        uebungsEmpfehlung: {
+          type: Type.STRING,
+          description: 'Konkrete Empfehlung, welcher Aufgabentyp geübt werden sollte.',
+        },
+      },
+      required: ['staerken', 'schwaechen', 'hilfreicherTipp', 'uebungsEmpfehlung'],
+    },
+  },
+  required: [
+    'schuelerName',
+    'istNameUnsicher',
+    'fach',
+    'datum',
+    'gesamterzieltePunkte',
+    'gesamtmaximalPunkte',
+    'note',
+    'aufgaben',
+    'schuelerFeedback',
+  ],
+};
+
+export function getSubjectFocusInstruction(subject?: string): string {
+  const norm = (subject || '').toLowerCase();
+  if (norm.includes('physik')) {
+    return 'FACHFOKUS PHYSIK: Achte besonders auf korrekte physikalische Formeln, Einheitenumrechnungen, Grössenordnungen und Vorzeichen. Fehlt im Endresultat nur die physikalische Einheit bei ansonsten perfektem Rechenweg, ziehe maximal 0.5 Punkte im letzten Schritt ab.';
+  }
+  if (norm.includes('chemie')) {
+    return 'FACHFOKUS CHEMIE: Achte besonders auf korrekt ausgeglichene Reaktionsgleichungen (Stöchiometrie), Ladungszahlen, Stoffmengenverhältnisse und präzise Fachbegriffe.';
+  }
+  if (norm.includes('geometrie')) {
+    return 'FACHFOKUS GEOMETRIE: Achte besonders auf korrekte geometrische Sätze (z. B. Pythagoras, Strahlensätze, Winkelsummen), nachvollziehbare Konstruktions- oder Berechnungsschritte und korrekte Massangaben.';
+  }
+  if (norm.includes('biologie')) {
+    return 'FACHFOKUS BIOLOGIE: Achte besonders auf präzise biologische Fachterminologie, korrekte Darstellung biologischer Prozesse, Ursache-Wirkungs-Zusammenhänge und vollständige Beschriftungen.';
+  }
+  if (norm.includes('informatik') || norm.includes('ict')) {
+    return 'FACHFOKUS INFORMATIK / ICT: Achte besonders auf algorithmische Korrektheit, Kontrollstrukturen, Randfälle und Datenstrukturen. Bewerte bei handschriftlichem Code kleinere Syntax-Ungenauigkeiten nachsichtig, sofern die Programmlogik stimmt.';
+  }
+  if (norm.includes('wirtschaft') || norm.includes('recht')) {
+    return 'FACHFOKUS WIRTSCHAFT & RECHT: Achte besonders auf präzise ökonomische und juristische Fachbegriffe, korrekte Buchungssätze/Kennzahlen und eine schlüssige, fallbezogene Argumentation.';
+  }
+  if (
+    norm.includes('sprache') ||
+    norm.includes('deutsch') ||
+    norm.includes('englisch') ||
+    norm.includes('franz')
+  ) {
+    return 'FACHFOKUS SPRACHE: Achte besonders auf inhaltliche Vollständigkeit, Textverständnis, Kohärenz, Argumentationsstruktur sowie Grammatik, Ausdruck und Orthographie.';
+  }
+  return 'FACHFOKUS MATHEMATIK: Achte besonders auf äquivalente Gleichungsumformungen, Vorzeichenregeln, Klammerauflösungen und eine lückenlose Überprüfung von Folgefehlern mit dem fehlerhaften Zwischenwert.';
+}
+
+// System prompt instructing Gemini 3.8 Flash on 3-tier hierarchy, diplomatic OCR, Folgefehler math, Swiss orthography, and calibrated uncertainty
+const SYSTEM_PROMPT = `
+Du bist eine erfahrene Schweizer Lehrperson und ein hochpräzises KI-Korrektursystem für handschriftliche Prüfungen.
+Deine Aufgabe ist es, die eingereichte Schülerarbeit anhand der Referenzunterlagen Schritt für Schritt zu transkribieren, fair zu bepunkten und pädagogisch wertvolles Feedback zu erstellen.
+
+HIERARCHIE DER REFERENZUNTERLAGEN:
+Falls mehrere Referenzblöcke vor der Schülerprüfung bereitgestellt werden, gewichte sie in dieser Reihenfolge:
+1. VORLAGENPRÜFUNG (falls vorhanden): Verbindlich für die offizielle Aufgabenstellung, Nummerierung und maximale Punktzahl pro Aufgabe.
+2. MUSTERLÖSUNG / ERWARTUNGSHORIZONT: Massgeblich für die korrekten Lösungswege, Zwischenergebnisse und die Punkteverteilung.
+3. UNTERRICHTSMATERIAL & BEWERTUNGSHINWEISE (falls vorhanden): Spezifische Vorgaben der Lehrperson zur Strenge, Teilpunktevergabe oder alternativen Lösungswegen.
+
+SPRACH- UND SCHREIBREGELN (SCHWEIZER HOCHDEUTSCH):
+- Verwende in sämtlichen Textfeldern (begruendung, lehrerKommentar, unsicherheitsGrund, schuelerFeedback) ausnahmslos Schweizer Hochdeutsch (de-CH).
+- Schreibe IMMER "ss" anstelle des Eszett (z. B. "gross", "Massstab", "schliesslich", "heisst"). Verwende NIEMALS das Zeichen "\u00df".
+- Formuliere das schuelerFeedback motivierend und direkt an die Schülerin / den Schüler gerichtet (respektvolle "Du"-Form).
+
+ZWEI-PHASEN-PROTOKOLL FÜR HÖCHSTE PRÄZISION:
+
+PHASE 1 — DIPLOMATISCHE TRANSKRIPTION & NAMENSERKENNUNG (KEIN AUTOCOMPLETE AUS DER MUSTERLÖSUNG!):
+1. Lies zuerst ausschliesslich die Handschrift auf dem Schülerblatt (über alle hochgeladenen Seiten hinweg).
+2. Lies den Namen der Schülerin / des Schülers ab ("schuelerName"). Ist der Name gar nicht vorhanden, nur ein unklarer Spitzname/Vorname oder handschriftlich unsicher lesbar, setze "istNameUnsicher": true.
+3. Transkribiere in "schuelerAntwort" und "schrittText" exakt das, was die Schülerin oder der Schüler tatsächlich geschrieben hat – inklusive aller Rechenfehler, Vorzeichenfehler oder unvollständiger Ansätze.
+4. VERBOT VON KONTEXT-RATEN: Ergänze oder korrigiere NIEMALS unleserliche Ziffern oder Vorzeichen stillschweigend anhand der Musterlösung!
+5. Ist eine Ziffer, ein Vorzeichen (+ / -), ein Exponent oder ein Wort schwer lesbar, überschrieben oder mehrdeutig, markiere die Stelle im Transkript sichtbar mit "[?]" (z. B. "4x - [?] = 16" oder "x = 4 [oder 9?]").
+6. Durchgestrichene Notizen werden ignoriert, ausser es ist unklar, ob eine Passage absichtlich durchgestrichen wurde.
+
+PHASE 2 — SCHRITTWEISE BEWERTUNG, TEILPUNKTE & FOLGEFEHLER:
+1. Vollständigkeit: Bewerte JEDE Aufgabe der Prüfung. Wenn eine Aufgabe auf dem Schülerblatt leer gelassen wurde, erstelle dennoch das Aufgaben-Objekt mit schuelerAntwort: "Keine Antwort vorhanden", erzieltePunkte: 0, status: "Fehler" und einem einzelnen Schritt (schrittIndex: 1, schrittText: "Keine Bearbeitung erkennbar", istKorrekt: false, fehlerTyp: "SonstigerFehler", erreichtePunkte: 0, maximalPunkte: <Maximalpunkte der Aufgabe>, istUnsicher: false, unsicherheitsGrund: "").
+2. Mathematische Punktekonsistenz:
+   - Zerlege jede Aufgabe in sinnvolle Teilschritte ("schritte") in 0.5er- oder 1.0er-Punkteschritten.
+   - Die Summe aller "schritte.maximalPunkte" einer Aufgabe MUSS exakt "aufgabe.maximalPunkte" ergeben.
+   - Die Summe aller "schritte.erreichtePunkte" einer Aufgabe MUSS exakt "aufgabe.erzieltePunkte" ergeben.
+3. Folgefehler (Carry-Over Errors) — ZWINGENDE NACHRECHNUNG:
+   - Macht die Schülerin / der Schüler in Schritt N einen Rechen- oder Vorzeichenfehler, erhält Schritt N Punktabzug (fehlerTyp: "Rechenfehler", istKorrekt: false).
+   - Rechne anschliessend alle folgenden Schritte (N+1, N+2, ...) aktiv mit dem FEHLERHAFTEN Zwischenwert der Schülerin / des Schülers durch!
+   - Wurde mit diesem falschen Zwischenwert mathematisch/logisch korrekt weitergerechnet, vergibst du für den Folgeschritt die VOLLEN Punkte dieses Teilschritts (istKorrekt: true, fehlerTyp: "Folgefehler") und dokumentierst die Nachrechnung in "begruendung" (z. B. "Folgefehler: Mit dem Zwischenergebnis 4x = 16 aus Schritt 1 korrekt durch 4 dividiert (x = 4).").
+
+REGELN FÜR EHRLICHE UNSICHERHEIT ("istUnsicher" & "unsicherheitsGrund"):
+Gib ehrlich zu, wenn eine Stelle menschliches Augenmass erfordert, aber vermeide unnötige Fehlalarme:
+- Setze "istUnsicher": true GENAU DANN, wenn mindestens einer dieser 4 Gründe zutrifft:
+  1. Unklare Handschrift / Scan-Qualität: Ein punkterelevantes Zeichen oder Vorzeichen ist mehrdeutig ("[?]" im Transkript) oder am Bildrand abgeschnitten.
+  2. Alternativer Lösungsweg / Gedankensprung: Die Schülerin / der Schüler nutzt einen gültigen, aber vom Erwartungshorizont abweichenden Rechenweg oder überspringt Zwischenschritte, sodass die Teilpunktevergabe Ermessenssache ist.
+  3. Folgefehler-Grenzfall: Ein früher Fehler vereinfacht die restliche Aufgabe so drastisch (z. B. Multiplikation mit 0), dass volle Folgefehlerpunkte pädagogisch fragwürdig sind.
+  4. Unklare Zuordnung / Korrekturen: Mehrere ungestrichene Lösungsversuche oder unklare Durchstreichungen.
+- WICHTIG — VORLÄUFIGE BEPUNKTUNG BEI UNSICHERHEIT:
+  Vergib bei "istUnsicher": true NIEMALS pauschal 0 Punkte aus Vorsicht! Vergib stattdessen deine fairste vorläufige Punkteschätzung ("erreichtePunkte") und erkläre in "unsicherheitsGrund" in einem präzisen Satz, was unklar ist und wie du vorläufig gewertet hast (z. B. "Ziffer nach dem Gleichheitszeichen schwer lesbar ('16' oder '10'); vorläufig als '16' mit 2 Punkten gewertet.").
+- Setze "istUnsicher": false (und "unsicherheitsGrund": ""), wenn die Schrift trotz normaler Schüler-Unordentlichkeit eindeutig lesbar ist und die Punktevergabe nach Musterlösung klar feststeht.
+
+REFERENZBEISPIEL FÜR KONSISTENTE PUNKTESUMMEN:
+- Aufgabe 1 (maximalPunkte: 5, erzieltePunkte: 4, status: "Folgefehler"):
+  - Schritt 1: schrittText: "4x = 16", erreichtePunkte: 0, maximalPunkte: 1, istKorrekt: false, fehlerTyp: "Rechenfehler", istUnsicher: false, unsicherheitsGrund: ""
+  - Schritt 2: schrittText: "x = 16 / 4", erreichtePunkte: 2, maximalPunkte: 2, istKorrekt: true, fehlerTyp: "Folgefehler", istUnsicher: false, unsicherheitsGrund: ""
+  - Schritt 3: schrittText: "x = 4", erreichtePunkte: 2, maximalPunkte: 2, istKorrekt: true, fehlerTyp: "Folgefehler", istUnsicher: false, unsicherheitsGrund: ""
+  (Summe der Schritte: 0 + 2 + 2 = 4 erzieltePunkte von 1 + 2 + 2 = 5 maximalPunkte)
+`;
+
 export async function runLiveGeminiCorrection(
   studentExamImageBase64: string,
-  rubric: string | { mimeType: string; data: string },
-  modelName: 'gemini-3.5-flash' | 'gemini-3.1-pro-preview' = 'gemini-3.5-flash',
+  rubric: ReferenceMaterialInput,
+  modelName: string = DEFAULT_GEMINI_MODEL,
   customApiKey?: string,
   studentMimeType: string = 'image/jpeg',
-  predefinedTasks?: PredefinedTask[]
+  predefinedTasks?: PredefinedTask[],
+  subject?: string,
+  materialOptions?: CorrectionMaterialOptions
 ): Promise<ExamCorrectionResult> {
   const apiKey = customApiKey || process.env.GEMINI_API_KEY;
   if (!apiKey) {
     throw new Error('GEMINI_API_KEY is not defined in environment variables.');
   }
 
-  // Initialize the official Google Gen AI SDK
   const ai = new GoogleGenAI({ apiKey });
 
   try {
     const contents: (string | { inlineData: { mimeType: string; data: string } })[] = [];
 
-    // Add student's written response (Base64 Image/PDF)
+    // TIER 1: Optional Blank Exam Template (Vorlagenprüfung)
+    if (materialOptions?.examTemplate) {
+      contents.push(
+        '=== REFERENZSTUFE 1: VORLAGENPRÜFUNG / OFFIZIELLES AUFGABENBLATT (VERBINDLICH FÜR AUFGABENSTELLUNG & MAXIMALPUNKTE) ==='
+      );
+      appendReferenceMaterialToContents(contents, materialOptions.examTemplate);
+    }
+
+    // TIER 2: Master Rubric (Musterlösung / Erwartungshorizont)
+    contents.push(
+      '=== REFERENZSTUFE 2: OFFIZIELLER ERWARTUNGSHORIZONT / MUSTERLÖSUNG (MASSGEBLICHE BEWERTUNGSREFERENZ) ==='
+    );
+    appendReferenceMaterialToContents(contents, rubric);
+
+    // TIER 3: Optional Teacher Grading Notes / Teaching Material (Unterrichtsmaterial & Bewertungshinweise)
+    if (materialOptions?.gradingNotes && materialOptions.gradingNotes.trim().length > 0) {
+      contents.push(
+        '=== REFERENZSTUFE 3: ZUSÄTZLICHES UNTERRICHTSMATERIAL & BEWERTUNGSHINWEISE DER LEHRPERSON ==='
+      );
+      contents.push(materialOptions.gradingNotes.trim());
+    }
+
+    // TIER 4: Student Exam Pages (Single or Multi-Page)
+    const extraPages = materialOptions?.additionalStudentPages || [];
+    const totalPages = 1 + extraPages.length;
+    contents.push(
+      `=== ZU KORRIGIERENDE HANDSCHRIFTLICHE SCHÜLERPRÜFUNG (${totalPages} ${totalPages === 1 ? 'SEITE' : 'SEITEN'} — ZUERST WÖRTLICH TRANSKRIBIEREN, DANN BEWERTEN) ===`
+    );
+    if (totalPages > 1) {
+      contents.push('--- Schülerprüfung Seite 1 ---');
+    }
     contents.push({
       inlineData: {
         mimeType: studentMimeType,
@@ -169,39 +454,37 @@ export async function runLiveGeminiCorrection(
       },
     });
 
-    // Add rubric context (Text or Image)
-    if (typeof rubric === 'string') {
-      contents.push(
-        `Hier ist der Erwartungshorizont/Musterlösung für diese Prüfung:\n${rubric}\n\nBitte korrigiere die hochgeladene Schülerprüfung anhand dieser Vorgaben und liefere das geforderte JSON.`
-      );
-    } else {
+    extraPages.forEach((page, idx) => {
+      contents.push(`--- Schülerprüfung Seite ${idx + 2} ---`);
       contents.push({
         inlineData: {
-          mimeType: rubric.mimeType,
-          data: rubric.data,
+          mimeType: page.mimeType,
+          data: page.data,
         },
       });
-      contents.push(
-        `Das oben stehende zweite Bild ist der Erwartungshorizont/Musterlösung für diese Prüfung. Bitte korrigiere die hochgeladene Schülerprüfung anhand dieses Bildes und liefere das geforderte JSON.`
-      );
-    }
+    });
 
-    let finalPrompt = SYSTEM_PROMPT;
+    contents.push(
+      'Bitte führe nun Phase 1 (diplomatische Transkription über alle Seiten) und Phase 2 (schrittweise Bewertung inklusive Folgefehler-Prüfung und Unsicherheits-Kennzeichnung) für diese Schülerprüfung durch.'
+    );
+
+    const subjectFocus = getSubjectFocusInstruction(subject);
+    let finalPrompt = `${SYSTEM_PROMPT}\n\n${subjectFocus}`;
+
     if (predefinedTasks && predefinedTasks.length > 0) {
-      finalPrompt = `${SYSTEM_PROMPT}
+      const totalTemplatePoints = predefinedTasks.reduce((sum, t) => sum + t.maxPoints, 0);
+      finalPrompt = `${finalPrompt}
 
-WICHTIGE ZUSATZVORGABE (STRIKTES TEMPLATE):
-Die zu korrigierende Prüfung hat ein vordefiniertes Aufgaben-Template. Du MUSST die Schülerantworten exakt nach diesem Aufgaben-Template bewerten und strukturieren.
-Erstelle im "aufgaben" Array in deiner JSON-Rückgabe exakt ein Objekt pro vordefinierter Aufgabe mit der entsprechenden "aufgabeId", dem "titel" und der exakten "maximalPunkte".
-Verwende exakt folgende Aufgaben und deren Punktelimits:
-${predefinedTasks.map((t) => `- Aufgabe ID: "${t.taskId}", Titel: "${t.title}", Maximalpunkte: ${t.maxPoints}`).join('\n')}
+WICHTIGE ZUSATZVORGABE (STRIKTES AUFGABEN-TEMPLATE):
+Die zu korrigierende Prüfung hat ein verbindliches Aufgaben-Template. Du MUSST die Schülerantworten exakt nach diesem Template strukturieren:
+${predefinedTasks.map((t) => `- aufgabeId: "${t.taskId}", titel: "${t.title}", maximalPunkte: ${t.maxPoints}`).join('\n')}
 
-Regeln für dieses Template:
-1. Erstelle KEINE Aufgaben in deiner JSON-Rückgabe, die nicht in dieser Liste aufgeführt sind.
-2. Weiche NICHT von der vorgegebenen "aufgabeId", dem "titel" und der "maximalPunkte" ab.
-3. Die Summe aller "maximalPunkte" im JSON MUSS exakt ${predefinedTasks.reduce((sum, t) => sum + t.maxPoints, 0)} entsprechen.
-4. Die erreichte Punktzahl ("erzieltePunkte") darf für jede Aufgabe niemals grösser sein als die vorgegebene "maximalPunkte" für diese Aufgabe.
-5. Die erreichten Punkte der Teilschritte ("schritte.erreichtePunkte") in einer Aufgabe müssen in der Summe exakt den "erzieltePunkte" der Aufgabe entsprechen und dürfen deren "maximalPunkte" nicht überschreiten.
+Verbindliche Template-Regeln:
+1. Erstelle im Array "aufgaben" exakt ein Objekt pro aufgelisteter Aufgabe in derselben Reihenfolge.
+2. Übernimm "aufgabeId", "titel" und "maximalPunkte" unverändert.
+3. Die Summe aller "maximalPunkte" im JSON MUSS exakt ${totalTemplatePoints} ergeben.
+4. Für jede Aufgabe muss die Summe der "schritte.maximalPunkte" exakt der vorgegebenen "maximalPunkte" der Aufgabe entsprechen.
+5. Wurde eine Aufgabe aus dem Template auf dem Schülerblatt nicht bearbeitet, erstelle sie mit erzieltePunkte: 0, status: "Fehler" und schuelerAntwort: "Keine Antwort vorhanden".
 `;
     }
 
@@ -211,40 +494,155 @@ Regeln für dieses Template:
       config: {
         systemInstruction: finalPrompt,
         responseMimeType: 'application/json',
-        temperature: 0.0, // Set to 0.0 for maximum determinism and consistency
-        seed: 42, // Static seed to ensure highly reproducible sampling paths
+        responseSchema: CORRECTION_RESPONSE_SCHEMA,
+        thinkingConfig: {
+          thinkingLevel: ThinkingLevel.HIGH,
+        },
+        temperature: 0.0,
+        seed: 42,
       },
     });
 
-    const responseText = response.text || '';
-
-    // Extract only the matching JSON object payload using balanced brace counting
-    const startIdx = responseText.indexOf('{');
-    let cleanJson = responseText;
-
-    if (startIdx !== -1) {
-      let braceCount = 0;
-      for (let i = startIdx; i < responseText.length; i++) {
-        const char = responseText[i];
-        if (char === '{') {
-          braceCount++;
-        } else if (char === '}') {
-          braceCount--;
-          if (braceCount === 0) {
-            cleanJson = responseText.substring(startIdx, i + 1);
-            break;
-          }
-        }
-      }
-    } else {
-      cleanJson = responseText
-        .replace(/```json/g, '')
-        .replace(/```/g, '')
-        .trim();
+    const responseText = (response.text || '').trim();
+    if (!responseText) {
+      throw new Error('Leere Antwort vom KI-Modell erhalten.');
     }
-    return JSON.parse(cleanJson) as ExamCorrectionResult;
+
+    return JSON.parse(responseText) as ExamCorrectionResult;
   } catch (error) {
     console.error('Error during live Gemini correction call:', error);
     throw error;
+  }
+}
+
+export interface ExamCandidateForMatching {
+  examId: string;
+  examTitle: string;
+  subject: string;
+  classId: string;
+  className: string;
+  taskTitles: string[];
+  studentNames: string[];
+}
+
+export interface ScanAutoIdentificationResult {
+  matchedExamId: string | null;
+  isExamMatchCertain: boolean;
+  extractedStudentName: string;
+  isStudentNameCertain: boolean;
+}
+
+const SCAN_IDENTIFICATION_SCHEMA: Schema = {
+  type: Type.OBJECT,
+  properties: {
+    matchedExamId: {
+      type: Type.STRING,
+      description:
+        'Die examId der am besten passenden Prüfung aus der Kandidatenliste (oder leerer String "", falls keine Prüfung plausibel passt).',
+    },
+    isExamMatchCertain: {
+      type: Type.BOOLEAN,
+      description:
+        'True NUR dann, wenn Titel, Klasse, Fach, Aufgabenstruktur oder Schülernamen auf dem Blatt zweifelsfrei zu genau einer Prüfung aus der Kandidatenliste passen; sonst false.',
+    },
+    extractedStudentName: {
+      type: Type.STRING,
+      description:
+        'Der auf dem Prüfungsblatt abgelesene Name der Schülerin / des Schülers (oder leerer String "").',
+    },
+    isStudentNameCertain: {
+      type: Type.BOOLEAN,
+      description:
+        'True, wenn der abgelesene Schülername eindeutig lesbar ist und klar einem Namen aus der Klassenliste zugeordnet werden kann; sonst false.',
+    },
+  },
+  required: ['matchedExamId', 'isExamMatchCertain', 'extractedStudentName', 'isStudentNameCertain'],
+};
+
+/**
+ * Fast vision pass used by the Global QR Mobile Relay to automatically identify which Exam/Class
+ * and which Student a photographed exam belongs to.
+ */
+export async function identifyExamAndStudentFromScan(
+  pages: { mimeType: string; data: string }[],
+  candidates: ExamCandidateForMatching[]
+): Promise<ScanAutoIdentificationResult> {
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey || candidates.length === 0) {
+    return {
+      matchedExamId: candidates[0]?.examId || null,
+      isExamMatchCertain: candidates.length === 1,
+      extractedStudentName: '',
+      isStudentNameCertain: false,
+    };
+  }
+
+  const ai = new GoogleGenAI({ apiKey });
+
+  try {
+    const contents: (string | { inlineData: { mimeType: string; data: string } })[] = [];
+
+    pages.slice(0, 2).forEach((p, idx) => {
+      contents.push(`--- Gescannte Prüfungsseite ${idx + 1} ---`);
+      contents.push({
+        inlineData: {
+          mimeType: p.mimeType,
+          data: p.data,
+        },
+      });
+    });
+
+    const candidateSummary = candidates
+      .map(
+        (c) =>
+          `- examId: "${c.examId}" | Titel: "${c.examTitle}" | Fach: "${c.subject}" | Klasse: "${c.className}" | Aufgaben: [${c.taskTitles.join(', ')}] | Schüler der Klasse: [${c.studentNames.join(', ')}]`
+      )
+      .join('\n');
+
+    contents.push(`
+Ordne dieses abfotografierte Prüfungsblatt der passenden Prüfung und Schülerin / dem passenden Schüler zu.
+
+VERFÜGBARE PRÜFUNGEN DER LEHRPERSON:
+${candidateSummary}
+
+REGELN:
+1. Lies den handschriftlichen Schülernamen auf dem Blatt ab ("extractedStudentName").
+2. Prüfe anhand des Prüfungstitels, des Fachs, der Klasse, der Aufgaben auf dem Blatt UND anhand der Frage, in welcher Klasse der abgelesene Schülername vorkommt, welche "examId" vorliegt.
+3. Wenn es nur 1 verfügbare Prüfung gibt und das Fach/Thema passt, wähle diese examId mit isExamMatchCertain: true.
+4. Wenn mehrere Prüfungen in Frage kommen und unklar ist, zu welcher Klasse/Prüfung das Blatt gehört, wähle die wahrscheinlichste examId als Vorschlag, setze aber ZWINGEND isExamMatchCertain: false!
+5. Wenn der Schülername unleserlich ist, fehlt oder nicht eindeutig zu einem Namen der Klassenliste passt, setze isStudentNameCertain: false.
+`);
+
+    const response = await ai.models.generateContent({
+      model: DEFAULT_GEMINI_MODEL,
+      contents,
+      config: {
+        responseMimeType: 'application/json',
+        responseSchema: SCAN_IDENTIFICATION_SCHEMA,
+        thinkingConfig: {
+          thinkingLevel: ThinkingLevel.LOW,
+        },
+        temperature: 0.0,
+        seed: 42,
+      },
+    });
+
+    const parsed = JSON.parse((response.text || '{}').trim());
+    const validExam = candidates.find((c) => c.examId === parsed.matchedExamId);
+
+    return {
+      matchedExamId: validExam ? validExam.examId : candidates[0]?.examId || null,
+      isExamMatchCertain: Boolean(validExam && parsed.isExamMatchCertain),
+      extractedStudentName: parsed.extractedStudentName || '',
+      isStudentNameCertain: Boolean(parsed.isStudentNameCertain),
+    };
+  } catch (error) {
+    console.error('Error in identifyExamAndStudentFromScan:', error);
+    return {
+      matchedExamId: candidates[0]?.examId || null,
+      isExamMatchCertain: false,
+      extractedStudentName: '',
+      isStudentNameCertain: false,
+    };
   }
 }
