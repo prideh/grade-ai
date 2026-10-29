@@ -20,7 +20,7 @@ test.describe('Full E2E Teacher & Mobile QR Relay Workflows', () => {
       .getByLabel(/Passwort/i)
       .first()
       .fill(teacherPassword);
-    await page.getByRole('button', { name: /Registrieren|Konto erstellen/i }).click();
+    await page.getByRole('button', { name: /Registrieren|Konto erstellen|Account erstellen/i }).click();
 
     await expect(page).toHaveURL(/\/dashboard/, { timeout: 15000 });
     await expect(page.getByText('Prüfungskorrektur starten')).toBeVisible();
@@ -132,8 +132,9 @@ test.describe('Full E2E Teacher & Mobile QR Relay Workflows', () => {
 
     await expect(page).toHaveURL(/\/dashboard/, { timeout: 15000 });
 
-    // Open the first seeded submission (Max Mustermann) in the Correction Workspace
-    const openWorkspaceBtn = page.getByRole('button', { name: /Workspace öffnen/i }).first();
+    // Open Max Mustermann's seeded submission (has the uncertain KI step) in the Correction Workspace
+    const maxRow = page.getByRole('row', { name: /Max Mustermann/i });
+    const openWorkspaceBtn = maxRow.getByRole('button', { name: /Workspace öffnen/i });
     await expect(openWorkspaceBtn).toBeVisible();
     await openWorkspaceBtn.click();
 
