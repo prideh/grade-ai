@@ -42,7 +42,7 @@ test.describe('Smoke Tests — Critical Availability, Security Boundaries & Orth
     const res = await page.goto('/scan/invalid-smoke-token');
     expect(res?.status()).toBe(200);
     await expect(
-      page.getByText(/QR-Code ungültig oder abgelaufen|nicht verifiziert/i).first()
+      page.getByText(/QR-Code ist abgelaufen oder ungültig|nicht verifiziert/i).first()
     ).toBeVisible();
   });
 });
