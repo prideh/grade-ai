@@ -47,6 +47,7 @@ import GroupIcon from '@mui/icons-material/Group';
 import ArrowForwardIcon from '@mui/icons-material/ArrowForward';
 import { BarChart } from '@mui/x-charts/BarChart';
 import DashboardLayout from '@/components/DashboardLayout';
+import ErrorState from '@/components/ErrorState';
 
 interface ClassData {
   id: string;
@@ -319,6 +320,32 @@ export default function ClassDetailsPage() {
     );
   }
 
+  if (error) {
+    return (
+      <DashboardLayout>
+        <Box sx={{ display: 'flex', flexDirection: 'column', gap: '32px' }}>
+          <Link href="/classes" passHref style={{ textDecoration: 'none' }}>
+            <Button
+              startIcon={<ArrowBackIcon />}
+              sx={{ textTransform: 'none', fontWeight: 650, color: 'text.secondary' }}
+            >
+              Zurück zur Klassenübersicht
+            </Button>
+          </Link>
+          <ErrorState
+            title="Fehler beim Laden der Klassendetails"
+            message={error}
+            onRetry={() => {
+              setLoading(true);
+              setError('');
+              fetchData();
+            }}
+          />
+        </Box>
+      </DashboardLayout>
+    );
+  }
+
   // Pre-process grade distribution for MUI Charts
   const distributionKeys = ['1.0-2.0', '2.0-3.0', '3.0-4.0', '4.0-5.0', '5.0-6.0'];
   const chartData = stats?.gradeDistribution
@@ -388,12 +415,6 @@ export default function ClassDetailsPage() {
             </Stack>
           </Box>
         </Stack>
-
-        {error && (
-          <Alert severity="error" sx={{ borderRadius: '12px' }}>
-            {error}
-          </Alert>
-        )}
 
         {/* 1. Statistics Summary Grid */}
         <Grid container spacing={3}>

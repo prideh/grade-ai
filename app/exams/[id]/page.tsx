@@ -46,6 +46,7 @@ import PlayArrowIcon from '@mui/icons-material/PlayArrow';
 import QrCodeScannerIcon from '@mui/icons-material/QrCodeScanner';
 import { BarChart } from '@mui/x-charts/BarChart';
 import DashboardLayout from '@/components/DashboardLayout';
+import ErrorState from '@/components/ErrorState';
 import QrScannerDialog from '@/components/QrScannerDialog';
 import {
   GRADING_FORMULA_OPTIONS,
@@ -287,6 +288,32 @@ export default function ExamDetailsPage() {
     );
   }
 
+  if (error) {
+    return (
+      <DashboardLayout>
+        <Box sx={{ display: 'flex', flexDirection: 'column', gap: '32px' }}>
+          <Link href="/exams" passHref style={{ textDecoration: 'none' }}>
+            <Button
+              startIcon={<ArrowBackIcon />}
+              sx={{ textTransform: 'none', fontWeight: 650, color: 'text.secondary' }}
+            >
+              Zurück zur Prüfungsübersicht
+            </Button>
+          </Link>
+          <ErrorState
+            title="Fehler beim Laden der Prüfungsdetails"
+            message={error}
+            onRetry={() => {
+              setLoading(true);
+              setError('');
+              fetchData();
+            }}
+          />
+        </Box>
+      </DashboardLayout>
+    );
+  }
+
   // Pre-process grade distribution
   const distributionKeys = ['1.0-2.0', '2.0-3.0', '3.0-4.0', '4.0-5.0', '5.0-6.0'];
   const chartData = stats?.gradeDistribution
@@ -376,12 +403,6 @@ export default function ExamDetailsPage() {
             </Stack>
           </Box>
         </Stack>
-
-        {error && (
-          <Alert severity="error" sx={{ borderRadius: '12px' }}>
-            {error}
-          </Alert>
-        )}
 
         {/* 1. Statistical Aggregates Grid */}
         <Grid container spacing={3}>
@@ -991,136 +1012,145 @@ export default function ExamDetailsPage() {
               </Button>
             </Stack>
 
-            <TableContainer
-              component={Box}
-              sx={{ border: '1px solid #f1f5f9', borderRadius: '8px' }}
-            >
-              <Table>
-                <TableHead sx={{ backgroundColor: '#f8fafc' }}>
-                  <TableRow>
-                    <TableCell sx={{ fontWeight: 'bold' }}>Schüler/in</TableCell>
-                    <TableCell sx={{ fontWeight: 'bold' }}>Status</TableCell>
-                    <TableCell sx={{ fontWeight: 'bold' }}>Punkte</TableCell>
-                    <TableCell sx={{ fontWeight: 'bold' }}>Note</TableCell>
-                    <TableCell sx={{ fontWeight: 'bold' }}>Korrekturdatum</TableCell>
-                    <TableCell sx={{ fontWeight: 'bold', textAlign: 'right' }}>
-                      Korrektur-Aktion
-                    </TableCell>
-                  </TableRow>
-                </TableHead>
-                <TableBody>
-                  {roster.map((student) => {
-                    let statusLabel = 'Ungestartet';
-                    let statusColor: 'default' | 'success' | 'warning' = 'default';
-                    if (student.status === 'COMPLETED') {
-                      statusLabel = 'Abgeschlossen';
-                      statusColor = 'success';
-                    } else if (student.status === 'DRAFT') {
-                      statusLabel = 'Entwurf';
-                      statusColor = 'warning';
-                    }
+            {roster.length === 0 ? (
+              <Typography
+                variant="body2"
+                sx={{ color: 'text.secondary', fontStyle: 'italic', py: 4, textAlign: 'center' }}
+              >
+                Keine Schüler/innen für diese Prüfung gefunden.
+              </Typography>
+            ) : (
+              <TableContainer
+                component={Box}
+                sx={{ border: '1px solid #f1f5f9', borderRadius: '8px' }}
+              >
+                <Table>
+                  <TableHead sx={{ backgroundColor: '#f8fafc' }}>
+                    <TableRow>
+                      <TableCell sx={{ fontWeight: 'bold' }}>Schüler/in</TableCell>
+                      <TableCell sx={{ fontWeight: 'bold' }}>Status</TableCell>
+                      <TableCell sx={{ fontWeight: 'bold' }}>Punkte</TableCell>
+                      <TableCell sx={{ fontWeight: 'bold' }}>Note</TableCell>
+                      <TableCell sx={{ fontWeight: 'bold' }}>Korrekturdatum</TableCell>
+                      <TableCell sx={{ fontWeight: 'bold', textAlign: 'right' }}>
+                        Korrektur-Aktion
+                      </TableCell>
+                    </TableRow>
+                  </TableHead>
+                  <TableBody>
+                    {roster.map((student) => {
+                      let statusLabel = 'Ungestartet';
+                      let statusColor: 'default' | 'success' | 'warning' = 'default';
+                      if (student.status === 'COMPLETED') {
+                        statusLabel = 'Abgeschlossen';
+                        statusColor = 'success';
+                      } else if (student.status === 'DRAFT') {
+                        statusLabel = 'Entwurf';
+                        statusColor = 'warning';
+                      }
 
-                    return (
-                      <TableRow
-                        key={student.studentId}
-                        sx={{ '&:last-child td, &:last-child th': { border: 0 } }}
-                      >
-                        <TableCell sx={{ fontWeight: 600 }}>
-                          <Link
-                            href={`/students/${student.studentId}`}
-                            style={{ textDecoration: 'none', color: '#1b77d1', fontWeight: 700 }}
-                          >
-                            {student.studentName}
-                          </Link>
-                        </TableCell>
-                        <TableCell>
-                          <Chip
-                            label={statusLabel}
-                            size="small"
-                            color={statusColor}
-                            variant={statusColor === 'default' ? 'outlined' : 'filled'}
-                            sx={{ fontWeight: 'bold' }}
-                          />
-                        </TableCell>
-                        <TableCell sx={{ fontWeight: 600 }}>
-                          {student.earnedPoints !== 'N/A'
-                            ? `${student.earnedPoints} / ${exam?.maxPoints}`
-                            : '—'}
-                        </TableCell>
-                        <TableCell>
-                          {student.status === 'COMPLETED' ? (
-                            <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
-                              <Chip
-                                label={student.grade}
-                                size="small"
-                                sx={{
-                                  backgroundColor:
-                                    parseFloat(student.grade) >= 4.0 ? '#1b77d1' : '#dc2626',
-                                  color: '#ffffff',
-                                  fontWeight: 'bold',
-                                  borderRadius: '6px',
-                                }}
-                              />
-                              {(student.uncertainStepsCount ?? 0) > 0 && (
+                      return (
+                        <TableRow
+                          key={student.studentId}
+                          sx={{ '&:last-child td, &:last-child th': { border: 0 } }}
+                        >
+                          <TableCell sx={{ fontWeight: 600 }}>
+                            <Link
+                              href={`/students/${student.studentId}`}
+                              style={{ textDecoration: 'none', color: '#1b77d1', fontWeight: 700 }}
+                            >
+                              {student.studentName}
+                            </Link>
+                          </TableCell>
+                          <TableCell>
+                            <Chip
+                              label={statusLabel}
+                              size="small"
+                              color={statusColor}
+                              variant={statusColor === 'default' ? 'outlined' : 'filled'}
+                              sx={{ fontWeight: 'bold' }}
+                            />
+                          </TableCell>
+                          <TableCell sx={{ fontWeight: 600 }}>
+                            {student.earnedPoints !== 'N/A'
+                              ? `${student.earnedPoints} / ${exam?.maxPoints}`
+                              : '—'}
+                          </TableCell>
+                          <TableCell>
+                            {student.status === 'COMPLETED' ? (
+                              <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
                                 <Chip
-                                  label={`⚠ KI unsicher (${student.uncertainStepsCount})`}
+                                  label={student.grade}
                                   size="small"
                                   sx={{
-                                    backgroundColor: '#fef3c7',
-                                    color: '#b45309',
-                                    border: '1px solid #f59e0b',
-                                    fontWeight: 700,
+                                    backgroundColor:
+                                      parseFloat(student.grade) >= 4.0 ? '#1b77d1' : '#dc2626',
+                                    color: '#ffffff',
+                                    fontWeight: 'bold',
                                     borderRadius: '6px',
                                   }}
                                 />
-                              )}
-                            </Stack>
-                          ) : (
-                            '—'
-                          )}
-                        </TableCell>
-                        <TableCell>{student.date}</TableCell>
-                        <TableCell sx={{ textAlign: 'right' }}>
-                          {student.status !== 'UNSTARTED' ? (
-                            <Link
-                              href={`/correct/${student.submissionId}`}
-                              passHref
-                              style={{ textDecoration: 'none' }}
-                            >
-                              <Button
-                                variant="outlined"
-                                size="small"
-                                sx={{ textTransform: 'none', fontWeight: 600 }}
+                                {(student.uncertainStepsCount ?? 0) > 0 && (
+                                  <Chip
+                                    label={`⚠ KI unsicher (${student.uncertainStepsCount})`}
+                                    size="small"
+                                    sx={{
+                                      backgroundColor: '#fef3c7',
+                                      color: '#b45309',
+                                      border: '1px solid #f59e0b',
+                                      fontWeight: 700,
+                                      borderRadius: '6px',
+                                    }}
+                                  />
+                                )}
+                              </Stack>
+                            ) : (
+                              '—'
+                            )}
+                          </TableCell>
+                          <TableCell>{student.date}</TableCell>
+                          <TableCell sx={{ textAlign: 'right' }}>
+                            {student.status !== 'UNSTARTED' ? (
+                              <Link
+                                href={`/correct/${student.submissionId}`}
+                                passHref
+                                style={{ textDecoration: 'none' }}
                               >
-                                Korrektur bearbeiten
+                                <Button
+                                  variant="outlined"
+                                  size="small"
+                                  sx={{ textTransform: 'none', fontWeight: 600 }}
+                                >
+                                  Korrektur bearbeiten
+                                </Button>
+                              </Link>
+                            ) : (
+                              <Button
+                                variant="contained"
+                                color="success"
+                                size="small"
+                                startIcon={<PlayArrowIcon />}
+                                onClick={() => {
+                                  setQrTargetMode('SUBMISSION');
+                                  setQrStudent({
+                                    id: student.studentId,
+                                    name: student.studentName,
+                                  });
+                                  setQrOpen(true);
+                                }}
+                                sx={{ textTransform: 'none', fontWeight: 700 }}
+                              >
+                                Arbeit einscannen (QR / Datei)
                               </Button>
-                            </Link>
-                          ) : (
-                            <Button
-                              variant="contained"
-                              color="success"
-                              size="small"
-                              startIcon={<PlayArrowIcon />}
-                              onClick={() => {
-                                setQrTargetMode('SUBMISSION');
-                                setQrStudent({
-                                  id: student.studentId,
-                                  name: student.studentName,
-                                });
-                                setQrOpen(true);
-                              }}
-                              sx={{ textTransform: 'none', fontWeight: 700 }}
-                            >
-                              Arbeit einscannen (QR / Datei)
-                            </Button>
-                          )}
-                        </TableCell>
-                      </TableRow>
-                    );
-                  })}
-                </TableBody>
-              </Table>
-            </TableContainer>
+                            )}
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })}
+                  </TableBody>
+                </Table>
+              </TableContainer>
+            )}
           </CardContent>
         </Card>
 

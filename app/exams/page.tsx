@@ -38,6 +38,7 @@ import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome';
 import CloseIcon from '@mui/icons-material/Close';
 import QrCodeScannerIcon from '@mui/icons-material/QrCodeScanner';
 import DashboardLayout from '@/components/DashboardLayout';
+import ErrorState from '@/components/ErrorState';
 import QrScannerDialog from '@/components/QrScannerDialog';
 import {
   GRADING_FORMULA_OPTIONS,
@@ -200,26 +201,24 @@ export default function ExamsPage() {
       ]);
       setError('');
 
-      let loadedClasses: SimpleClass[] = [];
-      if (classesRes.ok) {
-        const classesData = await classesRes.json();
-        loadedClasses = (classesData.classes || []).map(
-          (cls: {
-            id: string;
-            name: string;
-            _count?: { students?: number };
-            totalExams?: number;
-            averageGrade?: string;
-          }) => ({
-            id: cls.id,
-            name: cls.name,
-            studentsCount: cls._count?.students || 0,
-            totalExams: cls.totalExams ?? 0,
-            averageGrade: cls.averageGrade || 'N/A',
-          })
-        );
-        setClasses(loadedClasses);
-      }
+      if (!classesRes.ok) throw new Error('Fehler beim Laden der Klassen.');
+      const classesData = await classesRes.json();
+      const loadedClasses: SimpleClass[] = (classesData.classes || []).map(
+        (cls: {
+          id: string;
+          name: string;
+          _count?: { students?: number };
+          totalExams?: number;
+          averageGrade?: string;
+        }) => ({
+          id: cls.id,
+          name: cls.name,
+          studentsCount: cls._count?.students || 0,
+          totalExams: cls.totalExams ?? 0,
+          averageGrade: cls.averageGrade || 'N/A',
+        })
+      );
+      setClasses(loadedClasses);
 
       if (!examsRes.ok) throw new Error('Fehler beim Laden der Prüfungen.');
       const examsData = await examsRes.json();
@@ -412,7 +411,7 @@ export default function ExamsPage() {
           <Button
             variant="contained"
             startIcon={<AddIcon />}
-            disabled={classes.length === 0}
+            disabled={loading || !!error || classes.length === 0}
             onClick={() => {
               setCreateError('');
               setOpenCreate(true);
@@ -431,373 +430,400 @@ export default function ExamsPage() {
           </Button>
         </Box>
 
-        {error && (
-          <Alert severity="error" sx={{ borderRadius: '12px' }}>
-            {error}
-          </Alert>
-        )}
-
-        {/* Class Selector Deck */}
-        {classes.length > 0 && (
-          <Stack spacing={1.5}>
-            <Typography variant="subtitle2" sx={{ fontWeight: 700, color: 'text.secondary' }}>
-              Wähle eine Klasse, um deren Prüfungen anzuzeigen:
-            </Typography>
-            <Stack
-              direction="row"
-              spacing={2}
-              sx={{
-                overflowX: 'auto',
-                pb: 1.5,
-                pt: 0.5,
-                px: 0.5,
-                '&::-webkit-scrollbar': { height: '6px' },
-                '&::-webkit-scrollbar-thumb': {
-                  backgroundColor: '#cbd5e1',
-                  borderRadius: '3px',
-                },
-              }}
-            >
-              {classes.map((cls) => {
-                const isActive = cls.id === activeClassId;
-                return (
-                  <Card
-                    key={cls.id}
-                    onClick={() => {
-                      setActiveClassId(cls.id);
-                      setSelectedClassId(cls.id);
-                    }}
-                    sx={{
-                      minWidth: '220px',
-                      flexShrink: 0,
-                      borderRadius: '12px',
-                      border: '2px solid',
-                      borderColor: isActive ? '#1b77d1' : '#e2e8f0',
-                      boxShadow: isActive ? '0 10px 20px -10px rgba(27, 119, 209, 0.3)' : 'none',
-                      cursor: 'pointer',
-                      transition: 'all 0.2s ease',
-                      backgroundColor: isActive ? '#f0f7ff' : '#ffffff',
-                      '&:hover': {
-                        borderColor: '#1b77d1',
-                        transform: 'translateY(-2px)',
-                        boxShadow: '0 8px 16px -8px rgba(0,0,0,0.1)',
-                      },
-                    }}
-                  >
-                    <CardContent sx={{ p: 2, '&:last-child': { pb: 2 } }}>
-                      <Stack spacing={0.75}>
-                        <Stack direction="row" spacing={0.75} sx={{ alignItems: 'center' }}>
-                          <Typography
-                            variant="subtitle1"
-                            sx={{
-                              fontWeight: 800,
-                              color: isActive ? '#1b77d1' : '#0f172a',
-                              whiteSpace: 'nowrap',
-                              overflow: 'hidden',
-                              textOverflow: 'ellipsis',
-                            }}
-                          >
-                            {cls.name}
-                          </Typography>
-                          {cls.id === defaultClassId && (
-                            <StarIcon sx={{ color: '#eab308', fontSize: '1rem', flexShrink: 0 }} />
-                          )}
-                        </Stack>
-                        <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
-                          <Typography
-                            variant="caption"
-                            sx={{ color: 'text.secondary', fontWeight: 600 }}
-                          >
-                            {cls.studentsCount} Schüler
-                          </Typography>
-                          <Typography variant="caption" sx={{ color: '#cbd5e1' }}>
-                            •
-                          </Typography>
-                          <Typography
-                            variant="caption"
-                            sx={{ color: 'text.secondary', fontWeight: 600 }}
-                          >
-                            {cls.totalExams} {cls.totalExams === 1 ? 'Prüfung' : 'Prüfungen'}
-                          </Typography>
-                        </Stack>
-                        {cls.averageGrade !== 'N/A' && (
-                          <Stack
-                            direction="row"
-                            spacing={0.75}
-                            sx={{ alignItems: 'center', mt: 0.5 }}
-                          >
-                            <Typography
-                              variant="caption"
-                              sx={{ color: 'text.secondary', fontWeight: 600 }}
-                            >
-                              Klassenschnitt:
-                            </Typography>
-                            <Chip
-                              label={cls.averageGrade}
-                              size="small"
-                              sx={{
-                                height: '18px',
-                                fontSize: '0.7rem',
-                                fontWeight: 700,
-                                backgroundColor:
-                                  parseFloat(cls.averageGrade) >= 4.0 ? '#dcfce7' : '#fee2e2',
-                                color: parseFloat(cls.averageGrade) >= 4.0 ? '#15803d' : '#b91c1c',
-                                borderRadius: '4px',
-                              }}
-                            />
-                          </Stack>
-                        )}
-                      </Stack>
-                    </CardContent>
-                  </Card>
-                );
-              })}
-            </Stack>
-          </Stack>
-        )}
-
-        {loading ? (
+        {error ? (
+          <ErrorState
+            title="Fehler beim Laden der Prüfungen"
+            message={error}
+            onRetry={() => {
+              setLoading(true);
+              setError('');
+              fetchData();
+            }}
+          />
+        ) : loading ? (
           <Box sx={{ display: 'flex', justifyContent: 'center', py: 8 }}>
             <CircularProgress />
           </Box>
-        ) : classes.length === 0 ? (
-          <Card
-            sx={{
-              borderRadius: '16px',
-              border: '2px dashed #cbd5e1',
-              boxShadow: 'none',
-              backgroundColor: 'transparent',
-              p: 6,
-              textAlign: 'center',
-            }}
-          >
-            <AssignmentIcon sx={{ fontSize: '4rem', color: '#94a3b8', mb: 2 }} />
-            <Typography variant="h6" sx={{ fontWeight: 700, color: '#475569', mb: 1 }}>
-              Keine Klassen gefunden
-            </Typography>
-            <Typography
-              variant="body2"
-              sx={{ color: 'text.secondary', maxWidth: '400px', mx: 'auto', mb: 3 }}
-            >
-              Erstelle zuerst eine Schulklasse in der Klassenverwaltung, um Prüfungen für sie
-              anlegen zu können.
-            </Typography>
-            <Link href="/classes" passHref style={{ textDecoration: 'none' }}>
-              <Button
-                variant="contained"
-                startIcon={<AddIcon />}
-                sx={{ borderRadius: '8px', textTransform: 'none', fontWeight: 650 }}
-              >
-                Klassenverwaltung öffnen
-              </Button>
-            </Link>
-          </Card>
-        ) : filteredExams.length === 0 ? (
-          <Card
-            sx={{
-              borderRadius: '16px',
-              border: '2px dashed #cbd5e1',
-              boxShadow: 'none',
-              backgroundColor: 'transparent',
-              p: 6,
-              textAlign: 'center',
-            }}
-          >
-            <AssignmentIcon sx={{ fontSize: '4rem', color: '#94a3b8', mb: 2 }} />
-            <Typography variant="h6" sx={{ fontWeight: 700, color: '#475569', mb: 1 }}>
-              Keine Prüfungen gefunden
-            </Typography>
-            <Typography
-              variant="body2"
-              sx={{ color: 'text.secondary', maxWidth: '400px', mx: 'auto', mb: 3 }}
-            >
-              Erstelle deine erste Prüfung für{' '}
-              {classes.find((c) => c.id === activeClassId)?.name || 'diese Klasse'}, um einen
-              Erwartungshorizont für die automatische Folgefehler-Korrektur zu hinterlegen.
-            </Typography>
-            <Button
-              variant="outlined"
-              startIcon={<AddIcon />}
-              onClick={() => {
-                setCreateError('');
-                setOpenCreate(true);
-              }}
-              sx={{ borderRadius: '8px', textTransform: 'none', fontWeight: 650 }}
-            >
-              Erste Prüfung anlegen
-            </Button>
-          </Card>
         ) : (
-          <Grid container spacing={3}>
-            {filteredExams.map((ex) => (
-              <Grid size={{ xs: 12, sm: 6, md: 4 }} key={ex.id}>
-                <Card
+          <>
+            {/* Class Selector Deck */}
+            {classes.length > 0 && (
+              <Stack spacing={1.5}>
+                <Typography variant="subtitle2" sx={{ fontWeight: 700, color: 'text.secondary' }}>
+                  Wähle eine Klasse, um deren Prüfungen anzuzeigen:
+                </Typography>
+                <Stack
+                  direction="row"
+                  spacing={2}
                   sx={{
-                    borderRadius: '12px',
-                    border: '1px solid #e2e8f0',
-                    boxShadow: 'none',
-                    transition: 'all 0.25s ease',
-                    height: '100%',
-                    display: 'flex',
-                    flexDirection: 'column',
-                    justifyContent: 'space-between',
-                    '&:hover': {
-                      transform: 'translateY(-2px)',
-                      borderColor: '#1b77d1',
-                      boxShadow: '0 10px 20px -10px rgba(0,0,0,0.05)',
+                    overflowX: 'auto',
+                    pb: 1.5,
+                    pt: 0.5,
+                    px: 0.5,
+                    '&::-webkit-scrollbar': { height: '6px' },
+                    '&::-webkit-scrollbar-thumb': {
+                      backgroundColor: '#cbd5e1',
+                      borderRadius: '3px',
                     },
                   }}
                 >
-                  <CardContent sx={{ p: 3, pb: 1 }}>
-                    <Stack
-                      direction="row"
-                      sx={{ justifyContent: 'space-between', alignItems: 'flex-start', mb: 2 }}
-                    >
-                      <Box>
-                        <Typography
-                          variant="h6"
-                          sx={{ fontWeight: 800, color: '#0f172a', mb: 0.5, lineClamp: 2 }}
-                        >
-                          {ex.title}
-                        </Typography>
-                        <Chip
-                          label={ex.subject}
-                          size="small"
-                          sx={{
-                            backgroundColor: '#e3f2fd',
-                            color: '#1b77d1',
-                            fontWeight: 700,
-                            fontSize: '0.75rem',
-                            mb: 1,
-                          }}
-                        />
-                      </Box>
-                      <Box
+                  {classes.map((cls) => {
+                    const isActive = cls.id === activeClassId;
+                    return (
+                      <Card
+                        key={cls.id}
+                        onClick={() => {
+                          setActiveClassId(cls.id);
+                          setSelectedClassId(cls.id);
+                        }}
                         sx={{
-                          width: '40px',
-                          height: '40px',
-                          borderRadius: '8px',
-                          backgroundColor: '#fff7ed',
-                          color: '#ea580c',
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'center',
+                          minWidth: '220px',
                           flexShrink: 0,
+                          borderRadius: '12px',
+                          border: '2px solid',
+                          borderColor: isActive ? '#1b77d1' : '#e2e8f0',
+                          boxShadow: isActive
+                            ? '0 10px 20px -10px rgba(27, 119, 209, 0.3)'
+                            : 'none',
+                          cursor: 'pointer',
+                          transition: 'all 0.2s ease',
+                          backgroundColor: isActive ? '#f0f7ff' : '#ffffff',
+                          '&:hover': {
+                            borderColor: '#1b77d1',
+                            transform: 'translateY(-2px)',
+                            boxShadow: '0 8px 16px -8px rgba(0,0,0,0.1)',
+                          },
                         }}
                       >
-                        <AssignmentIcon sx={{ fontSize: '1.25rem' }} />
-                      </Box>
-                    </Stack>
+                        <CardContent sx={{ p: 2, '&:last-child': { pb: 2 } }}>
+                          <Stack spacing={0.75}>
+                            <Stack direction="row" spacing={0.75} sx={{ alignItems: 'center' }}>
+                              <Typography
+                                variant="subtitle1"
+                                sx={{
+                                  fontWeight: 800,
+                                  color: isActive ? '#1b77d1' : '#0f172a',
+                                  whiteSpace: 'nowrap',
+                                  overflow: 'hidden',
+                                  textOverflow: 'ellipsis',
+                                }}
+                              >
+                                {cls.name}
+                              </Typography>
+                              {cls.id === defaultClassId && (
+                                <StarIcon
+                                  sx={{ color: '#eab308', fontSize: '1rem', flexShrink: 0 }}
+                                />
+                              )}
+                            </Stack>
+                            <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
+                              <Typography
+                                variant="caption"
+                                sx={{ color: 'text.secondary', fontWeight: 600 }}
+                              >
+                                {cls.studentsCount} Schüler
+                              </Typography>
+                              <Typography variant="caption" sx={{ color: '#cbd5e1' }}>
+                                •
+                              </Typography>
+                              <Typography
+                                variant="caption"
+                                sx={{ color: 'text.secondary', fontWeight: 600 }}
+                              >
+                                {cls.totalExams} {cls.totalExams === 1 ? 'Prüfung' : 'Prüfungen'}
+                              </Typography>
+                            </Stack>
+                            {cls.averageGrade !== 'N/A' && (
+                              <Stack
+                                direction="row"
+                                spacing={0.75}
+                                sx={{ alignItems: 'center', mt: 0.5 }}
+                              >
+                                <Typography
+                                  variant="caption"
+                                  sx={{ color: 'text.secondary', fontWeight: 600 }}
+                                >
+                                  Klassenschnitt:
+                                </Typography>
+                                <Chip
+                                  label={cls.averageGrade}
+                                  size="small"
+                                  sx={{
+                                    height: '18px',
+                                    fontSize: '0.7rem',
+                                    fontWeight: 700,
+                                    backgroundColor:
+                                      parseFloat(cls.averageGrade) >= 4.0 ? '#dcfce7' : '#fee2e2',
+                                    color:
+                                      parseFloat(cls.averageGrade) >= 4.0 ? '#15803d' : '#b91c1c',
+                                    borderRadius: '4px',
+                                  }}
+                                />
+                              </Stack>
+                            )}
+                          </Stack>
+                        </CardContent>
+                      </Card>
+                    );
+                  })}
+                </Stack>
+              </Stack>
+            )}
 
-                    <Divider sx={{ mb: 2, borderColor: '#f1f5f9' }} />
-
-                    <Grid container spacing={2}>
-                      <Grid size={{ xs: 6 }}>
-                        <Stack spacing={0.25}>
-                          <Typography
-                            variant="caption"
-                            sx={{ color: 'text.secondary', fontWeight: 600 }}
-                          >
-                            Klasse
-                          </Typography>
-                          <Typography variant="body2" sx={{ fontWeight: 700, color: '#334155' }}>
-                            {ex.className}
-                          </Typography>
-                        </Stack>
-                      </Grid>
-                      <Grid size={{ xs: 6 }}>
-                        <Stack spacing={0.25}>
-                          <Typography
-                            variant="caption"
-                            sx={{ color: 'text.secondary', fontWeight: 600 }}
-                          >
-                            Max. Punkte
-                          </Typography>
-                          <Typography variant="body2" sx={{ fontWeight: 700, color: '#334155' }}>
-                            {ex.maxPoints} Punkte
-                          </Typography>
-                        </Stack>
-                      </Grid>
-                      <Grid size={{ xs: 6 }} sx={{ mt: 1 }}>
-                        <Stack spacing={0.25}>
-                          <Typography
-                            variant="caption"
-                            sx={{ color: 'text.secondary', fontWeight: 600 }}
-                          >
-                            Korrekturen
-                          </Typography>
-                          <Typography variant="body2" sx={{ fontWeight: 700, color: '#334155' }}>
-                            {ex.submissionsCount} bewertet
-                          </Typography>
-                        </Stack>
-                      </Grid>
-                      <Grid size={{ xs: 6 }} sx={{ mt: 1 }}>
-                        <Stack direction="row" spacing={0.75} sx={{ alignItems: 'center' }}>
-                          <Typography
-                            variant="caption"
-                            sx={{ color: 'text.secondary', fontWeight: 600 }}
-                          >
-                            Schnitt (Ø):
-                          </Typography>
-                          {ex.averageGrade !== 'N/A' ? (
-                            <Chip
-                              label={ex.averageGrade}
-                              size="small"
-                              sx={{
-                                backgroundColor:
-                                  parseFloat(ex.averageGrade) >= 4.0 ? '#dcfce7' : '#fee2e2',
-                                color: parseFloat(ex.averageGrade) >= 4.0 ? '#15803d' : '#b91c1c',
-                                fontWeight: 'bold',
-                                borderRadius: '6px',
-                                fontSize: '0.75rem',
-                              }}
-                            />
-                          ) : (
-                            <Typography
-                              variant="body2"
-                              sx={{ fontWeight: 600, color: 'text.secondary', fontSize: '0.8rem' }}
-                            >
-                              Keine Noten
-                            </Typography>
-                          )}
-                        </Stack>
-                      </Grid>
-                    </Grid>
-                  </CardContent>
-
-                  <CardActions sx={{ p: 2, pt: 0, justifyContent: 'space-between' }}>
-                    <Button
-                      size="small"
-                      startIcon={<ContentCopyIcon />}
-                      onClick={() => handleOpenCopy(ex)}
+            {classes.length === 0 ? (
+              <Card
+                sx={{
+                  borderRadius: '16px',
+                  border: '2px dashed #cbd5e1',
+                  boxShadow: 'none',
+                  backgroundColor: 'transparent',
+                  p: 6,
+                  textAlign: 'center',
+                }}
+              >
+                <AssignmentIcon sx={{ fontSize: '4rem', color: '#94a3b8', mb: 2 }} />
+                <Typography variant="h6" sx={{ fontWeight: 700, color: '#475569', mb: 1 }}>
+                  Keine Klassen gefunden
+                </Typography>
+                <Typography
+                  variant="body2"
+                  sx={{ color: 'text.secondary', maxWidth: '400px', mx: 'auto', mb: 3 }}
+                >
+                  Erstelle zuerst eine Schulklasse in der Klassenverwaltung, um Prüfungen für sie
+                  anlegen zu können.
+                </Typography>
+                <Link href="/classes" passHref style={{ textDecoration: 'none' }}>
+                  <Button
+                    variant="contained"
+                    startIcon={<AddIcon />}
+                    sx={{ borderRadius: '8px', textTransform: 'none', fontWeight: 650 }}
+                  >
+                    Klassenverwaltung öffnen
+                  </Button>
+                </Link>
+              </Card>
+            ) : filteredExams.length === 0 ? (
+              <Card
+                sx={{
+                  borderRadius: '16px',
+                  border: '2px dashed #cbd5e1',
+                  boxShadow: 'none',
+                  backgroundColor: 'transparent',
+                  p: 6,
+                  textAlign: 'center',
+                }}
+              >
+                <AssignmentIcon sx={{ fontSize: '4rem', color: '#94a3b8', mb: 2 }} />
+                <Typography variant="h6" sx={{ fontWeight: 700, color: '#475569', mb: 1 }}>
+                  Keine Prüfungen gefunden
+                </Typography>
+                <Typography
+                  variant="body2"
+                  sx={{ color: 'text.secondary', maxWidth: '400px', mx: 'auto', mb: 3 }}
+                >
+                  Erstelle deine erste Prüfung für{' '}
+                  {classes.find((c) => c.id === activeClassId)?.name || 'diese Klasse'}, um einen
+                  Erwartungshorizont für die automatische Folgefehler-Korrektur zu hinterlegen.
+                </Typography>
+                <Button
+                  variant="outlined"
+                  startIcon={<AddIcon />}
+                  onClick={() => {
+                    setCreateError('');
+                    setOpenCreate(true);
+                  }}
+                  sx={{ borderRadius: '8px', textTransform: 'none', fontWeight: 650 }}
+                >
+                  Erste Prüfung anlegen
+                </Button>
+              </Card>
+            ) : (
+              <Grid container spacing={3}>
+                {filteredExams.map((ex) => (
+                  <Grid size={{ xs: 12, sm: 6, md: 4 }} key={ex.id}>
+                    <Card
                       sx={{
-                        textTransform: 'none',
-                        fontWeight: 650,
-                        color: 'text.secondary',
-                        '&:hover': { backgroundColor: '#f1f5f9', color: '#0f172a' },
+                        borderRadius: '12px',
+                        border: '1px solid #e2e8f0',
+                        boxShadow: 'none',
+                        transition: 'all 0.25s ease',
+                        height: '100%',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        justifyContent: 'space-between',
+                        '&:hover': {
+                          transform: 'translateY(-2px)',
+                          borderColor: '#1b77d1',
+                          boxShadow: '0 10px 20px -10px rgba(0,0,0,0.05)',
+                        },
                       }}
                     >
-                      Kopieren
-                    </Button>
-                    <Link href={`/exams/${ex.id}`} passHref style={{ textDecoration: 'none' }}>
-                      <Button
-                        size="small"
-                        endIcon={<ArrowForwardIcon />}
-                        sx={{
-                          textTransform: 'none',
-                          fontWeight: 700,
-                          color: '#1b77d1',
-                          '&:hover': { backgroundColor: '#f0f7ff' },
-                        }}
-                      >
-                        Musterlösung & Stats
-                      </Button>
-                    </Link>
-                  </CardActions>
-                </Card>
+                      <CardContent sx={{ p: 3, pb: 1 }}>
+                        <Stack
+                          direction="row"
+                          sx={{ justifyContent: 'space-between', alignItems: 'flex-start', mb: 2 }}
+                        >
+                          <Box>
+                            <Typography
+                              variant="h6"
+                              sx={{ fontWeight: 800, color: '#0f172a', mb: 0.5, lineClamp: 2 }}
+                            >
+                              {ex.title}
+                            </Typography>
+                            <Chip
+                              label={ex.subject}
+                              size="small"
+                              sx={{
+                                backgroundColor: '#e3f2fd',
+                                color: '#1b77d1',
+                                fontWeight: 700,
+                                fontSize: '0.75rem',
+                                mb: 1,
+                              }}
+                            />
+                          </Box>
+                          <Box
+                            sx={{
+                              width: '40px',
+                              height: '40px',
+                              borderRadius: '8px',
+                              backgroundColor: '#fff7ed',
+                              color: '#ea580c',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              flexShrink: 0,
+                            }}
+                          >
+                            <AssignmentIcon sx={{ fontSize: '1.25rem' }} />
+                          </Box>
+                        </Stack>
+
+                        <Divider sx={{ mb: 2, borderColor: '#f1f5f9' }} />
+
+                        <Grid container spacing={2}>
+                          <Grid size={{ xs: 6 }}>
+                            <Stack spacing={0.25}>
+                              <Typography
+                                variant="caption"
+                                sx={{ color: 'text.secondary', fontWeight: 600 }}
+                              >
+                                Klasse
+                              </Typography>
+                              <Typography
+                                variant="body2"
+                                sx={{ fontWeight: 700, color: '#334155' }}
+                              >
+                                {ex.className}
+                              </Typography>
+                            </Stack>
+                          </Grid>
+                          <Grid size={{ xs: 6 }}>
+                            <Stack spacing={0.25}>
+                              <Typography
+                                variant="caption"
+                                sx={{ color: 'text.secondary', fontWeight: 600 }}
+                              >
+                                Max. Punkte
+                              </Typography>
+                              <Typography
+                                variant="body2"
+                                sx={{ fontWeight: 700, color: '#334155' }}
+                              >
+                                {ex.maxPoints} Punkte
+                              </Typography>
+                            </Stack>
+                          </Grid>
+                          <Grid size={{ xs: 6 }} sx={{ mt: 1 }}>
+                            <Stack spacing={0.25}>
+                              <Typography
+                                variant="caption"
+                                sx={{ color: 'text.secondary', fontWeight: 600 }}
+                              >
+                                Korrekturen
+                              </Typography>
+                              <Typography
+                                variant="body2"
+                                sx={{ fontWeight: 700, color: '#334155' }}
+                              >
+                                {ex.submissionsCount} bewertet
+                              </Typography>
+                            </Stack>
+                          </Grid>
+                          <Grid size={{ xs: 6 }} sx={{ mt: 1 }}>
+                            <Stack direction="row" spacing={0.75} sx={{ alignItems: 'center' }}>
+                              <Typography
+                                variant="caption"
+                                sx={{ color: 'text.secondary', fontWeight: 600 }}
+                              >
+                                Schnitt (Ø):
+                              </Typography>
+                              {ex.averageGrade !== 'N/A' ? (
+                                <Chip
+                                  label={ex.averageGrade}
+                                  size="small"
+                                  sx={{
+                                    backgroundColor:
+                                      parseFloat(ex.averageGrade) >= 4.0 ? '#dcfce7' : '#fee2e2',
+                                    color:
+                                      parseFloat(ex.averageGrade) >= 4.0 ? '#15803d' : '#b91c1c',
+                                    fontWeight: 'bold',
+                                    borderRadius: '6px',
+                                    fontSize: '0.75rem',
+                                  }}
+                                />
+                              ) : (
+                                <Typography
+                                  variant="body2"
+                                  sx={{
+                                    fontWeight: 600,
+                                    color: 'text.secondary',
+                                    fontSize: '0.8rem',
+                                  }}
+                                >
+                                  Keine Noten
+                                </Typography>
+                              )}
+                            </Stack>
+                          </Grid>
+                        </Grid>
+                      </CardContent>
+
+                      <CardActions sx={{ p: 2, pt: 0, justifyContent: 'space-between' }}>
+                        <Button
+                          size="small"
+                          startIcon={<ContentCopyIcon />}
+                          onClick={() => handleOpenCopy(ex)}
+                          sx={{
+                            textTransform: 'none',
+                            fontWeight: 650,
+                            color: 'text.secondary',
+                            '&:hover': { backgroundColor: '#f1f5f9', color: '#0f172a' },
+                          }}
+                        >
+                          Kopieren
+                        </Button>
+                        <Link href={`/exams/${ex.id}`} passHref style={{ textDecoration: 'none' }}>
+                          <Button
+                            size="small"
+                            endIcon={<ArrowForwardIcon />}
+                            sx={{
+                              textTransform: 'none',
+                              fontWeight: 700,
+                              color: '#1b77d1',
+                              '&:hover': { backgroundColor: '#f0f7ff' },
+                            }}
+                          >
+                            Musterlösung & Stats
+                          </Button>
+                        </Link>
+                      </CardActions>
+                    </Card>
+                  </Grid>
+                ))}
               </Grid>
-            ))}
-          </Grid>
+            )}
+          </>
         )}
 
         {/* Dialog for Create Exam */}

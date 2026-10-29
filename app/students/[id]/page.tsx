@@ -13,7 +13,6 @@ import {
   CardContent,
   Stack,
   CircularProgress,
-  Alert,
   Chip,
   List,
   ListItem,
@@ -37,6 +36,7 @@ import AssignmentIcon from '@mui/icons-material/Assignment';
 import WorkspacePremiumIcon from '@mui/icons-material/WorkspacePremium';
 import { LineChart } from '@mui/x-charts/LineChart';
 import DashboardLayout from '@/components/DashboardLayout';
+import ErrorState from '@/components/ErrorState';
 
 interface StudentData {
   id: string;
@@ -129,6 +129,32 @@ export default function StudentDetailsPage() {
     );
   }
 
+  if (error) {
+    return (
+      <DashboardLayout>
+        <Box sx={{ display: 'flex', flexDirection: 'column', gap: '32px' }}>
+          <Link href="/classes" passHref style={{ textDecoration: 'none' }}>
+            <Button
+              startIcon={<ArrowBackIcon />}
+              sx={{ textTransform: 'none', fontWeight: 650, color: 'text.secondary' }}
+            >
+              Zurück zur Klassenübersicht
+            </Button>
+          </Link>
+          <ErrorState
+            title="Fehler beim Laden der Schülerdetails"
+            message={error}
+            onRetry={() => {
+              setLoading(true);
+              setError('');
+              fetchData();
+            }}
+          />
+        </Box>
+      </DashboardLayout>
+    );
+  }
+
   // Pre-process trajectory for MUI Line Chart
   const lineChartXData =
     trajectory.length > 0
@@ -174,12 +200,6 @@ export default function StudentDetailsPage() {
             </Box>
           </Box>
         </Stack>
-
-        {error && (
-          <Alert severity="error" sx={{ borderRadius: '12px' }}>
-            {error}
-          </Alert>
-        )}
 
         {/* 1. Student Summary Statistics Cards */}
         <Grid container spacing={3}>

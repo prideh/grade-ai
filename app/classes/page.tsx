@@ -32,6 +32,7 @@ import { getErrorMessage } from '@/lib/api-error';
 import StarIcon from '@mui/icons-material/Star';
 import StarBorderIcon from '@mui/icons-material/StarBorder';
 import DashboardLayout from '@/components/DashboardLayout';
+import ErrorState from '@/components/ErrorState';
 
 interface PrismaClassInfo {
   id: string;
@@ -164,6 +165,7 @@ export default function ClassesPage() {
           <Button
             variant="contained"
             startIcon={<AddIcon />}
+            disabled={loading || !!error}
             onClick={() => {
               setCreateError('');
               setOpenCreate(true);
@@ -182,13 +184,17 @@ export default function ClassesPage() {
           </Button>
         </Box>
 
-        {error && (
-          <Alert severity="error" sx={{ borderRadius: '12px' }}>
-            {error}
-          </Alert>
-        )}
-
-        {loading ? (
+        {error ? (
+          <ErrorState
+            title="Fehler beim Laden der Klassen"
+            message={error}
+            onRetry={() => {
+              setLoading(true);
+              setError('');
+              fetchClasses();
+            }}
+          />
+        ) : loading ? (
           <Box sx={{ display: 'flex', justifyContent: 'center', py: 8 }}>
             <CircularProgress />
           </Box>
