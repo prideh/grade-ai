@@ -405,7 +405,7 @@ export default function ClassesPage() {
                           '&:hover': { backgroundColor: '#f0f7ff' },
                         }}
                       >
-                        Details & Roster
+                        Details & Klassenliste
                       </Button>
                     </Link>
                   </CardActions>
@@ -433,7 +433,7 @@ export default function ClassesPage() {
               <Stack spacing={2} sx={{ mt: 1 }}>
                 {createError && <Alert severity="error">{createError}</Alert>}
                 <TextField
-                  label="Klassenbezeichnung"
+                  label="Klassenname"
                   placeholder="z.B. Klasse 9c"
                   fullWidth
                   variant="outlined"

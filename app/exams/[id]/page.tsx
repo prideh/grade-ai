@@ -1175,7 +1175,7 @@ export default function ExamDetailsPage() {
               Möchtest du die Prüfung <strong>{exam?.title}</strong> wirklich löschen?
             </Typography>
             <Typography variant="caption" sx={{ color: 'error.main', fontWeight: 600 }}>
-              Dabei werden all ihre bereits durchgeführten Korrekturen und AI-Feedbacks
+              Dabei werden all ihre bereits durchgeführten Korrekturen und KI-Rückmeldungen
               unwiderruflich entfernt!
             </Typography>
           </DialogContent>

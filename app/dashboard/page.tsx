@@ -1172,7 +1172,7 @@ export default function Dashboard() {
                                   variant="body2"
                                   sx={{ fontWeight: 700, color: '#1b77d1' }}
                                 >
-                                  Automatische Namenserkennung (Bulk / QR — Empfohlen)
+                                  Automatische Namenserkennung (Mehrfach-Upload / QR — Empfohlen)
                                 </Typography>
                               </Stack>
                             </MenuItem>
@@ -1599,7 +1599,7 @@ export default function Dashboard() {
                           ③
                         </Box>{' '}
                         {selectedStudentId === 'AUTO'
-                          ? 'Schülerarbeiten hochladen (Bulk-Upload)'
+                          ? 'Schülerarbeiten hochladen (Mehrfach-Upload)'
                           : 'Schülerarbeit hochladen (Scans/Fotos/PDF)'}
                       </Typography>
 

@@ -179,7 +179,7 @@ export default function SubmissionsPage() {
           </Typography>
           <Typography variant="body1" sx={{ color: 'text.secondary', fontWeight: 550 }}>
             Übersicht über alle handschriftlich korrigierten Arbeiten, deren Ergebnisse und
-            AI-Feedbacks.
+            KI-Rückmeldungen.
           </Typography>
         </Box>
 

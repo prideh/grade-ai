@@ -677,7 +677,7 @@ export default function ClassDetailsPage() {
                   variant="h6"
                   sx={{ fontWeight: 850, color: '#0f172a', letterSpacing: '-0.01em' }}
                 >
-                  Klassen-Roster (Schüler/innen)
+                  Klassenliste (Schüler/innen)
                 </Typography>
               </Stack>
               <Button
@@ -1057,7 +1057,7 @@ export default function ClassDetailsPage() {
                 Klasse austragen?
               </Typography>
               <Typography variant="caption" sx={{ color: 'error.main', fontWeight: 600 }}>
-                Achtung: Dies löscht unwiderruflich all seine Prüfungen, AI-Feedbacks und
+                Achtung: Dies löscht unwiderruflich all seine Prüfungen, KI-Rückmeldungen und
                 Korrekturergebnisse!
               </Typography>
             </Stack>

@@ -814,7 +814,7 @@ export default function ExamsPage() {
                               '&:hover': { backgroundColor: '#f0f7ff' },
                             }}
                           >
-                            Musterlösung & Stats
+                            Musterlösung & Statistiken
                           </Button>
                         </Link>
                       </CardActions>

@@ -66,8 +66,7 @@ export default function Home() {
           </Typography>
         </Stack>
 
-        <Stack direction="row" spacing={2} sx={{ alignItems: 'center' }}>
-        </Stack>
+        <Stack direction="row" spacing={2} sx={{ alignItems: 'center' }}></Stack>
       </Box>
 
       {/* Hero section */}
@@ -122,7 +121,7 @@ export default function Home() {
         >
           Die professionelle Schweizer Prüfungs-Assistenten-Plattform, die handschriftliche Arbeiten
           liest, Teilpunkte vergibt und mathematische Folgefehler vollautomatisch berücksichtigt.
-          Sparen Sie bis zu 80% Ihrer Korrekturzeit.
+          Spare bis zu 80% deiner Korrekturzeit.
         </Typography>
 
         <Stack spacing={2} sx={{ alignItems: 'center' }}>
