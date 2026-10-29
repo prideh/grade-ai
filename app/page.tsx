@@ -67,19 +67,6 @@ export default function Home() {
         </Stack>
 
         <Stack direction="row" spacing={2} sx={{ alignItems: 'center' }}>
-          <Box
-            sx={{
-              fontSize: '0.8rem',
-              backgroundColor: '#f1f5f9',
-              padding: '4px 12px',
-              borderRadius: '20px',
-              border: '1px solid #e2e8f0',
-              color: '#475569',
-              fontWeight: 600,
-            }}
-          >
-            Gemini 3.5 Ready
-          </Box>
         </Stack>
       </Box>
 
