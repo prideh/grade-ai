@@ -30,9 +30,9 @@ test.describe('Full E2E Teacher & Mobile QR Relay Workflows', () => {
 
     // --- STEP 2: Create a Class & Add Students ---
     await page.goto('/classes');
-    await page.getByRole('button', { name: /Neue Klasse/i }).click();
-    await page.getByLabel(/Klassenname/i).fill('Gymnasium 10b');
-    await page.getByRole('button', { name: /Erstellen|Speichern/i }).click();
+    await page.getByRole('button', { name: /Klasse erstellen/i }).first().click();
+    await page.getByLabel(/Klassenbezeichnung|Klassenname/i).fill('Gymnasium 10b');
+    await page.getByRole('dialog').getByRole('button', { name: /Erstellen|Speichern/i }).click();
 
     await expect(page.getByText('Gymnasium 10b').first()).toBeVisible();
     await page.getByText('Gymnasium 10b').first().click();
@@ -52,12 +52,12 @@ test.describe('Full E2E Teacher & Mobile QR Relay Workflows', () => {
 
     // --- STEP 3: Create an Exam & Verify Exam Details + CSV Export ---
     await page.goto('/exams');
-    await page.getByRole('button', { name: /Neue Prüfung/i }).click();
+    await page.getByRole('button', { name: /Neue Prüfung|Prüfung anlegen/i }).first().click();
     await page.getByLabel(/Prüfungstitel/i).fill('Algebra Prüfung 1');
     await page
-      .getByPlaceholder(/Trage hier die Musterlösung/i)
+      .getByPlaceholder(/Gib Formeln|Trage hier die Musterlösung/i)
       .fill('Aufgabe 1: 2x = 10 -> x = 5 (4 Punkte)');
-    await page.getByRole('button', { name: /Prüfung anlegen/i }).click();
+    await page.getByRole('dialog').getByRole('button', { name: /Anlegen|Prüfung anlegen/i }).click();
 
     await expect(page.getByText('Algebra Prüfung 1').first()).toBeVisible();
     await page.getByText('Algebra Prüfung 1').first().click();
@@ -81,7 +81,7 @@ test.describe('Full E2E Teacher & Mobile QR Relay Workflows', () => {
 
     // Open the mobile scanner page with the generated token
     await page.goto(`/scan/${encodeURIComponent(relayJson.token)}`);
-    await expect(page.getByText(/GradeAi Mobile Scanner/i)).toBeVisible();
+    await expect(page.getByText(/Smartphone-Scanner|GradeAi Mobile Scanner/i)).toBeVisible();
     await expect(page.getByText(new RegExp(teacherName))).toBeVisible();
 
     // Upload a simulated 1x1 JPEG image as a scanned Musterlösung (RUBRIC) via the relay upload API
