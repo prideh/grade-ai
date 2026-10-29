@@ -103,7 +103,7 @@ test.describe('Full E2E Teacher & Mobile QR Relay Workflows', () => {
     expect(uploadRes.status()).toBe(200);
     const uploadJson = await uploadRes.json();
     expect(uploadJson.targetMode).toBe('RUBRIC');
-    expect(uploadJson.pageCount).toBe(1);
+    expect(uploadJson.pagesCount).toBe(1);
 
     // Verify desktop polling endpoint (/api/mobile-relay?token=...) now returns the scannedDocument
     const pollRes = await page.request.get(
