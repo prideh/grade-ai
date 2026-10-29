@@ -26,12 +26,8 @@ import LockIcon from '@mui/icons-material/Lock';
 
 export default function LoginPage() {
   const router = useRouter();
-  const [email, setEmail] = useState(
-    process.env.NODE_ENV === 'development' ? 'lehrer@schule.ch' : ''
-  );
-  const [password, setPassword] = useState(
-    process.env.NODE_ENV === 'development' ? 'password123' : ''
-  );
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -166,7 +162,7 @@ export default function LoginPage() {
                   variant="outlined"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
-                  placeholder="lehrer@schule.ch"
+                  placeholder="name@schule.ch"
                   slotProps={{
                     input: {
                       startAdornment: (
