@@ -33,6 +33,7 @@ import {
   InputLabel,
 } from '@mui/material';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
+import { getErrorMessage } from '@/lib/api-error';
 import AddIcon from '@mui/icons-material/Add';
 import DeleteIcon from '@mui/icons-material/Delete';
 import EditIcon from '@mui/icons-material/Edit';
@@ -113,8 +114,10 @@ export default function ClassDetailsPage() {
 
   const [openDeleteStudent, setOpenDeleteStudent] = useState(false);
   const [openDeleteClass, setOpenDeleteClass] = useState(false);
+  const [deleteClassError, setDeleteClassError] = useState('');
   const [openEditClass, setOpenEditClass] = useState(false);
   const [editedClassName, setEditedClassName] = useState('');
+  const [editClassError, setEditClassError] = useState('');
 
   // Fetch Class Details
   const fetchData = React.useCallback(async () => {
@@ -178,8 +181,14 @@ export default function ClassDetailsPage() {
         body: JSON.stringify({ name: newStudentName }),
       });
 
-      const result = await res.json();
-      if (!res.ok) throw new Error(result.error || 'Erstellen fehlgeschlagen.');
+      if (!res.ok) {
+        const errorMsg = await getErrorMessage(
+          res,
+          'Schüler/in konnte nicht eingeschrieben werden.'
+        );
+        setStudentActionError(errorMsg);
+        return;
+      }
 
       setOpenAddStudent(false);
       setNewStudentName('');
@@ -209,8 +218,11 @@ export default function ClassDetailsPage() {
         body: JSON.stringify({ classId: targetClassId }),
       });
 
-      const result = await res.json();
-      if (!res.ok) throw new Error(result.error || 'Transfer fehlgeschlagen.');
+      if (!res.ok) {
+        const errorMsg = await getErrorMessage(res, 'Transfer fehlgeschlagen.');
+        setStudentActionError(errorMsg);
+        return;
+      }
 
       setOpenTransfer(false);
       setSelectedStudent(null);
@@ -234,8 +246,11 @@ export default function ClassDetailsPage() {
         method: 'DELETE',
       });
 
-      const result = await res.json();
-      if (!res.ok) throw new Error(result.error || 'Löschen fehlgeschlagen.');
+      if (!res.ok) {
+        const errorMsg = await getErrorMessage(res, 'Löschen fehlgeschlagen.');
+        setStudentActionError(errorMsg);
+        return;
+      }
 
       setOpenDeleteStudent(false);
       setSelectedStudent(null);
@@ -250,12 +265,19 @@ export default function ClassDetailsPage() {
   // DELETE Class
   const handleDeleteClass = async () => {
     setStudentActionLoading(true);
+    setDeleteClassError('');
     try {
       const res = await fetch(`/api/classes/${classId}`, { method: 'DELETE' });
-      if (!res.ok) throw new Error('Klasse konnte nicht gelöscht werden.');
+      if (!res.ok) {
+        const errorMsg = await getErrorMessage(res, 'Klasse konnte nicht aufgelöst werden.');
+        setDeleteClassError(errorMsg);
+        return;
+      }
+      setOpenDeleteClass(false);
       router.push('/classes');
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Fehler beim Löschen der Klasse.');
+      setDeleteClassError(err instanceof Error ? err.message : 'Fehler beim Löschen der Klasse.');
+    } finally {
       setStudentActionLoading(false);
     }
   };
@@ -266,17 +288,22 @@ export default function ClassDetailsPage() {
     if (!editedClassName.trim()) return;
 
     setStudentActionLoading(true);
+    setEditClassError('');
     try {
       const res = await fetch(`/api/classes/${classId}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name: editedClassName }),
       });
-      if (!res.ok) throw new Error('Fehler beim Aktualisieren.');
+      if (!res.ok) {
+        const errorMsg = await getErrorMessage(res, 'Klassenname konnte nicht geändert werden.');
+        setEditClassError(errorMsg);
+        return;
+      }
       setOpenEditClass(false);
       fetchData();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Fehler beim Ändern des Namens.');
+      setEditClassError(err instanceof Error ? err.message : 'Fehler beim Ändern des Namens.');
     } finally {
       setStudentActionLoading(false);
     }
@@ -337,7 +364,11 @@ export default function ClassDetailsPage() {
               <Button
                 variant="outlined"
                 startIcon={<EditIcon />}
-                onClick={() => setOpenEditClass(true)}
+                onClick={() => {
+                  setEditClassError('');
+                  setEditedClassName(classData?.name || '');
+                  setOpenEditClass(true);
+                }}
                 sx={{ borderRadius: '8px', textTransform: 'none', fontWeight: 650 }}
               >
                 Name ändern
@@ -346,7 +377,10 @@ export default function ClassDetailsPage() {
                 variant="outlined"
                 color="error"
                 startIcon={<DeleteIcon />}
-                onClick={() => setOpenDeleteClass(true)}
+                onClick={() => {
+                  setDeleteClassError('');
+                  setOpenDeleteClass(true);
+                }}
                 sx={{ borderRadius: '8px', textTransform: 'none', fontWeight: 650 }}
               >
                 Klasse auflösen
@@ -868,7 +902,10 @@ export default function ClassDetailsPage() {
         {/* Add Student Dialog */}
         <Dialog
           open={openAddStudent}
-          onClose={() => setOpenAddStudent(false)}
+          onClose={(_e, reason) => {
+            if (studentActionLoading || reason === 'backdropClick') return;
+            setOpenAddStudent(false);
+          }}
           maxWidth="xs"
           fullWidth
         >
@@ -916,7 +953,15 @@ export default function ClassDetailsPage() {
         </Dialog>
 
         {/* Transfer Student Dialog */}
-        <Dialog open={openTransfer} onClose={() => setOpenTransfer(false)} maxWidth="xs" fullWidth>
+        <Dialog
+          open={openTransfer}
+          onClose={(_e, reason) => {
+            if (studentActionLoading || reason === 'backdropClick') return;
+            setOpenTransfer(false);
+          }}
+          maxWidth="xs"
+          fullWidth
+        >
           <DialogTitle sx={{ fontWeight: 800, color: '#0f172a' }}>
             Schüler/in umteilen (Klassentransfer)
           </DialogTitle>
@@ -973,7 +1018,10 @@ export default function ClassDetailsPage() {
         {/* Delete Student Dialog */}
         <Dialog
           open={openDeleteStudent}
-          onClose={() => setOpenDeleteStudent(false)}
+          onClose={(_e, reason) => {
+            if (studentActionLoading || reason === 'backdropClick') return;
+            setOpenDeleteStudent(false);
+          }}
           maxWidth="xs"
           fullWidth
         >
@@ -1015,12 +1063,20 @@ export default function ClassDetailsPage() {
         {/* Delete Class Dialog */}
         <Dialog
           open={openDeleteClass}
-          onClose={() => setOpenDeleteClass(false)}
+          onClose={(_e, reason) => {
+            if (studentActionLoading || reason === 'backdropClick') return;
+            setOpenDeleteClass(false);
+          }}
           maxWidth="xs"
           fullWidth
         >
           <DialogTitle sx={{ fontWeight: 800, color: '#0f172a' }}>Klasse auflösen?</DialogTitle>
           <DialogContent>
+            {deleteClassError && (
+              <Alert severity="error" sx={{ mb: 2, borderRadius: '8px' }}>
+                {deleteClassError}
+              </Alert>
+            )}
             <Typography variant="body2" sx={{ color: 'text.primary', mb: 1 }}>
               Möchtest du die Klasse <strong>{classData?.name}</strong> wirklich auflösen?
             </Typography>
@@ -1032,6 +1088,7 @@ export default function ClassDetailsPage() {
           <DialogActions sx={{ p: 2, pt: 0 }}>
             <Button
               onClick={() => setOpenDeleteClass(false)}
+              disabled={studentActionLoading}
               sx={{ textTransform: 'none', fontWeight: 650 }}
             >
               Abbrechen
@@ -1051,7 +1108,10 @@ export default function ClassDetailsPage() {
         {/* Edit Class Dialog */}
         <Dialog
           open={openEditClass}
-          onClose={() => setOpenEditClass(false)}
+          onClose={(_e, reason) => {
+            if (studentActionLoading || reason === 'backdropClick') return;
+            setOpenEditClass(false);
+          }}
           maxWidth="xs"
           fullWidth
         >
@@ -1059,6 +1119,11 @@ export default function ClassDetailsPage() {
             <DialogTitle sx={{ fontWeight: 800, color: '#0f172a' }}>Klassenname ändern</DialogTitle>
             <DialogContent>
               <Stack spacing={2} sx={{ mt: 1 }}>
+                {editClassError && (
+                  <Alert severity="error" sx={{ borderRadius: '8px' }}>
+                    {editClassError}
+                  </Alert>
+                )}
                 <TextField
                   label="Neuer Klassenname"
                   fullWidth
@@ -1073,6 +1138,7 @@ export default function ClassDetailsPage() {
             <DialogActions sx={{ p: 2, pt: 0 }}>
               <Button
                 onClick={() => setOpenEditClass(false)}
+                disabled={studentActionLoading}
                 sx={{ textTransform: 'none', fontWeight: 650 }}
               >
                 Abbrechen

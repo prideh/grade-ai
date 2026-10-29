@@ -33,6 +33,7 @@ import {
   DialogActions,
 } from '@mui/material';
 import HistoryIcon from '@mui/icons-material/History';
+import { getErrorMessage } from '@/lib/api-error';
 import SearchIcon from '@mui/icons-material/Search';
 import DeleteIcon from '@mui/icons-material/Delete';
 import DashboardLayout from '@/components/DashboardLayout';
@@ -75,6 +76,8 @@ export default function SubmissionsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [deleteTargetId, setDeleteTargetId] = useState<string | null>(null);
+  const [deleteLoading, setDeleteLoading] = useState(false);
+  const [deleteError, setDeleteError] = useState('');
 
   // Filter States
   const [searchQuery, setSearchQuery] = useState('');
@@ -120,26 +123,32 @@ export default function SubmissionsPage() {
   }, [fetchData]);
 
   const handleDeleteSubmission = (id: string) => {
+    setDeleteError('');
     setDeleteTargetId(id);
   };
 
   const confirmDeleteSubmission = async () => {
     if (!deleteTargetId) return;
-    const id = deleteTargetId;
-    setDeleteTargetId(null);
+    setDeleteLoading(true);
+    setDeleteError('');
 
     try {
-      const res = await fetch(`/api/submissions/${id}`, {
+      const res = await fetch(`/api/submissions/${deleteTargetId}`, {
         method: 'DELETE',
       });
 
       if (!res.ok) {
-        throw new Error('Korrektur konnte nicht gelöscht werden.');
+        const msg = await getErrorMessage(res, 'Korrektur konnte nicht gelöscht werden.');
+        setDeleteError(msg);
+        return;
       }
 
+      setDeleteTargetId(null);
       fetchData();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Fehler beim Löschen.');
+      setDeleteError(err instanceof Error ? err.message : 'Fehler beim Löschen.');
+    } finally {
+      setDeleteLoading(false);
     }
   };
 
@@ -426,7 +435,10 @@ export default function SubmissionsPage() {
       {/* Dialog for Delete Confirmation */}
       <Dialog
         open={Boolean(deleteTargetId)}
-        onClose={() => setDeleteTargetId(null)}
+        onClose={(_e, reason) => {
+          if (deleteLoading || reason === 'backdropClick') return;
+          setDeleteTargetId(null);
+        }}
         maxWidth="xs"
         fullWidth
         slotProps={{
@@ -442,6 +454,11 @@ export default function SubmissionsPage() {
           Korrektur löschen?
         </DialogTitle>
         <DialogContent>
+          {deleteError && (
+            <Alert severity="error" sx={{ mb: 1.5, borderRadius: '8px' }}>
+              {deleteError}
+            </Alert>
+          )}
           <Typography variant="body2" sx={{ color: 'text.secondary', lineHeight: 1.5 }}>
             Möchtest du diese Korrektur wirklich löschen? Dieser Schritt kann nicht rückgängig
             gemacht werden.
@@ -450,6 +467,7 @@ export default function SubmissionsPage() {
         <DialogActions sx={{ p: 2, pt: 1 }}>
           <Button
             onClick={() => setDeleteTargetId(null)}
+            disabled={deleteLoading}
             sx={{ textTransform: 'none', fontWeight: 650 }}
           >
             Abbrechen
@@ -458,13 +476,14 @@ export default function SubmissionsPage() {
             onClick={confirmDeleteSubmission}
             variant="contained"
             color="error"
+            disabled={deleteLoading}
             sx={{
               textTransform: 'none',
               fontWeight: 700,
               borderRadius: '8px',
             }}
           >
-            Endgültig löschen
+            {deleteLoading ? <CircularProgress size={20} /> : 'Endgültig löschen'}
           </Button>
         </DialogActions>
       </Dialog>

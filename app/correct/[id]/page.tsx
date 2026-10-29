@@ -33,6 +33,7 @@ import PrintIcon from '@mui/icons-material/Print';
 import SaveIcon from '@mui/icons-material/Save';
 import ErrorIcon from '@mui/icons-material/Error';
 import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome';
+import { getErrorMessage } from '@/lib/api-error';
 import AddIcon from '@mui/icons-material/Add';
 import QrCodeScannerIcon from '@mui/icons-material/QrCodeScanner';
 import QrScannerDialog from '@/components/QrScannerDialog';
@@ -120,9 +121,10 @@ export default function CorrectWorkspace() {
         }),
       });
 
-      const result = await res.json();
       if (!res.ok) {
-        throw new Error(result.error || 'Hinzufügen fehlgeschlagen.');
+        const errorMsg = await getErrorMessage(res, 'Aufgabe konnte nicht hinzugefügt werden.');
+        setAddTaskError(errorMsg);
+        return;
       }
 
       setOpenAddTask(false);
@@ -1363,7 +1365,10 @@ export default function CorrectWorkspace() {
                 <Tooltip title="Fehlende Aufgabe hinzufügen">
                   <IconButton
                     color="primary"
-                    onClick={() => setOpenAddTask(true)}
+                    onClick={() => {
+                      setAddTaskError('');
+                      setOpenAddTask(true);
+                    }}
                     sx={{
                       backgroundColor: '#f0f7ff',
                       '&:hover': { backgroundColor: '#e3f2fd' },
@@ -1924,7 +1929,15 @@ export default function CorrectWorkspace() {
       </Snackbar>
 
       {/* Dialog for adding missing tasks */}
-      <Dialog open={openAddTask} onClose={() => setOpenAddTask(false)} maxWidth="xs" fullWidth>
+      <Dialog
+        open={openAddTask}
+        onClose={(_e, reason) => {
+          if (addTaskLoading || reason === 'backdropClick') return;
+          setOpenAddTask(false);
+        }}
+        maxWidth="xs"
+        fullWidth
+      >
         <form onSubmit={handleAddTask}>
           <DialogTitle sx={{ fontWeight: 800, color: '#0f172a', letterSpacing: '-0.01em' }}>
             Fehlende Aufgabe erfassen

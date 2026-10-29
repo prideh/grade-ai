@@ -33,6 +33,7 @@ import {
   MenuItem,
 } from '@mui/material';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
+import { getErrorMessage } from '@/lib/api-error';
 import DeleteIcon from '@mui/icons-material/Delete';
 import EditIcon from '@mui/icons-material/Edit';
 import AssessmentIcon from '@mui/icons-material/Assessment';
@@ -187,6 +188,7 @@ export default function ExamDetailsPage() {
 
   // Dialogs
   const [openDelete, setOpenDelete] = useState(false);
+  const [deleteError, setDeleteError] = useState('');
 
   // Fetch Exam details
   const fetchData = React.useCallback(async () => {
@@ -240,7 +242,11 @@ export default function ExamDetailsPage() {
           gradeRounding,
         }),
       });
-      if (!res.ok) throw new Error('Musterlösung konnte nicht aktualisiert werden.');
+      if (!res.ok) {
+        const msg = await getErrorMessage(res, 'Musterlösung konnte nicht aktualisiert werden.');
+        setError(msg);
+        return;
+      }
       setEditingRubric(false);
       setUploadedFileName('');
       fetchData();
@@ -254,12 +260,19 @@ export default function ExamDetailsPage() {
   // DELETE Exam
   const handleDeleteExam = async () => {
     setSaveLoading(true);
+    setDeleteError('');
     try {
       const res = await fetch(`/api/exams/${examId}`, { method: 'DELETE' });
-      if (!res.ok) throw new Error('Prüfung konnte nicht gelöscht werden.');
+      if (!res.ok) {
+        const msg = await getErrorMessage(res, 'Prüfung konnte nicht gelöscht werden.');
+        setDeleteError(msg);
+        return;
+      }
+      setOpenDelete(false);
       router.push('/exams');
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Fehler beim Löschen.');
+      setDeleteError(err instanceof Error ? err.message : 'Fehler beim Löschen.');
+    } finally {
       setSaveLoading(false);
     }
   };
@@ -352,7 +365,10 @@ export default function ExamDetailsPage() {
                 variant="outlined"
                 color="error"
                 startIcon={<DeleteIcon />}
-                onClick={() => setOpenDelete(true)}
+                onClick={() => {
+                  setDeleteError('');
+                  setOpenDelete(true);
+                }}
                 sx={{ borderRadius: '8px', textTransform: 'none', fontWeight: 650 }}
               >
                 Prüfung löschen
@@ -1109,9 +1125,22 @@ export default function ExamDetailsPage() {
         </Card>
 
         {/* Delete Exam Dialog Confirmation */}
-        <Dialog open={openDelete} onClose={() => setOpenDelete(false)} maxWidth="xs" fullWidth>
+        <Dialog
+          open={openDelete}
+          onClose={(_e, reason) => {
+            if (saveLoading || reason === 'backdropClick') return;
+            setOpenDelete(false);
+          }}
+          maxWidth="xs"
+          fullWidth
+        >
           <DialogTitle sx={{ fontWeight: 800, color: '#0f172a' }}>Prüfung löschen?</DialogTitle>
           <DialogContent>
+            {deleteError && (
+              <Alert severity="error" sx={{ mb: 2, borderRadius: '8px' }}>
+                {deleteError}
+              </Alert>
+            )}
             <Typography variant="body2" sx={{ color: 'text.primary', mb: 1 }}>
               Möchtest du die Prüfung <strong>{exam?.title}</strong> wirklich löschen?
             </Typography>
@@ -1123,6 +1152,7 @@ export default function ExamDetailsPage() {
           <DialogActions sx={{ p: 2, pt: 0 }}>
             <Button
               onClick={() => setOpenDelete(false)}
+              disabled={saveLoading}
               sx={{ textTransform: 'none', fontWeight: 650 }}
             >
               Abbrechen

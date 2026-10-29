@@ -33,6 +33,7 @@ import ArrowForwardIcon from '@mui/icons-material/ArrowForward';
 import StarsIcon from '@mui/icons-material/Stars';
 import StarIcon from '@mui/icons-material/Star';
 import ContentCopyIcon from '@mui/icons-material/ContentCopy';
+import { getErrorMessage } from '@/lib/api-error';
 import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome';
 import CloseIcon from '@mui/icons-material/Close';
 import QrCodeScannerIcon from '@mui/icons-material/QrCodeScanner';
@@ -292,9 +293,10 @@ export default function ExamsPage() {
         }),
       });
 
-      const result = await res.json();
       if (!res.ok) {
-        throw new Error(result.error || 'Erstellen fehlgeschlagen.');
+        const errorMsg = await getErrorMessage(res, 'Prüfung konnte nicht erstellt werden.');
+        setCreateError(errorMsg);
+        return;
       }
 
       setOpenCreate(false);
@@ -364,9 +366,10 @@ export default function ExamsPage() {
         }),
       });
 
-      const result = await res.json();
       if (!res.ok) {
-        throw new Error(result.error || 'Kopieren fehlgeschlagen.');
+        const errorMsg = await getErrorMessage(res, 'Prüfung konnte nicht kopiert werden.');
+        setCopyError(errorMsg);
+        return;
       }
 
       setOpenCopy(false);
@@ -410,7 +413,10 @@ export default function ExamsPage() {
             variant="contained"
             startIcon={<AddIcon />}
             disabled={classes.length === 0}
-            onClick={() => setOpenCreate(true)}
+            onClick={() => {
+              setCreateError('');
+              setOpenCreate(true);
+            }}
             sx={{
               padding: '10px 20px',
               borderRadius: '8px',
@@ -612,7 +618,10 @@ export default function ExamsPage() {
             <Button
               variant="outlined"
               startIcon={<AddIcon />}
-              onClick={() => setOpenCreate(true)}
+              onClick={() => {
+                setCreateError('');
+                setOpenCreate(true);
+              }}
               sx={{ borderRadius: '8px', textTransform: 'none', fontWeight: 650 }}
             >
               Erste Prüfung anlegen
@@ -792,7 +801,15 @@ export default function ExamsPage() {
         )}
 
         {/* Dialog for Create Exam */}
-        <Dialog open={openCreate} onClose={() => setOpenCreate(false)} maxWidth="sm" fullWidth>
+        <Dialog
+          open={openCreate}
+          onClose={(_e, reason) => {
+            if (createLoading || reason === 'backdropClick') return;
+            setOpenCreate(false);
+          }}
+          maxWidth="sm"
+          fullWidth
+        >
           <form onSubmit={handleCreateExam}>
             <DialogTitle sx={{ fontWeight: 800, color: '#0f172a', letterSpacing: '-0.01em' }}>
               Neue Prüfung anlegen
@@ -1149,32 +1166,57 @@ export default function ExamsPage() {
                 )}
               </Stack>
             </DialogContent>
-            <DialogActions sx={{ p: 2, pt: 0 }}>
-              <Button
-                onClick={() => setOpenCreate(false)}
-                sx={{ textTransform: 'none', fontWeight: 650 }}
-              >
-                Abbrechen
-              </Button>
-              <Button
-                type="submit"
-                variant="contained"
-                disabled={createLoading}
-                sx={{
-                  textTransform: 'none',
-                  fontWeight: 700,
-                  backgroundColor: '#1b77d1',
-                  borderRadius: '8px',
-                }}
-              >
-                {createLoading ? <CircularProgress size={20} /> : 'Anlegen'}
-              </Button>
+            <DialogActions
+              sx={{
+                p: 2,
+                pt: 1,
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'stretch',
+                gap: 1.5,
+              }}
+            >
+              {createError && (
+                <Alert severity="error" sx={{ borderRadius: '8px' }}>
+                  {createError}
+                </Alert>
+              )}
+              <Stack direction="row" spacing={1} sx={{ justifyContent: 'flex-end', width: '100%' }}>
+                <Button
+                  onClick={() => setOpenCreate(false)}
+                  disabled={createLoading}
+                  sx={{ textTransform: 'none', fontWeight: 650 }}
+                >
+                  Abbrechen
+                </Button>
+                <Button
+                  type="submit"
+                  variant="contained"
+                  disabled={createLoading}
+                  sx={{
+                    textTransform: 'none',
+                    fontWeight: 700,
+                    backgroundColor: '#1b77d1',
+                    borderRadius: '8px',
+                  }}
+                >
+                  {createLoading ? <CircularProgress size={20} /> : 'Anlegen'}
+                </Button>
+              </Stack>
             </DialogActions>
           </form>
         </Dialog>
 
         {/* Dialog for Copy Exam */}
-        <Dialog open={openCopy} onClose={() => setOpenCopy(false)} maxWidth="sm" fullWidth>
+        <Dialog
+          open={openCopy}
+          onClose={(_e, reason) => {
+            if (copyLoading || reason === 'backdropClick') return;
+            setOpenCopy(false);
+          }}
+          maxWidth="sm"
+          fullWidth
+        >
           <form onSubmit={handleCopyExam}>
             <DialogTitle sx={{ fontWeight: 800, color: '#0f172a', letterSpacing: '-0.01em' }}>
               Prüfung kopieren
@@ -1322,26 +1364,43 @@ export default function ExamsPage() {
                 />
               </Stack>
             </DialogContent>
-            <DialogActions sx={{ p: 2, pt: 0 }}>
-              <Button
-                onClick={() => setOpenCopy(false)}
-                sx={{ textTransform: 'none', fontWeight: 650 }}
-              >
-                Abbrechen
-              </Button>
-              <Button
-                type="submit"
-                variant="contained"
-                disabled={copyLoading}
-                sx={{
-                  textTransform: 'none',
-                  fontWeight: 700,
-                  backgroundColor: '#1b77d1',
-                  borderRadius: '8px',
-                }}
-              >
-                {copyLoading ? <CircularProgress size={20} /> : 'Kopieren'}
-              </Button>
+            <DialogActions
+              sx={{
+                p: 2,
+                pt: 1,
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'stretch',
+                gap: 1.5,
+              }}
+            >
+              {copyError && (
+                <Alert severity="error" sx={{ borderRadius: '8px' }}>
+                  {copyError}
+                </Alert>
+              )}
+              <Stack direction="row" spacing={1} sx={{ justifyContent: 'flex-end', width: '100%' }}>
+                <Button
+                  onClick={() => setOpenCopy(false)}
+                  disabled={copyLoading}
+                  sx={{ textTransform: 'none', fontWeight: 650 }}
+                >
+                  Abbrechen
+                </Button>
+                <Button
+                  type="submit"
+                  variant="contained"
+                  disabled={copyLoading}
+                  sx={{
+                    textTransform: 'none',
+                    fontWeight: 700,
+                    backgroundColor: '#1b77d1',
+                    borderRadius: '8px',
+                  }}
+                >
+                  {copyLoading ? <CircularProgress size={20} /> : 'Kopieren'}
+                </Button>
+              </Stack>
             </DialogActions>
           </form>
         </Dialog>

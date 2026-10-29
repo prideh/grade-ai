@@ -28,6 +28,7 @@ import AddIcon from '@mui/icons-material/Add';
 import GroupIcon from '@mui/icons-material/Group';
 import SchoolIcon from '@mui/icons-material/School';
 import ArrowForwardIcon from '@mui/icons-material/ArrowForward';
+import { getErrorMessage } from '@/lib/api-error';
 import StarIcon from '@mui/icons-material/Star';
 import StarBorderIcon from '@mui/icons-material/StarBorder';
 import DashboardLayout from '@/components/DashboardLayout';
@@ -120,10 +121,10 @@ export default function ClassesPage() {
         body: JSON.stringify({ name: newClassName }),
       });
 
-      const result = await res.json();
-
       if (!res.ok) {
-        throw new Error(result.error || 'Erstellen fehlgeschlagen.');
+        const errorMsg = await getErrorMessage(res, 'Klasse konnte nicht erstellt werden.');
+        setCreateError(errorMsg);
+        return;
       }
 
       setOpenCreate(false);
@@ -163,7 +164,10 @@ export default function ClassesPage() {
           <Button
             variant="contained"
             startIcon={<AddIcon />}
-            onClick={() => setOpenCreate(true)}
+            onClick={() => {
+              setCreateError('');
+              setOpenCreate(true);
+            }}
             sx={{
               padding: '10px 20px',
               borderRadius: '8px',
@@ -213,7 +217,10 @@ export default function ClassesPage() {
             <Button
               variant="outlined"
               startIcon={<AddIcon />}
-              onClick={() => setOpenCreate(true)}
+              onClick={() => {
+                setCreateError('');
+                setOpenCreate(true);
+              }}
               sx={{ borderRadius: '8px', textTransform: 'none', fontWeight: 650 }}
             >
               Erste Klasse erstellen
@@ -403,7 +410,15 @@ export default function ClassesPage() {
         )}
 
         {/* Dialog for Create Class */}
-        <Dialog open={openCreate} onClose={() => setOpenCreate(false)} maxWidth="xs" fullWidth>
+        <Dialog
+          open={openCreate}
+          onClose={(_e, reason) => {
+            if (createLoading || reason === 'backdropClick') return;
+            setOpenCreate(false);
+          }}
+          maxWidth="xs"
+          fullWidth
+        >
           <form onSubmit={handleCreateClass}>
             <DialogTitle sx={{ fontWeight: 800, color: '#0f172a', letterSpacing: '-0.01em' }}>
               Neue Klasse erstellen
@@ -427,26 +442,43 @@ export default function ClassesPage() {
                 />
               </Stack>
             </DialogContent>
-            <DialogActions sx={{ p: 2, pt: 0 }}>
-              <Button
-                onClick={() => setOpenCreate(false)}
-                sx={{ textTransform: 'none', fontWeight: 650 }}
-              >
-                Abbrechen
-              </Button>
-              <Button
-                type="submit"
-                variant="contained"
-                disabled={createLoading}
-                sx={{
-                  textTransform: 'none',
-                  fontWeight: 700,
-                  backgroundColor: '#1b77d1',
-                  borderRadius: '8px',
-                }}
-              >
-                {createLoading ? <CircularProgress size={20} /> : 'Erstellen'}
-              </Button>
+            <DialogActions
+              sx={{
+                p: 2,
+                pt: 1,
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'stretch',
+                gap: 1.5,
+              }}
+            >
+              {createError && (
+                <Alert severity="error" sx={{ borderRadius: '8px' }}>
+                  {createError}
+                </Alert>
+              )}
+              <Stack direction="row" spacing={1} sx={{ justifyContent: 'flex-end', width: '100%' }}>
+                <Button
+                  onClick={() => setOpenCreate(false)}
+                  disabled={createLoading}
+                  sx={{ textTransform: 'none', fontWeight: 650 }}
+                >
+                  Abbrechen
+                </Button>
+                <Button
+                  type="submit"
+                  variant="contained"
+                  disabled={createLoading}
+                  sx={{
+                    textTransform: 'none',
+                    fontWeight: 700,
+                    backgroundColor: '#1b77d1',
+                    borderRadius: '8px',
+                  }}
+                >
+                  {createLoading ? <CircularProgress size={20} /> : 'Erstellen'}
+                </Button>
+              </Stack>
             </DialogActions>
           </form>
         </Dialog>

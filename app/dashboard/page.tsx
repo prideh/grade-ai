@@ -48,6 +48,7 @@ import AssignmentIcon from '@mui/icons-material/Assignment';
 import TrendingUpIcon from '@mui/icons-material/TrendingUp';
 import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome';
 import ErrorIcon from '@mui/icons-material/Error';
+import { getErrorMessage } from '@/lib/api-error';
 import StarIcon from '@mui/icons-material/Star';
 import StarBorderIcon from '@mui/icons-material/StarBorder';
 import QrCodeScannerIcon from '@mui/icons-material/QrCodeScanner';
@@ -126,6 +127,8 @@ export default function Dashboard() {
   const [exams, setExams] = useState<DashboardExam[]>([]);
   const [recentSubmissions, setRecentSubmissions] = useState<DashboardSubmission[]>([]);
   const [cancelTargetId, setCancelTargetId] = useState<string | null>(null);
+  const [cancelLoading, setCancelLoading] = useState(false);
+  const [cancelError, setCancelError] = useState('');
   const [dismissedSubmissionIds, setDismissedSubmissionIds] = useState<string[]>(() => {
     if (typeof window !== 'undefined') {
       const stored = localStorage.getItem('gradeai_dismissed_submission_ids');
@@ -161,6 +164,7 @@ export default function Dashboard() {
 
     if (isCancelOrFailure) {
       if (sub.status === 'PENDING' || sub.status === 'PROCESSING') {
+        setCancelError('');
         setCancelTargetId(subId);
         return;
       }
@@ -2227,7 +2231,10 @@ export default function Dashboard() {
       {/* Dialog for Cancel Active Submission Confirmation */}
       <Dialog
         open={Boolean(cancelTargetId)}
-        onClose={() => setCancelTargetId(null)}
+        onClose={(_e, reason) => {
+          if (cancelLoading || reason === 'backdropClick') return;
+          setCancelTargetId(null);
+        }}
         maxWidth="xs"
         fullWidth
         slotProps={{
@@ -2243,6 +2250,11 @@ export default function Dashboard() {
           Korrektur abbrechen?
         </DialogTitle>
         <DialogContent>
+          {cancelError && (
+            <Alert severity="error" sx={{ mb: 1.5, borderRadius: '8px' }}>
+              {cancelError}
+            </Alert>
+          )}
           <Typography variant="body2" sx={{ color: 'text.secondary', lineHeight: 1.5 }}>
             Möchtest du diese aktive Korrektur wirklich abbrechen und aus der Warteschlange löschen?
           </Typography>
@@ -2250,27 +2262,43 @@ export default function Dashboard() {
         <DialogActions sx={{ p: 2, pt: 1 }}>
           <Button
             onClick={() => setCancelTargetId(null)}
+            disabled={cancelLoading}
             sx={{ textTransform: 'none', fontWeight: 650 }}
           >
             Zurück
           </Button>
           <Button
             onClick={async () => {
-              const target = cancelTargetId;
-              setCancelTargetId(null);
-              if (target) {
-                await executeCancelSubmission(target);
+              if (!cancelTargetId) return;
+              setCancelLoading(true);
+              setCancelError('');
+              try {
+                const res = await fetch(`/api/submissions/${cancelTargetId}`, { method: 'DELETE' });
+                if (!res.ok) {
+                  const msg = await getErrorMessage(res, 'Fehler beim Abbrechen der Korrektur.');
+                  setCancelError(msg);
+                  return;
+                }
+                setCancelTargetId(null);
+                fetchRecentSubmissions();
+              } catch (err) {
+                setCancelError(
+                  err instanceof Error ? err.message : 'Fehler beim Abbrechen der Korrektur.'
+                );
+              } finally {
+                setCancelLoading(false);
               }
             }}
             variant="contained"
             color="error"
+            disabled={cancelLoading}
             sx={{
               textTransform: 'none',
               fontWeight: 700,
               borderRadius: '8px',
             }}
           >
-            Ja, abbrechen
+            {cancelLoading ? <CircularProgress size={20} /> : 'Ja, abbrechen'}
           </Button>
         </DialogActions>
       </Dialog>
