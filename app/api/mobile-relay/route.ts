@@ -3,25 +3,9 @@ import { db } from '@/lib/db';
 import { getSession } from '@/lib/session';
 import { signMobileRelayToken, verifyMobileRelayToken } from '@/lib/jwt';
 import { getScannedRelayDocument } from '@/lib/relay-store';
+import { resolveRelayOrigin } from '@/lib/relay-url';
 import QRCode from 'qrcode';
-import os from 'os';
 import crypto from 'crypto';
-
-function getLocalLanIp(): string | null {
-  try {
-    const nets = os.networkInterfaces();
-    for (const name of Object.keys(nets)) {
-      for (const net of nets[name] || []) {
-        if (net.family === 'IPv4' && !net.internal) {
-          return net.address;
-        }
-      }
-    }
-  } catch {
-    // Ignore OS interface errors
-  }
-  return null;
-}
 
 // POST: Create a new QR Mobile Camera Relay session token and QR code Data URL
 export async function POST(request: Request) {
@@ -67,19 +51,7 @@ export async function POST(request: Request) {
       '2h'
     );
 
-    const reqUrl = new URL(request.url);
-    let baseOrigin = customOrigin || reqUrl.origin;
-
-    // If accessed via localhost, substitute the LAN IPv4 address so smartphones on the same Wi-Fi can connect
-    const lanIp = getLocalLanIp();
-    if (
-      !customOrigin &&
-      lanIp &&
-      (reqUrl.hostname === 'localhost' || reqUrl.hostname === '127.0.0.1')
-    ) {
-      baseOrigin = `${reqUrl.protocol}//${lanIp}${reqUrl.port ? `:${reqUrl.port}` : ''}`;
-    }
-
+    const { origin: baseOrigin, lanIp } = resolveRelayOrigin(request, customOrigin);
     const scanUrl = `${baseOrigin}/scan/${token}`;
     const qrDataUrl = await QRCode.toDataURL(scanUrl, {
       width: 320,
