@@ -4,15 +4,23 @@ import { resolveRelayOrigin, isLocalHost } from '@/lib/relay-url';
 describe('Mobile Relay URL Resolution (lib/relay-url.ts)', () => {
   const originalEnv = { ...process.env };
 
+  const setEnv = (key: string, value: string | undefined) => {
+    if (value === undefined) {
+      delete (process.env as Record<string, string | undefined>)[key];
+    } else {
+      (process.env as Record<string, string | undefined>)[key] = value;
+    }
+  };
+
   beforeEach(() => {
     vi.resetModules();
     process.env = { ...originalEnv };
-    delete process.env.APP_URL;
-    delete process.env.NEXT_PUBLIC_APP_URL;
-    delete process.env.BASE_URL;
-    delete process.env.RENDER_EXTERNAL_URL;
-    delete process.env.RENDER;
-    delete process.env.CI;
+    setEnv('APP_URL', undefined);
+    setEnv('NEXT_PUBLIC_APP_URL', undefined);
+    setEnv('BASE_URL', undefined);
+    setEnv('RENDER_EXTERNAL_URL', undefined);
+    setEnv('RENDER', undefined);
+    setEnv('CI', undefined);
   });
 
   afterEach(() => {
@@ -40,7 +48,7 @@ describe('Mobile Relay URL Resolution (lib/relay-url.ts)', () => {
 
   describe('Produktionsumgebung (NODE_ENV=production oder RENDER=true)', () => {
     beforeEach(() => {
-      process.env.NODE_ENV = 'production';
+      setEnv('NODE_ENV', 'production');
     });
 
     it('nutzt x-forwarded-host und x-forwarded-proto vom Reverse-Proxy', () => {
@@ -96,7 +104,7 @@ describe('Mobile Relay URL Resolution (lib/relay-url.ts)', () => {
     });
 
     it('nutzt explizit konfigurierte APP_URL', () => {
-      process.env.APP_URL = 'https://app.grade-ai.ch';
+      setEnv('APP_URL', 'https://app.grade-ai.ch');
 
       const request = new Request('http://localhost:10000/api/mobile-relay', {
         headers: {
@@ -111,7 +119,7 @@ describe('Mobile Relay URL Resolution (lib/relay-url.ts)', () => {
     });
 
     it('faellt auf RENDER_EXTERNAL_URL zurueck, wenn Forwarded-Header fehlen', () => {
-      process.env.RENDER_EXTERNAL_URL = 'https://grade-ai-qkkc.onrender.com';
+      setEnv('RENDER_EXTERNAL_URL', 'https://grade-ai-qkkc.onrender.com');
 
       const request = new Request('http://localhost:10000/api/mobile-relay');
 
@@ -144,7 +152,7 @@ describe('Mobile Relay URL Resolution (lib/relay-url.ts)', () => {
 
   describe('Lokale Entwicklungsumgebung (NODE_ENV=development)', () => {
     beforeEach(() => {
-      process.env.NODE_ENV = 'development';
+      setEnv('NODE_ENV', 'development');
     });
 
     it('bevorzugt customOrigin, falls vom Benutzer im Desktop-Dialog eingegeben', () => {
@@ -181,8 +189,8 @@ describe('Mobile Relay URL Resolution (lib/relay-url.ts)', () => {
 
   describe('CI-Umgebung (CI=true)', () => {
     beforeEach(() => {
-      process.env.NODE_ENV = 'development';
-      process.env.CI = 'true';
+      setEnv('NODE_ENV', 'development');
+      setEnv('CI', 'true');
     });
 
     it('verhindert unnoetige LAN-Ersetzung in automatisierten Testumgebungen', () => {
