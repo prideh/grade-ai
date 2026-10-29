@@ -35,7 +35,7 @@ test.describe('Full E2E Teacher & Mobile QR Relay Workflows', () => {
     await page.getByRole('dialog').getByRole('button', { name: /Erstellen|Speichern/i }).click();
 
     await expect(page.getByText('Gymnasium 10b').first()).toBeVisible();
-    await page.getByText('Gymnasium 10b').first().click();
+    await page.getByRole('link', { name: /Details & Roster/i }).or(page.getByRole('button', { name: /Details & Roster/i })).first().click();
     await expect(page).toHaveURL(/\/classes\/.+/);
 
     // Add a student to the class
@@ -60,7 +60,7 @@ test.describe('Full E2E Teacher & Mobile QR Relay Workflows', () => {
     await page.getByRole('dialog').getByRole('button', { name: /Anlegen|Prüfung anlegen/i }).click();
 
     await expect(page.getByText('Algebra Prüfung 1').first()).toBeVisible();
-    await page.getByText('Algebra Prüfung 1').first().click();
+    await page.getByRole('link', { name: /Musterlösung & Stats/i }).or(page.getByRole('button', { name: /Musterlösung & Stats/i })).first().click();
     await expect(page).toHaveURL(/\/exams\/.+/);
 
     // Verify new "Korrektur-Fortschritt" KPI card (replaced Standardabweichung)
