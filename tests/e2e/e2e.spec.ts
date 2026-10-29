@@ -44,8 +44,8 @@ test.describe('Full E2E Teacher & Mobile QR Relay Workflows', () => {
       await addStudentBtn.click();
       await page.getByLabel(/Name/i).last().fill('Lukas Keller');
       await page
-        .getByRole('button', { name: /Hinzufügen|Speichern/i })
-        .last()
+        .getByRole('dialog')
+        .getByRole('button', { name: /Einschreiben|Hinzufügen|Speichern/i })
         .click();
       await expect(page.getByText('Lukas Keller').first()).toBeVisible();
     }
