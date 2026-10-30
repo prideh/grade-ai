@@ -8,8 +8,7 @@ import {
   matchStudentByNameWithConfidence,
   parseStudentExamUrls,
 } from '@/lib/grading';
-import fs from 'fs/promises';
-import path from 'path';
+import { getStorageAdapter } from '@/lib/storage';
 import crypto from 'crypto';
 
 function parseStoredMaterial(
@@ -103,28 +102,22 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       let finalStudentName = resolvedStudentName;
 
       try {
-        // Read single or multi-page files from disk and convert to base64
+        // Read single or multi-page files from durable storage and convert to base64
         const pageUrls = parseStudentExamUrls(submission.studentExamUrl);
         if (pageUrls.length === 0) {
           throw new Error('Keine Prüfungsdateien für diese Abgabe gefunden.');
         }
 
+        const storage = getStorageAdapter();
         const pagePayloads: { mimeType: string; data: string }[] = [];
         for (const relUrl of pageUrls) {
-          const filePath = path.join(process.cwd(), 'public', relUrl);
-          const studentBytes = await fs.readFile(filePath);
-          const ext = (relUrl.split('.').pop() || 'jpg').toLowerCase();
-          const mimeType =
-            ext === 'pdf'
-              ? 'application/pdf'
-              : ext === 'png'
-                ? 'image/png'
-                : ext === 'webp'
-                  ? 'image/webp'
-                  : 'image/jpeg';
+          const fileData = await storage.read(relUrl);
+          if (!fileData) {
+            throw new Error(`Prüfungsdatei nicht gefunden: ${relUrl}`);
+          }
           pagePayloads.push({
-            mimeType,
-            data: studentBytes.toString('base64'),
+            mimeType: fileData.contentType,
+            data: fileData.buffer.toString('base64'),
           });
         }
 

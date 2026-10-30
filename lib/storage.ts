@@ -1,0 +1,346 @@
+import fs from 'node:fs/promises';
+import { existsSync } from 'node:fs';
+import path from 'node:path';
+import crypto from 'node:crypto';
+
+export interface StorageFile {
+  buffer: Buffer;
+  contentType: string;
+}
+
+export interface StorageAdapter {
+  write(key: string, data: Buffer, contentType?: string): Promise<string>;
+  read(key: string): Promise<StorageFile | null>;
+  delete(key: string): Promise<boolean>;
+  exists(key: string): Promise<boolean>;
+  getUrl(key: string): string;
+}
+
+export interface S3Config {
+  bucket: string;
+  endpoint?: string;
+  region?: string;
+  accessKeyId: string;
+  secretAccessKey: string;
+  forcePathStyle?: boolean;
+}
+
+/**
+ * Normalisiert Dateipfade oder URLs auf einen konsistenten Storage-Key ohne fuehrende Slashes.
+ */
+export function normalizeStorageKey(raw: string): string {
+  if (!raw) return '';
+  return raw
+    .replace(/\\/g, '/')
+    .replace(/^\/+/, '')
+    .replace(/^uploads\//, '')
+    .trim();
+}
+
+/**
+ * Ermittelt den passenden MIME-Type anhand der Dateiendung.
+ */
+export function resolveMimeType(keyOrExt: string): string {
+  const ext = (keyOrExt.split('.').pop() || '').toLowerCase();
+  switch (ext) {
+    case 'pdf':
+      return 'application/pdf';
+    case 'png':
+      return 'image/png';
+    case 'webp':
+      return 'image/webp';
+    case 'jpg':
+    case 'jpeg':
+      return 'image/jpeg';
+    default:
+      return 'application/octet-stream';
+  }
+}
+
+/**
+ * Lokaler Filesystem-Storage fuer Entwicklungsumgebungen.
+ * Schreibt standardmaessig nach /storage/uploads (ausserhalb von /public)
+ * und bietet Rueckfall-Kompatibilitaet fuer Altdaten in /public/uploads.
+ */
+export class FilesystemStorageAdapter implements StorageAdapter {
+  private baseDir: string;
+  private legacyDir: string;
+
+  constructor(baseDir?: string) {
+    this.baseDir =
+      baseDir ||
+      process.env.STORAGE_LOCAL_DIR ||
+      path.join(/*turbopackIgnore: true*/ process.cwd(), 'storage', 'uploads');
+    this.legacyDir = path.join(/*turbopackIgnore: true*/ process.cwd(), 'public', 'uploads');
+  }
+
+  getUrl(key: string): string {
+    const cleanKey = normalizeStorageKey(key);
+    return `/uploads/${cleanKey}`;
+  }
+
+  async write(key: string, data: Buffer, _contentType?: string): Promise<string> {
+    const cleanKey = normalizeStorageKey(key);
+    await fs.mkdir(this.baseDir, { recursive: true });
+    const targetPath = path.join(this.baseDir, cleanKey);
+    await fs.writeFile(targetPath, data);
+    return this.getUrl(cleanKey);
+  }
+
+  async read(key: string): Promise<StorageFile | null> {
+    const cleanKey = normalizeStorageKey(key);
+    const targetPath = path.join(this.baseDir, cleanKey);
+    let resolvedPath: string | null = null;
+
+    if (existsSync(targetPath)) {
+      resolvedPath = targetPath;
+    } else {
+      const legacyPath = path.join(this.legacyDir, cleanKey);
+      if (existsSync(legacyPath)) {
+        resolvedPath = legacyPath;
+      }
+    }
+
+    if (!resolvedPath) {
+      return null;
+    }
+
+    const buffer = await fs.readFile(resolvedPath);
+    const contentType = resolveMimeType(cleanKey);
+    return { buffer, contentType };
+  }
+
+  async delete(key: string): Promise<boolean> {
+    const cleanKey = normalizeStorageKey(key);
+    let deleted = false;
+    const targetPath = path.join(this.baseDir, cleanKey);
+    if (existsSync(targetPath)) {
+      await fs.unlink(targetPath);
+      deleted = true;
+    }
+    const legacyPath = path.join(this.legacyDir, cleanKey);
+    if (existsSync(legacyPath)) {
+      await fs.unlink(legacyPath);
+      deleted = true;
+    }
+    return deleted;
+  }
+
+  async exists(key: string): Promise<boolean> {
+    const cleanKey = normalizeStorageKey(key);
+    const targetPath = path.join(this.baseDir, cleanKey);
+    if (existsSync(targetPath)) return true;
+    const legacyPath = path.join(this.legacyDir, cleanKey);
+    return existsSync(legacyPath);
+  }
+}
+
+/**
+ * Produktions-Adapter fuer S3-kompatible Object Storages (Cloudflare R2, AWS S3, MinIO, etc.)
+ * Verwendet AWS Signature Version 4 (SigV4) mit Node.js built-in Krypto-Primitiven.
+ */
+export class S3StorageAdapter implements StorageAdapter {
+  private config: S3Config;
+
+  constructor(config: S3Config) {
+    this.config = config;
+  }
+
+  getUrl(key: string): string {
+    const cleanKey = normalizeStorageKey(key);
+    return `/uploads/${cleanKey}`;
+  }
+
+  private getRequestDetails(method: string, key: string, payload?: Buffer, contentType?: string) {
+    const cleanKey = normalizeStorageKey(key);
+    const region = this.config.region || 'auto';
+    const service = 's3';
+    const now = new Date();
+    const amzDate = now.toISOString().replace(/[:-]|\.\d{3}/g, '');
+    const dateStamp = amzDate.slice(0, 8);
+
+    let host: string;
+    let uri: string;
+    let fullUrl: string;
+
+    const baseEndpoint = this.config.endpoint
+      ? this.config.endpoint.replace(/\/+$/, '')
+      : `https://s3.${region}.amazonaws.com`;
+
+    const parsedEndpoint = new URL(baseEndpoint);
+    const usePathStyle = this.config.forcePathStyle ?? true;
+
+    if (usePathStyle) {
+      host = parsedEndpoint.host;
+      uri = `/${this.config.bucket}/${encodeURIComponent(cleanKey).replace(/%2F/g, '/')}`;
+      fullUrl = `${parsedEndpoint.origin}${uri}`;
+    } else {
+      host = `${this.config.bucket}.${parsedEndpoint.host}`;
+      uri = `/${encodeURIComponent(cleanKey).replace(/%2F/g, '/')}`;
+      fullUrl = `${parsedEndpoint.protocol}//${host}${uri}`;
+    }
+
+    const payloadHash = crypto
+      .createHash('sha256')
+      .update(payload || Buffer.alloc(0))
+      .digest('hex');
+
+    const headers: Record<string, string> = {
+      host,
+      'x-amz-date': amzDate,
+      'x-amz-content-sha256': payloadHash,
+    };
+
+    if (contentType) {
+      headers['content-type'] = contentType;
+    }
+
+    const headerKeys = Object.keys(headers).sort();
+    const canonicalHeaders = headerKeys
+      .map((k) => `${k.toLowerCase()}:${headers[k].trim()}\n`)
+      .join('');
+    const signedHeaders = headerKeys.map((k) => k.toLowerCase()).join(';');
+
+    const canonicalQuery = '';
+    const canonicalRequest = [
+      method,
+      uri,
+      canonicalQuery,
+      canonicalHeaders,
+      signedHeaders,
+      payloadHash,
+    ].join('\n');
+
+    const hashedCanonicalRequest = crypto
+      .createHash('sha256')
+      .update(canonicalRequest)
+      .digest('hex');
+
+    const credentialScope = `${dateStamp}/${region}/${service}/aws4_request`;
+    const stringToSign = [
+      'AWS4-HMAC-SHA256',
+      amzDate,
+      credentialScope,
+      hashedCanonicalRequest,
+    ].join('\n');
+
+    const kDate = crypto
+      .createHmac('sha256', 'AWS4' + this.config.secretAccessKey)
+      .update(dateStamp)
+      .digest();
+    const kRegion = crypto.createHmac('sha256', kDate).update(region).digest();
+    const kService = crypto.createHmac('sha256', kRegion).update(service).digest();
+    const kSigning = crypto.createHmac('sha256', kService).update('aws4_request').digest();
+
+    const signature = crypto.createHmac('sha256', kSigning).update(stringToSign).digest('hex');
+
+    const authHeader = `AWS4-HMAC-SHA256 Credential=${this.config.accessKeyId}/${credentialScope}, SignedHeaders=${signedHeaders}, Signature=${signature}`;
+    headers['Authorization'] = authHeader;
+
+    return { fullUrl, headers };
+  }
+
+  async write(key: string, data: Buffer, contentType?: string): Promise<string> {
+    const cleanKey = normalizeStorageKey(key);
+    const mime = contentType || resolveMimeType(cleanKey);
+    const { fullUrl, headers } = this.getRequestDetails('PUT', cleanKey, data, mime);
+
+    const res = await fetch(fullUrl, {
+      method: 'PUT',
+      headers,
+      body: new Uint8Array(data),
+    });
+
+    if (!res.ok) {
+      const errText = await res.text().catch(() => '');
+      throw new Error(`S3 write fehlgeschlagen [${res.status}]: ${errText || res.statusText}`);
+    }
+
+    return this.getUrl(cleanKey);
+  }
+
+  async read(key: string): Promise<StorageFile | null> {
+    const cleanKey = normalizeStorageKey(key);
+    const { fullUrl, headers } = this.getRequestDetails('GET', cleanKey);
+
+    const res = await fetch(fullUrl, {
+      method: 'GET',
+      headers,
+    });
+
+    if (res.status === 404) {
+      return null;
+    }
+
+    if (!res.ok) {
+      const errText = await res.text().catch(() => '');
+      throw new Error(`S3 read fehlgeschlagen [${res.status}]: ${errText || res.statusText}`);
+    }
+
+    const arrayBuf = await res.arrayBuffer();
+    const buffer = Buffer.from(arrayBuf);
+    const contentType = res.headers.get('content-type') || resolveMimeType(cleanKey);
+
+    return { buffer, contentType };
+  }
+
+  async delete(key: string): Promise<boolean> {
+    const cleanKey = normalizeStorageKey(key);
+    const { fullUrl, headers } = this.getRequestDetails('DELETE', cleanKey);
+
+    const res = await fetch(fullUrl, {
+      method: 'DELETE',
+      headers,
+    });
+
+    if (res.status === 404) return false;
+    if (!res.ok) {
+      const errText = await res.text().catch(() => '');
+      throw new Error(`S3 delete fehlgeschlagen [${res.status}]: ${errText || res.statusText}`);
+    }
+    return true;
+  }
+
+  async exists(key: string): Promise<boolean> {
+    const cleanKey = normalizeStorageKey(key);
+    const { fullUrl, headers } = this.getRequestDetails('HEAD', cleanKey);
+
+    const res = await fetch(fullUrl, {
+      method: 'HEAD',
+      headers,
+    });
+
+    if (res.status === 200) return true;
+    if (res.status === 404) return false;
+    return false;
+  }
+}
+
+/**
+ * Liefert den gemaess Umgebungsvariablen konfigurierten Storage-Adapter zurueck.
+ */
+export function getStorageAdapter(): StorageAdapter {
+  const driver = process.env.STORAGE_DRIVER?.toLowerCase();
+  const bucket = process.env.S3_BUCKET || '';
+  const accessKeyId = (process.env.S3_ACCESS_KEY_ID || process.env.AWS_ACCESS_KEY_ID || '').trim();
+  const secretAccessKey = (
+    process.env.S3_SECRET_ACCESS_KEY ||
+    process.env.AWS_SECRET_ACCESS_KEY ||
+    ''
+  ).trim();
+
+  const hasS3Config = Boolean(bucket && accessKeyId && secretAccessKey);
+
+  if (driver === 's3' || (!driver && hasS3Config)) {
+    return new S3StorageAdapter({
+      bucket,
+      endpoint: process.env.S3_ENDPOINT,
+      region: process.env.S3_REGION || 'auto',
+      accessKeyId,
+      secretAccessKey,
+      forcePathStyle: process.env.S3_FORCE_PATH_STYLE !== 'false',
+    });
+  }
+
+  return new FilesystemStorageAdapter();
+}

@@ -13,8 +13,7 @@ import {
   parseStudentExamUrls,
 } from '@/lib/grading';
 import { saveScannedRelayDocument } from '@/lib/relay-store';
-import fs from 'fs/promises';
-import path from 'path';
+import { getStorageAdapter } from '@/lib/storage';
 import crypto from 'crypto';
 
 const ALLOWED_MIME_TO_EXT: Record<string, string> = {
@@ -136,8 +135,7 @@ export async function POST(request: Request) {
       });
     }
 
-    const uploadsDir = path.join(process.cwd(), 'public', 'uploads');
-    await fs.mkdir(uploadsDir, { recursive: true });
+    const storage = getStorageAdapter();
 
     // =========================================================================
     // MODE 2: REPLACING OR APPENDING PAGES TO AN EXISTING SUBMISSION
@@ -175,8 +173,8 @@ export async function POST(request: Request) {
       for (let idx = 0; idx < pagePayloads.length; idx++) {
         const p = pagePayloads[idx];
         const fileName = `${existingSub.id}_${suffixId}_p${idx + 1}.${p.ext}`;
-        await fs.writeFile(path.join(uploadsDir, fileName), p.buffer);
-        newUrls.push(`/uploads/${fileName}`);
+        const savedUrl = await storage.write(fileName, p.buffer, p.mimeType);
+        newUrls.push(savedUrl);
       }
 
       const finalUrls =
@@ -187,20 +185,14 @@ export async function POST(request: Request) {
       const allEvaluationPages: { mimeType: string; data: string }[] = [];
       if (effectiveTargetMode === 'APPEND_SUBMISSION') {
         for (const u of existingUrls) {
-          const safeRelative = u.replace(/^\/+/, '');
-          const diskPath = path.join(process.cwd(), 'public', safeRelative);
           try {
-            const diskBytes = await fs.readFile(diskPath);
-            const ext = (diskPath.split('.').pop() || '').toLowerCase();
-            const mime =
-              ext === 'pdf'
-                ? 'application/pdf'
-                : ext === 'png'
-                  ? 'image/png'
-                  : ext === 'webp'
-                    ? 'image/webp'
-                    : 'image/jpeg';
-            allEvaluationPages.push({ mimeType: mime, data: diskBytes.toString('base64') });
+            const fileData = await storage.read(u);
+            if (fileData) {
+              allEvaluationPages.push({
+                mimeType: fileData.contentType,
+                data: fileData.buffer.toString('base64'),
+              });
+            }
           } catch {
             // Skip unreadable old file
           }
@@ -464,8 +456,8 @@ export async function POST(request: Request) {
         pagePayloads.length === 1
           ? `${submissionId}.${p.ext}`
           : `${submissionId}_p${idx + 1}.${p.ext}`;
-      await fs.writeFile(path.join(uploadsDir, fileName), p.buffer);
-      savedUrls.push(`/uploads/${fileName}`);
+      const savedUrl = await storage.write(fileName, p.buffer, p.mimeType);
+      savedUrls.push(savedUrl);
     }
 
     const storedStudentExamUrl = savedUrls.length === 1 ? savedUrls[0] : JSON.stringify(savedUrls);

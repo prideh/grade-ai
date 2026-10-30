@@ -1,7 +1,8 @@
 import { NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { getSession } from '@/lib/session';
-import { calculateRawSwissGrade, calculateSwissGrade } from '@/lib/grading';
+import { calculateRawSwissGrade, calculateSwissGrade, parseStudentExamUrls } from '@/lib/grading';
+import { getStorageAdapter } from '@/lib/storage';
 
 // GET: Fetch a submission by ID and map to standard ExamCorrectionResult
 export async function GET(request: Request, { params }: { params: Promise<{ id: string }> }) {
@@ -461,6 +462,19 @@ export async function DELETE(request: Request, { params }: { params: Promise<{ i
     await db.submission.delete({
       where: { id: submissionId },
     });
+
+    // Clean up stored scans
+    if (submission.studentExamUrl) {
+      try {
+        const storage = getStorageAdapter();
+        const urls = parseStudentExamUrls(submission.studentExamUrl);
+        for (const u of urls) {
+          await storage.delete(u);
+        }
+      } catch (storageErr) {
+        console.warn('Storage cleanup warning on submission delete:', storageErr);
+      }
+    }
 
     return NextResponse.json({ success: true });
   } catch (error) {

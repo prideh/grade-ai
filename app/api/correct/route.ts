@@ -7,8 +7,7 @@ import {
   calculateSwissGrade,
   matchStudentByNameWithConfidence,
 } from '@/lib/grading';
-import fs from 'fs/promises';
-import path from 'path';
+import { getStorageAdapter } from '@/lib/storage';
 import crypto from 'crypto';
 
 // Allowed student exam MIME types and safe file extensions
@@ -246,15 +245,15 @@ export async function POST(request: Request) {
     const studentBytes = await studentExam.arrayBuffer();
     const studentBase64 = Buffer.from(studentBytes).toString('base64');
 
-    // 4. Save the exam sheet document to the local filesystem (Option A)
-    const uploadsDir = path.join(process.cwd(), 'public', 'uploads');
-    await fs.mkdir(uploadsDir, { recursive: true });
-
+    // 4. Save the exam sheet document via the configured durable storage adapter
     const submissionId = crypto.randomUUID();
     const fileName = `${submissionId}.${safeFormat.ext}`;
-    const filePath = path.join(uploadsDir, fileName);
-    await fs.writeFile(filePath, Buffer.from(studentBytes));
-    const savedFilePath = `/uploads/${fileName}`;
+    const storage = getStorageAdapter();
+    const savedFilePath = await storage.write(
+      fileName,
+      Buffer.from(studentBytes),
+      safeFormat.mimeType
+    );
 
     // Fetch exam name synchronously for decoupled logging
     const examRecordSync = await db.exam.findUnique({ where: { id: finalExamId } });
