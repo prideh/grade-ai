@@ -2,6 +2,13 @@ import { NextResponse } from 'next/server';
 import { getSession } from '@/lib/session';
 import { GoogleGenAI, Type, ThinkingLevel, type Schema } from '@google/genai';
 import { DEFAULT_GEMINI_MODEL, appendReferenceMaterialToContents } from '@/lib/gemini';
+import {
+  computeRubricParseHash,
+  buildLlmCacheKey,
+  getCachedLlmResult,
+  setCachedLlmResult,
+  LLM_PROMPT_VERSIONS,
+} from '@/lib/llm-cache';
 
 const RUBRIC_PARSE_SCHEMA: Schema = {
   type: Type.ARRAY,
@@ -35,10 +42,25 @@ export async function POST(request: Request) {
     }
 
     const body = await request.json();
-    const { rubricText } = body;
+    const { rubricText, bypassCache } = body;
 
     if (!rubricText) {
       return NextResponse.json({ error: 'Musterlösung fehlt.' }, { status: 400 });
+    }
+
+    const rubricHash = computeRubricParseHash({
+      teacherId: session.userId,
+      modelName: DEFAULT_GEMINI_MODEL,
+      promptVersion: LLM_PROMPT_VERSIONS.rubricParse,
+      rubricText,
+    });
+    const cacheKey = buildLlmCacheKey(session.userId, 'rubric_parse', rubricHash);
+
+    if (!bypassCache) {
+      const cached = await getCachedLlmResult<unknown[]>(cacheKey);
+      if (cached) {
+        return NextResponse.json({ success: true, tasks: cached.result, cached: true });
+      }
     }
 
     const apiKey = process.env.GEMINI_API_KEY;
@@ -85,7 +107,20 @@ Regeln:
     const responseText = (response.text || '').trim();
     const parsedTasks = responseText ? JSON.parse(responseText) : [];
 
-    return NextResponse.json({ success: true, tasks: parsedTasks });
+    if (Array.isArray(parsedTasks) && parsedTasks.length > 0) {
+      await setCachedLlmResult(cacheKey, {
+        result: parsedTasks,
+        cachedAt: Date.now(),
+        cachedAtIso: new Date().toISOString(),
+        model: DEFAULT_GEMINI_MODEL,
+        hash: rubricHash,
+        callType: 'rubric_parse',
+        promptVersion: LLM_PROMPT_VERSIONS.rubricParse,
+        teacherId: session.userId,
+      });
+    }
+
+    return NextResponse.json({ success: true, tasks: parsedTasks, cached: false });
   } catch (error) {
     console.error('Error parsing rubric text:', error);
     return NextResponse.json(

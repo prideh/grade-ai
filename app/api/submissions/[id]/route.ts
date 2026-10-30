@@ -3,6 +3,12 @@ import { db } from '@/lib/db';
 import { getSession } from '@/lib/session';
 import { calculateRawSwissGrade, calculateSwissGrade, parseStudentExamUrls } from '@/lib/grading';
 import { getStorageAdapter } from '@/lib/storage';
+import {
+  serverCache,
+  CacheTags,
+  invalidateSubmissionCache,
+  invalidateLogsCache,
+} from '@/lib/cache';
 
 // GET: Fetch a submission by ID and map to standard ExamCorrectionResult
 export async function GET(request: Request, { params }: { params: Promise<{ id: string }> }) {
@@ -13,6 +19,12 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
     }
 
     const { id: submissionId } = await params;
+
+    const cacheKey = `teacher:${session.userId}:submission:${submissionId}:detail`;
+    const cached = await serverCache.get<unknown>(cacheKey);
+    if (cached) {
+      return NextResponse.json(cached);
+    }
 
     const submission = await db.submission.findUnique({
       where: { id: submissionId },
@@ -75,12 +87,20 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
       }))
       .sort((a, b) => a.studentName.localeCompare(b.studentName, 'de-CH'));
 
+    const latestLog = await db.correctionLog.findFirst({
+      where: { submissionId },
+      orderBy: { createdAt: 'desc' },
+      select: { actionType: true, modelUsed: true },
+    });
+    const isReused = latestLog?.actionType === 'WIEDERVERWENDET';
+
     // Map DB relational model to ExamCorrectionResult frontend format
     const responseData = {
       id: submission.id,
       examId: submission.examId,
       examTitle: submission.exam.title,
       siblingSubmissions,
+      isReused: Boolean(isReused),
       status: submission.status,
       errorMessage: submission.errorMessage,
       schuelerName:
@@ -133,6 +153,15 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
         uebungsEmpfehlung: submission.exerciseRecommendation || '',
       },
     };
+
+    await serverCache.set(cacheKey, responseData, {
+      tags: [
+        CacheTags.teacher(session.userId),
+        CacheTags.submissions(session.userId),
+        CacheTags.submission(session.userId, submissionId),
+        CacheTags.exam(session.userId, submission.examId),
+      ],
+    });
 
     return NextResponse.json(responseData);
   } catch (error) {
@@ -287,6 +316,13 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       return finalSubmission;
     });
 
+    await invalidateSubmissionCache(session.userId, {
+      submissionId,
+      examId: submission.examId,
+      classId: submission.exam.classId,
+      studentId: submission.studentId || undefined,
+    });
+
     return NextResponse.json({
       success: true,
       earnedPoints: updatedSubmission.earnedPoints,
@@ -396,6 +432,21 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
       include: { student: true },
     });
 
+    await invalidateSubmissionCache(session.userId, {
+      submissionId,
+      examId: submission.examId,
+      classId: submission.exam.classId,
+      studentId: submission.studentId || undefined,
+    });
+    if (examChanged) {
+      await invalidateSubmissionCache(session.userId, {
+        submissionId,
+        examId: targetExamId,
+        classId: targetClassId,
+        studentId,
+      });
+    }
+
     return NextResponse.json({
       success: true,
       studentId: updated.studentId,
@@ -462,6 +513,14 @@ export async function DELETE(request: Request, { params }: { params: Promise<{ i
     await db.submission.delete({
       where: { id: submissionId },
     });
+
+    await invalidateSubmissionCache(session.userId, {
+      submissionId,
+      examId: submission.examId,
+      classId: submission.exam.classId,
+      studentId: submission.studentId || undefined,
+    });
+    await invalidateLogsCache(session.userId);
 
     // Clean up stored scans
     if (submission.studentExamUrl) {

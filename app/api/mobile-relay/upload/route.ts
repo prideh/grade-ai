@@ -5,6 +5,7 @@ import {
   DEFAULT_GEMINI_MODEL,
   identifyExamAndStudentFromScan,
   runLiveGeminiCorrection,
+  type ExamCorrectionResult,
 } from '@/lib/gemini';
 import {
   calculateRawSwissGrade,
@@ -14,7 +15,29 @@ import {
 } from '@/lib/grading';
 import { saveScannedRelayDocument } from '@/lib/relay-store';
 import { getStorageAdapter } from '@/lib/storage';
+import { invalidateExamCache, invalidateSubmissionCache, invalidateLogsCache } from '@/lib/cache';
+import {
+  computeGradingHash,
+  buildLlmCacheKey,
+  getCachedLlmResult,
+  setCachedLlmResult,
+  LLM_PROMPT_VERSIONS,
+} from '@/lib/llm-cache';
 import crypto from 'crypto';
+
+function parseStoredMaterial(
+  rawText?: string | null
+): string | { mimeType: string; data: string } | null {
+  if (!rawText) return null;
+  if (rawText.startsWith('{"mimeType":')) {
+    try {
+      return JSON.parse(rawText);
+    } catch {
+      return rawText;
+    }
+  }
+  return rawText;
+}
 
 const ALLOWED_MIME_TO_EXT: Record<string, string> = {
   'application/pdf': 'pdf',
@@ -124,6 +147,7 @@ export async function POST(request: Request) {
                 ? { rubricText: serializedDocument }
                 : { examTemplateText: serializedDocument },
           });
+          invalidateExamCache(payload.teacherId, ownedExam.id, ownedExam.classId);
         }
       }
 
@@ -224,6 +248,14 @@ export async function POST(request: Request) {
         },
       });
 
+      invalidateSubmissionCache(payload.teacherId, {
+        submissionId: existingSub.id,
+        examId: existingSub.examId,
+        classId: existingSub.exam.classId,
+        studentId: existingSub.studentId,
+      });
+      invalidateLogsCache(payload.teacherId);
+
       after(async () => {
         const startTime = Date.now();
         try {
@@ -237,20 +269,50 @@ export async function POST(request: Request) {
               : undefined;
 
           const [firstEvalPage, ...extraEvalPages] = allEvaluationPages;
-          const result = await runLiveGeminiCorrection(
-            firstEvalPage.data,
-            existingSub.exam.rubricText,
-            DEFAULT_GEMINI_MODEL,
-            process.env.GEMINI_API_KEY,
-            firstEvalPage.mimeType,
+          const promptVersion = LLM_PROMPT_VERSIONS.grading;
+          const gradingHash = computeGradingHash({
+            teacherId: payload.teacherId,
+            modelName: DEFAULT_GEMINI_MODEL,
+            promptVersion,
+            studentPages: allEvaluationPages,
+            rubric: parseStoredMaterial(existingSub.exam.rubricText),
+            examTemplate: parseStoredMaterial(existingSub.exam.examTemplateText),
+            gradingNotes: existingSub.exam.gradingNotes,
             predefinedTasks,
-            existingSub.exam.subject,
-            {
-              examTemplate: existingSub.exam.examTemplateText,
-              gradingNotes: existingSub.exam.gradingNotes,
-              additionalStudentPages: extraEvalPages,
-            }
-          );
+            subject: existingSub.exam.subject,
+          });
+          const cacheKey = buildLlmCacheKey(payload.teacherId, 'grading', gradingHash);
+
+          let result: ExamCorrectionResult;
+          const cached = await getCachedLlmResult<ExamCorrectionResult>(cacheKey);
+          if (cached) {
+            result = cached.result;
+          } else {
+            result = await runLiveGeminiCorrection(
+              firstEvalPage.data,
+              existingSub.exam.rubricText,
+              DEFAULT_GEMINI_MODEL,
+              process.env.GEMINI_API_KEY,
+              firstEvalPage.mimeType,
+              predefinedTasks,
+              existingSub.exam.subject,
+              {
+                examTemplate: existingSub.exam.examTemplateText,
+                gradingNotes: existingSub.exam.gradingNotes,
+                additionalStudentPages: extraEvalPages,
+              }
+            );
+            await setCachedLlmResult(cacheKey, {
+              result,
+              cachedAt: Date.now(),
+              cachedAtIso: new Date().toISOString(),
+              model: DEFAULT_GEMINI_MODEL,
+              hash: gradingHash,
+              callType: 'grading',
+              promptVersion,
+              teacherId: payload.teacherId,
+            });
+          }
 
           let serverTotalEarnedPoints = 0;
           let serverTotalMaxPoints = 0;
@@ -390,6 +452,13 @@ export async function POST(request: Request) {
             where: { id: logRecord.id },
             data: { status: 'COMPLETED', durationMs: Date.now() - startTime },
           });
+          invalidateSubmissionCache(payload.teacherId, {
+            submissionId: existingSub.id,
+            examId: existingSub.examId,
+            classId: existingSub.exam.classId,
+            studentId: existingSub.studentId,
+          });
+          invalidateLogsCache(payload.teacherId);
         } catch (err) {
           const errMsg = err instanceof Error ? err.message : String(err);
           await db.submission.update({
@@ -400,6 +469,13 @@ export async function POST(request: Request) {
             where: { id: logRecord.id },
             data: { status: 'FAILED', errorMessage: errMsg, durationMs: Date.now() - startTime },
           });
+          invalidateSubmissionCache(payload.teacherId, {
+            submissionId: existingSub.id,
+            examId: existingSub.examId,
+            classId: existingSub.exam.classId,
+            studentId: existingSub.studentId,
+          });
+          invalidateLogsCache(payload.teacherId);
         }
       });
 
@@ -516,6 +592,14 @@ export async function POST(request: Request) {
       },
     });
 
+    invalidateSubmissionCache(payload.teacherId, {
+      submissionId,
+      examId: initialExam.id,
+      classId: initialExam.classId,
+      studentId: targetStudentIdFromRequest,
+    });
+    invalidateLogsCache(payload.teacherId);
+
     after(async () => {
       const startTime = Date.now();
       let finalStudentName = preselectedStudentObj?.name || 'Smartphone-Scan';
@@ -550,7 +634,8 @@ export async function POST(request: Request) {
 
             const identification = await identifyExamAndStudentFromScan(
               pagePayloads.map((p) => ({ mimeType: p.mimeType, data: p.data })),
-              candidates
+              candidates,
+              { teacherId: payload.teacherId }
             );
             const foundExam = teacherExams.find((e) => e.id === identification.matchedExamId);
             if (foundExam) {
@@ -570,23 +655,57 @@ export async function POST(request: Request) {
             : undefined;
 
         const [firstPage, ...extraPages] = pagePayloads;
-        const result = await runLiveGeminiCorrection(
-          firstPage.data,
-          activeExam.rubricText,
-          DEFAULT_GEMINI_MODEL,
-          process.env.GEMINI_API_KEY,
-          firstPage.mimeType,
+        const promptVersion = LLM_PROMPT_VERSIONS.grading;
+        const studentPages = pagePayloads.map((p) => ({ mimeType: p.mimeType, data: p.data }));
+        const gradingHash = computeGradingHash({
+          teacherId: payload.teacherId,
+          modelName: DEFAULT_GEMINI_MODEL,
+          promptVersion,
+          studentPages,
+          rubric: parseStoredMaterial(activeExam.rubricText),
+          examTemplate: parseStoredMaterial(activeExam.examTemplateText),
+          gradingNotes: activeExam.gradingNotes,
           predefinedTasks,
-          activeExam.subject,
-          {
-            examTemplate: activeExam.examTemplateText,
-            gradingNotes: activeExam.gradingNotes,
-            additionalStudentPages: extraPages.map((p) => ({
-              mimeType: p.mimeType,
-              data: p.data,
-            })),
-          }
-        );
+          subject: activeExam.subject,
+        });
+        const cacheKey = buildLlmCacheKey(payload.teacherId, 'grading', gradingHash);
+
+        let result: ExamCorrectionResult;
+        let isReused = false;
+
+        const cached = await getCachedLlmResult<ExamCorrectionResult>(cacheKey);
+        if (cached) {
+          result = cached.result;
+          isReused = true;
+        } else {
+          result = await runLiveGeminiCorrection(
+            firstPage.data,
+            activeExam.rubricText,
+            DEFAULT_GEMINI_MODEL,
+            process.env.GEMINI_API_KEY,
+            firstPage.mimeType,
+            predefinedTasks,
+            activeExam.subject,
+            {
+              examTemplate: activeExam.examTemplateText,
+              gradingNotes: activeExam.gradingNotes,
+              additionalStudentPages: extraPages.map((p) => ({
+                mimeType: p.mimeType,
+                data: p.data,
+              })),
+            }
+          );
+          await setCachedLlmResult(cacheKey, {
+            result,
+            cachedAt: Date.now(),
+            cachedAtIso: new Date().toISOString(),
+            model: DEFAULT_GEMINI_MODEL,
+            hash: gradingHash,
+            callType: 'grading',
+            promptVersion,
+            teacherId: payload.teacherId,
+          });
+        }
 
         const classStudents = activeExam.class.students;
         const extractedName = (result.schuelerName || '').trim();
@@ -820,8 +939,16 @@ export async function POST(request: Request) {
             studentName: finalStudentName,
             status: 'COMPLETED',
             durationMs,
+            actionType: isReused ? 'WIEDERVERWENDET' : 'ERSTELLT',
           },
         });
+        invalidateSubmissionCache(payload.teacherId, {
+          submissionId,
+          examId: activeExam.id,
+          classId: activeExam.classId,
+          studentId: finalMatchedStudentId,
+        });
+        invalidateLogsCache(payload.teacherId);
       } catch (error) {
         const durationMs = Date.now() - startTime;
         const errMsg = error instanceof Error ? error.message : String(error);
@@ -852,6 +979,13 @@ export async function POST(request: Request) {
         } catch {
           // Ignore if deleted
         }
+        invalidateSubmissionCache(payload.teacherId, {
+          submissionId,
+          examId: initialExam.id,
+          classId: initialExam.classId,
+          studentId: targetStudentIdFromRequest,
+        });
+        invalidateLogsCache(payload.teacherId);
       }
     });
 

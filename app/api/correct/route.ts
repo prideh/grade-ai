@@ -1,13 +1,25 @@
 import { NextResponse, after } from 'next/server';
 import { db } from '@/lib/db';
 import { getSession } from '@/lib/session';
-import { DEFAULT_GEMINI_MODEL, runLiveGeminiCorrection } from '@/lib/gemini';
+import {
+  DEFAULT_GEMINI_MODEL,
+  runLiveGeminiCorrection,
+  type ExamCorrectionResult,
+} from '@/lib/gemini';
 import {
   calculateRawSwissGrade,
   calculateSwissGrade,
   matchStudentByNameWithConfidence,
 } from '@/lib/grading';
 import { getStorageAdapter } from '@/lib/storage';
+import { invalidateSubmissionCache, invalidateLogsCache } from '@/lib/cache';
+import {
+  computeGradingHash,
+  buildLlmCacheKey,
+  getCachedLlmResult,
+  setCachedLlmResult,
+  LLM_PROMPT_VERSIONS,
+} from '@/lib/llm-cache';
 import crypto from 'crypto';
 
 // Allowed student exam MIME types and safe file extensions
@@ -302,6 +314,14 @@ export async function POST(request: Request) {
       },
     });
 
+    await invalidateSubmissionCache(session.userId, {
+      submissionId: submission.id,
+      examId: finalExamId,
+      classId: classId,
+      studentId: studentId || undefined,
+    });
+    await invalidateLogsCache(session.userId);
+
     // 6. Schedule heavy live Gemini OCR and correction in the background using stable Next.js after()
     after(async () => {
       const startTime = Date.now();
@@ -334,21 +354,57 @@ export async function POST(request: Request) {
               }))
             : undefined;
 
-        // 3. Run live Gemini OCR and correction analysis with 3-tier reference hierarchy
+        // 3. Run live Gemini OCR or reuse result from Content-Hash LLM Cache
         const examTemplateParam = parseStoredMaterial(examRecord?.examTemplateText);
-        const result = await runLiveGeminiCorrection(
-          studentBase64,
-          rubricParam,
-          model,
-          apiKey,
-          safeFormat.mimeType,
+        const promptVersion = LLM_PROMPT_VERSIONS.grading;
+        const studentPages = [{ mimeType: safeFormat.mimeType, data: studentBase64 }];
+        const gradingHash = computeGradingHash({
+          teacherId: session.userId,
+          modelName: model,
+          promptVersion,
+          studentPages,
+          rubric: rubricParam,
+          examTemplate: examTemplateParam,
+          gradingNotes: examRecord?.gradingNotes,
           predefinedTasks,
-          examRecord?.subject,
-          {
-            examTemplate: examTemplateParam,
-            gradingNotes: examRecord?.gradingNotes,
-          }
-        );
+          subject: examRecord?.subject,
+        });
+        const cacheKey = buildLlmCacheKey(session.userId, 'grading', gradingHash);
+
+        let result: ExamCorrectionResult;
+        let isReused = false;
+        let modelUsedForLog = model;
+
+        const cached = !overwrite ? await getCachedLlmResult<ExamCorrectionResult>(cacheKey) : null;
+        if (cached) {
+          result = cached.result;
+          isReused = true;
+          modelUsedForLog = cached.model;
+        } else {
+          result = await runLiveGeminiCorrection(
+            studentBase64,
+            rubricParam,
+            model,
+            apiKey,
+            safeFormat.mimeType,
+            predefinedTasks,
+            examRecord?.subject,
+            {
+              examTemplate: examTemplateParam,
+              gradingNotes: examRecord?.gradingNotes,
+            }
+          );
+          await setCachedLlmResult(cacheKey, {
+            result,
+            cachedAt: Date.now(),
+            cachedAtIso: new Date().toISOString(),
+            model,
+            hash: gradingHash,
+            callType: 'grading',
+            promptVersion,
+            teacherId: session.userId,
+          });
+        }
 
         // 4. Perform AI Auto-Matching with explicit confidence calibration if studentId was not provided synchronously
         let matchedStudentId = studentId || null;
@@ -586,8 +642,18 @@ export async function POST(request: Request) {
             status: 'COMPLETED',
             studentName: finalStudentName,
             durationMs,
+            modelUsed: modelUsedForLog,
+            actionType: isReused ? 'WIEDERVERWENDET' : overwrite ? 'ERSETZT' : 'ERSTELLT',
           },
         });
+
+        await invalidateSubmissionCache(session.userId, {
+          submissionId: submission.id,
+          examId: finalExamId,
+          classId: classId,
+          studentId: matchedStudentId || studentId || undefined,
+        });
+        await invalidateLogsCache(session.userId);
       } catch (error) {
         const durationMs = Date.now() - startTime;
 
@@ -612,6 +678,12 @@ export async function POST(request: Request) {
           } catch (logErr) {
             console.error('Failed to set CANCELLED state on CorrectionLog:', logErr);
           }
+          await invalidateSubmissionCache(session.userId, {
+            submissionId: submission.id,
+            examId: finalExamId,
+            classId: classId,
+          });
+          await invalidateLogsCache(session.userId);
           return;
         }
 
@@ -654,6 +726,13 @@ export async function POST(request: Request) {
             );
           }
         }
+
+        await invalidateSubmissionCache(session.userId, {
+          submissionId: submission.id,
+          examId: finalExamId,
+          classId: classId,
+        });
+        await invalidateLogsCache(session.userId);
       }
     });
 

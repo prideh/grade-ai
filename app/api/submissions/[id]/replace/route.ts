@@ -9,6 +9,13 @@ import {
   parseStudentExamUrls,
 } from '@/lib/grading';
 import { getStorageAdapter } from '@/lib/storage';
+import { invalidateSubmissionCache, invalidateLogsCache } from '@/lib/cache';
+import {
+  computeGradingHash,
+  buildLlmCacheKey,
+  setCachedLlmResult,
+  LLM_PROMPT_VERSIONS,
+} from '@/lib/llm-cache';
 import crypto from 'crypto';
 
 function parseStoredMaterial(
@@ -96,6 +103,14 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       },
     });
 
+    await invalidateSubmissionCache(session.userId, {
+      submissionId,
+      examId: submission.examId,
+      classId: submission.exam.classId,
+      studentId: submission.studentId || undefined,
+    });
+    await invalidateLogsCache(session.userId);
+
     // 3. Schedule the background task using Next.js after() to re-run correction with overwrite = true
     after(async () => {
       const startTime = Date.now();
@@ -158,6 +173,32 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
             additionalStudentPages: extraPages,
           }
         );
+
+        // Expliziter Re-Grade aktualisiert den LLM-Cache fuer zukuenftige identische Abfragen
+        const promptVersion = LLM_PROMPT_VERSIONS.grading;
+        const studentPages = [firstPage, ...extraPages];
+        const gradingHash = computeGradingHash({
+          teacherId: session.userId,
+          modelName: modelToUse,
+          promptVersion,
+          studentPages,
+          rubric: rubricParam,
+          examTemplate: examTemplateParam,
+          gradingNotes: submission.exam.gradingNotes,
+          predefinedTasks,
+          subject: submission.exam.subject,
+        });
+        const cacheKey = buildLlmCacheKey(session.userId, 'grading', gradingHash);
+        await setCachedLlmResult(cacheKey, {
+          result,
+          cachedAt: Date.now(),
+          cachedAtIso: new Date().toISOString(),
+          model: modelToUse,
+          hash: gradingHash,
+          callType: 'grading',
+          promptVersion,
+          teacherId: session.userId,
+        });
 
         // Resolve student ID via calibrated auto-matching if student was not manually set previously
         let matchedStudentId = submission.studentId;
@@ -338,6 +379,14 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
             durationMs,
           },
         });
+
+        await invalidateSubmissionCache(session.userId, {
+          submissionId,
+          examId: submission.examId,
+          classId: submission.exam.classId,
+          studentId: matchedStudentId || submission.studentId || undefined,
+        });
+        await invalidateLogsCache(session.userId);
       } catch (error) {
         const durationMs = Date.now() - startTime;
 
@@ -362,6 +411,12 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
           } catch (logErr) {
             console.error('Failed to set CANCELLED status on CorrectionLog:', logErr);
           }
+          await invalidateSubmissionCache(session.userId, {
+            submissionId,
+            examId: submission.examId,
+            classId: submission.exam.classId,
+          });
+          await invalidateLogsCache(session.userId);
           return;
         }
 
@@ -403,6 +458,13 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
             );
           }
         }
+
+        await invalidateSubmissionCache(session.userId, {
+          submissionId,
+          examId: submission.examId,
+          classId: submission.exam.classId,
+        });
+        await invalidateLogsCache(session.userId);
       }
     });
 

@@ -1,4 +1,11 @@
 import { GoogleGenAI, Type, ThinkingLevel, type Schema } from '@google/genai';
+import {
+  computeScanIdentificationHash,
+  buildLlmCacheKey,
+  getCachedLlmResult,
+  setCachedLlmResult,
+  LLM_PROMPT_VERSIONS,
+} from '@/lib/llm-cache';
 
 export const DEFAULT_GEMINI_MODEL = 'gemini-3.8-flash';
 
@@ -559,13 +566,19 @@ const SCAN_IDENTIFICATION_SCHEMA: Schema = {
   required: ['matchedExamId', 'isExamMatchCertain', 'extractedStudentName', 'isStudentNameCertain'],
 };
 
+export interface IdentifyScanOptions {
+  teacherId?: string;
+  bypassCache?: boolean;
+}
+
 /**
  * Fast vision pass used by the Global QR Mobile Relay to automatically identify which Exam/Class
  * and which Student a photographed exam belongs to.
  */
 export async function identifyExamAndStudentFromScan(
   pages: { mimeType: string; data: string }[],
-  candidates: ExamCandidateForMatching[]
+  candidates: ExamCandidateForMatching[],
+  options?: IdentifyScanOptions
 ): Promise<ScanAutoIdentificationResult> {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey || candidates.length === 0) {
@@ -575,6 +588,27 @@ export async function identifyExamAndStudentFromScan(
       extractedStudentName: '',
       isStudentNameCertain: false,
     };
+  }
+
+  // 1. Content-Hash Cache Pruefung bei vorhandener teacherId (Mandantentrennung)
+  let cacheKey: string | null = null;
+  let scanHash: string | null = null;
+  if (options?.teacherId) {
+    scanHash = computeScanIdentificationHash({
+      teacherId: options.teacherId,
+      modelName: DEFAULT_GEMINI_MODEL,
+      promptVersion: LLM_PROMPT_VERSIONS.scanIdentification,
+      pages,
+      candidates,
+    });
+    cacheKey = buildLlmCacheKey(options.teacherId, 'scan_identification', scanHash);
+
+    if (!options.bypassCache) {
+      const cached = await getCachedLlmResult<ScanAutoIdentificationResult>(cacheKey);
+      if (cached) {
+        return cached.result;
+      }
+    }
   }
 
   const ai = new GoogleGenAI({ apiKey });
@@ -630,12 +664,27 @@ REGELN:
     const parsed = JSON.parse((response.text || '{}').trim());
     const validExam = candidates.find((c) => c.examId === parsed.matchedExamId);
 
-    return {
+    const result: ScanAutoIdentificationResult = {
       matchedExamId: validExam ? validExam.examId : candidates[0]?.examId || null,
       isExamMatchCertain: Boolean(validExam && parsed.isExamMatchCertain),
       extractedStudentName: parsed.extractedStudentName || '',
       isStudentNameCertain: Boolean(parsed.isStudentNameCertain),
     };
+
+    if (cacheKey && scanHash && options?.teacherId) {
+      await setCachedLlmResult(cacheKey, {
+        result,
+        cachedAt: Date.now(),
+        cachedAtIso: new Date().toISOString(),
+        model: DEFAULT_GEMINI_MODEL,
+        hash: scanHash,
+        callType: 'scan_identification',
+        promptVersion: LLM_PROMPT_VERSIONS.scanIdentification,
+        teacherId: options.teacherId,
+      });
+    }
+
+    return result;
   } catch (error) {
     console.error('Error in identifyExamAndStudentFromScan:', error);
     return {
