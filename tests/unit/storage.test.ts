@@ -8,6 +8,7 @@ import {
   FilesystemStorageAdapter,
   S3StorageAdapter,
   getStorageAdapter,
+  type StorageAdapter,
 } from '@/lib/storage';
 import { GET, HEAD } from '@/app/uploads/[...file]/route';
 import * as sessionModule from '@/lib/session';
@@ -111,13 +112,13 @@ describe('Storage System (lib/storage.ts)', () => {
       const testData = Buffer.from('TEST_SCAN_BYTES');
 
       let interceptedUrl = '';
-      let interceptedHeaders: Headers | null = null;
+      let interceptedHeaders: Record<string, string> = {};
       let interceptedMethod = '';
 
       vi.spyOn(global, 'fetch').mockImplementation(async (url, init) => {
         interceptedUrl = String(url);
         interceptedMethod = init?.method || '';
-        interceptedHeaders = new Headers(init?.headers as Record<string, string>);
+        interceptedHeaders = (init?.headers || {}) as Record<string, string>;
         return new Response(null, { status: 200 });
       });
 
@@ -128,10 +129,10 @@ describe('Storage System (lib/storage.ts)', () => {
       expect(interceptedUrl).toBe(
         'https://test-account.r2.cloudflarestorage.com/grade-ai-test-bucket/student_scan.pdf'
       );
-      expect(interceptedHeaders?.get('content-type')).toBe('application/pdf');
-      expect(interceptedHeaders?.get('x-amz-date')).toMatch(/^\d{8}T\d{6}Z$/);
+      expect(interceptedHeaders['content-type']).toBe('application/pdf');
+      expect(interceptedHeaders['x-amz-date']).toMatch(/^\d{8}T\d{6}Z$/);
 
-      const auth = interceptedHeaders?.get('authorization');
+      const auth = interceptedHeaders['Authorization'] || interceptedHeaders['authorization'] || '';
       expect(auth).toContain('AWS4-HMAC-SHA256');
       expect(auth).toContain('Credential=TEST_KEY_ID/');
       expect(auth).toContain('SignedHeaders=');
