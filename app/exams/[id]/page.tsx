@@ -31,12 +31,14 @@ import {
   InputLabel,
   Select,
   MenuItem,
+  Tooltip,
 } from '@mui/material';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import { getErrorMessage } from '@/lib/api-error';
 import DeleteIcon from '@mui/icons-material/Delete';
 import EditIcon from '@mui/icons-material/Edit';
 import ContentCopyIcon from '@mui/icons-material/ContentCopy';
+import PrintIcon from '@mui/icons-material/Print';
 import AssessmentIcon from '@mui/icons-material/Assessment';
 import TrendingUpIcon from '@mui/icons-material/TrendingUp';
 import StarsIcon from '@mui/icons-material/Stars';
@@ -77,6 +79,7 @@ interface ExamStats {
   lowestGrade: string;
   stdDev: string;
   totalCompleted: number;
+  totalStudents?: number;
   gradeDistribution: Record<string, number>;
 }
 
@@ -394,6 +397,10 @@ export default function ExamDetailsPage() {
     GRADE_ROUNDING_OPTIONS.find((r) => r.value === (exam?.gradeRounding || '0.1'))?.label ||
     'Zehntelnoten (0.1)';
 
+  const totalStudentsCount = stats?.totalStudents ?? roster.length;
+  const completedCount = stats?.totalCompleted || 0;
+  const ungradedCount = Math.max(0, totalStudentsCount - completedCount);
+
   return (
     <DashboardLayout>
       <Box sx={{ display: 'flex', flexDirection: 'column', gap: '32px' }}>
@@ -437,7 +444,42 @@ export default function ExamDetailsPage() {
               </Typography>
             </Box>
 
-            <Stack direction="row" spacing={1.5} sx={{ flexWrap: 'wrap' }}>
+            <Stack direction="row" spacing={1.5} sx={{ flexWrap: 'wrap', alignItems: 'center' }}>
+              <Tooltip
+                title={
+                  completedCount === 0
+                    ? 'Noch keine bewerteten Arbeiten vorhanden (mindestens eine abgeschlossene Korrektur erforderlich)'
+                    : ungradedCount > 0
+                      ? `${ungradedCount} von ${totalStudentsCount} noch nicht bewertet – nicht enthalten (${ungradedCount} of ${totalStudentsCount} not yet graded - not included)`
+                      : 'Feedback-Blätter für die gesamte Klasse drucken'
+                }
+              >
+                <span>
+                  <Link
+                    href={`/exams/${examId}/print`}
+                    passHref
+                    style={{
+                      textDecoration: 'none',
+                      pointerEvents: completedCount === 0 ? 'none' : 'auto',
+                    }}
+                  >
+                    <Button
+                      variant="contained"
+                      startIcon={<PrintIcon />}
+                      disabled={completedCount === 0}
+                      sx={{
+                        borderRadius: '8px',
+                        textTransform: 'none',
+                        fontWeight: 700,
+                        backgroundColor: '#0f172a',
+                        '&:hover': { backgroundColor: '#1e293b' },
+                      }}
+                    >
+                      Feedback für alle drucken
+                    </Button>
+                  </Link>
+                </span>
+              </Tooltip>
               <Button
                 variant="outlined"
                 startIcon={<ContentCopyIcon />}
@@ -486,6 +528,21 @@ export default function ExamDetailsPage() {
                 Prüfung löschen
               </Button>
             </Stack>
+            {ungradedCount > 0 && completedCount > 0 && (
+              <Typography
+                variant="caption"
+                sx={{
+                  color: 'text.secondary',
+                  fontWeight: 600,
+                  display: 'block',
+                  mt: 0.5,
+                  textAlign: { xs: 'left', sm: 'right' },
+                }}
+              >
+                {ungradedCount} von {totalStudentsCount} noch nicht bewertet – nicht enthalten (
+                {ungradedCount} of {totalStudentsCount} not yet graded - not included)
+              </Typography>
+            )}
           </Box>
         </Stack>
 
