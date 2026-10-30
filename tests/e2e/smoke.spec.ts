@@ -84,6 +84,10 @@ test.describe('Smoke Tests — Critical Availability, Security Boundaries & Orth
     const ogTitle = await page.locator('meta[property="og:title"]').getAttribute('content');
     expect(ogTitle).toContain('GradeAI');
     const canonical = await page.locator('link[rel="canonical"]').getAttribute('href');
-    expect(canonical).toBe('/');
+    expect(canonical).toMatch(/^https?:\/\/.*grade-ai/);
+
+    await page.goto('/login');
+    const robotsMeta = await page.locator('meta[name="robots"]').getAttribute('content');
+    expect(robotsMeta).toBe('noindex, nofollow');
   });
 });
