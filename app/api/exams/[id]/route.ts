@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { getSession } from '@/lib/session';
+import { computeTaskAnalysis } from '@/lib/task-analysis';
 
 // GET: Fetch exam details, statistics, and submissions tracking (all class students)
 export async function GET(request: Request, { params }: { params: Promise<{ id: string }> }) {
@@ -24,10 +25,14 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
           include: {
             student: true,
             tasks: {
-              select: {
+              orderBy: {
+                orderIndex: 'asc',
+              },
+              include: {
                 schritte: {
-                  where: { istUnsicher: true },
-                  select: { id: true },
+                  orderBy: {
+                    schrittIndex: 'asc',
+                  },
                 },
               },
             },
@@ -107,7 +112,10 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
         earnedPoints: existingSub ? existingSub.earnedPoints.toFixed(1) : 'N/A',
         date: existingSub ? existingSub.createdAt.toLocaleDateString('de-CH') : 'N/A',
         uncertainStepsCount: existingSub
-          ? existingSub.tasks.reduce((sum, t) => sum + t.schritte.length, 0)
+          ? existingSub.tasks.reduce(
+              (sum, t) => sum + t.schritte.filter((s) => s.istUnsicher).length,
+              0
+            )
           : 0,
       };
     });
@@ -123,6 +131,8 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
       totalStudents: exam.class.students.length,
       gradeDistribution,
     };
+
+    const taskAnalysis = computeTaskAnalysis(exam.tasks, exam.submissions);
 
     return NextResponse.json({
       exam: {
@@ -142,6 +152,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
       },
       stats,
       roster: submissionsTracker,
+      taskAnalysis,
     });
   } catch (error) {
     console.error('Error fetching exam details:', error);

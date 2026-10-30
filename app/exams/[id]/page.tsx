@@ -32,6 +32,8 @@ import {
   Select,
   MenuItem,
   Tooltip,
+  Collapse,
+  IconButton,
 } from '@mui/material';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import { getErrorMessage } from '@/lib/api-error';
@@ -47,6 +49,10 @@ import AssignmentIcon from '@mui/icons-material/Assignment';
 import SaveIcon from '@mui/icons-material/Save';
 import PlayArrowIcon from '@mui/icons-material/PlayArrow';
 import QrCodeScannerIcon from '@mui/icons-material/QrCodeScanner';
+import QueryStatsIcon from '@mui/icons-material/QueryStats';
+import KeyboardArrowDownIcon from '@mui/icons-material/KeyboardArrowDown';
+import KeyboardArrowUpIcon from '@mui/icons-material/KeyboardArrowUp';
+import type { ExamTaskAnalysis } from '@/lib/task-analysis';
 import { BarChart } from '@mui/x-charts/BarChart';
 import DashboardLayout from '@/components/DashboardLayout';
 import ErrorState from '@/components/ErrorState';
@@ -103,6 +109,15 @@ export default function ExamDetailsPage() {
   const [exam, setExam] = useState<ExamData | null>(null);
   const [stats, setStats] = useState<ExamStats | null>(null);
   const [roster, setRoster] = useState<ExamRosterStudent[]>([]);
+  const [taskAnalysis, setTaskAnalysis] = useState<ExamTaskAnalysis | null>(null);
+  const [expandedTasks, setExpandedTasks] = useState<Record<string, boolean>>({});
+
+  const toggleTaskExpand = (taskId: string) => {
+    setExpandedTasks((prev) => ({
+      ...prev,
+      [taskId]: !prev[taskId],
+    }));
+  };
 
   // Loading & Error States
   const [loading, setLoading] = useState(true);
@@ -279,6 +294,7 @@ export default function ExamDetailsPage() {
       setExam(data.exam);
       setStats(data.stats);
       setRoster(data.roster || []);
+      setTaskAnalysis(data.taskAnalysis || null);
       setRubricText(data.exam.rubricText || '');
       setGradingNotes(data.exam.gradingNotes || '');
       setGradingFormula((data.exam.gradingFormula as GradingFormula) || 'LINEAR_60');
@@ -1121,6 +1137,473 @@ export default function ExamDetailsPage() {
             </Card>
           </Grid>
         </Grid>
+
+        {/* 2b. Aufgabenanalyse */}
+        <Card sx={{ borderRadius: '12px', border: '1px solid #e2e8f0', boxShadow: 'none' }}>
+          <CardContent sx={{ p: 3 }}>
+            <Stack
+              direction="row"
+              sx={{
+                justifyContent: 'space-between',
+                alignItems: 'flex-start',
+                flexWrap: 'wrap',
+                gap: 1.5,
+                mb: 2,
+              }}
+            >
+              <Box>
+                <Stack direction="row" spacing={1.5} sx={{ alignItems: 'center', mb: 0.5 }}>
+                  <QueryStatsIcon sx={{ color: '#0f172a' }} />
+                  <Typography
+                    variant="h6"
+                    sx={{ fontWeight: 850, color: '#0f172a', letterSpacing: '-0.01em' }}
+                  >
+                    Aufgabenanalyse
+                  </Typography>
+                </Stack>
+                <Typography variant="body2" sx={{ color: 'text.secondary' }}>
+                  Ergebnisse und Fehlerschwerpunkte pro Aufgabe zur gezielten Nachbesprechung im
+                  Unterricht.
+                </Typography>
+              </Box>
+
+              {taskAnalysis && (
+                <Box sx={{ textAlign: { xs: 'left', sm: 'right' } }}>
+                  <Typography variant="subtitle2" sx={{ fontWeight: 700, color: '#0f172a' }}>
+                    {`Basis: ${taskAnalysis.completedSubmissionsCount} von ${taskAnalysis.totalSubmissions} korrigierten Arbeiten`}
+                    {taskAnalysis.unmatchedCompletedCount > 0 && (
+                      <span style={{ fontWeight: 500, color: '#64748b' }}>
+                        {` (davon ${taskAnalysis.unmatchedCompletedCount} nicht zugeordnete Arbeiten)`}
+                      </span>
+                    )}
+                  </Typography>
+                  {taskAnalysis.excludedSubmissionsCount > 0 ? (
+                    <Typography variant="caption" sx={{ color: '#d97706', display: 'block' }}>
+                      {`Ausgeschlossen (noch nicht abgeschlossen): ${taskAnalysis.excludedSubmissionsCount} Arbeiten `}
+                      {`(${taskAnalysis.excludedBreakdown.pending} ausstehend, ${taskAnalysis.excludedBreakdown.processing} in Verarbeitung, ${taskAnalysis.excludedBreakdown.failed} fehlgeschlagen)`}
+                    </Typography>
+                  ) : (
+                    <Typography
+                      variant="caption"
+                      sx={{ color: 'text.secondary', display: 'block' }}
+                    >
+                      Alle eingereichten Arbeiten sind abgeschlossen.
+                    </Typography>
+                  )}
+                </Box>
+              )}
+            </Stack>
+
+            <Typography
+              variant="caption"
+              sx={{ color: 'text.secondary', display: 'block', mb: 2.5, fontStyle: 'italic' }}
+            >
+              Hinweis: Alle Werte spiegeln den aktuellen Speicherstand (KI-Korrektur einschliesslich
+              manueller Lehrpersonen-Anpassungen) wider.
+            </Typography>
+
+            {/* Empty State when no completed submissions */}
+            {!taskAnalysis || taskAnalysis.completedSubmissionsCount === 0 ? (
+              <Alert severity="info" sx={{ borderRadius: '8px' }}>
+                Bisher liegen keine abgeschlossenen Korrekturen für diese Prüfung vor. Die
+                Aufgabenanalyse steht zur Verfügung, sobald mindestens eine Arbeit den Status
+                &bdquo;Abgeschlossen&ldquo; erreicht hat.
+                {taskAnalysis && taskAnalysis.totalSubmissions > 0 && (
+                  <span>
+                    {' '}
+                    Aktuell befinden sich {taskAnalysis.totalSubmissions} Arbeiten in der
+                    Warteschlange oder Verarbeitung.
+                  </span>
+                )}
+              </Alert>
+            ) : taskAnalysis.tasks.length === 0 ? (
+              <Alert severity="info" sx={{ borderRadius: '8px' }}>
+                Keine Aufgaben für diese Prüfung hinterlegt.
+              </Alert>
+            ) : (
+              <TableContainer
+                component={Box}
+                sx={{ border: '1px solid #f1f5f9', borderRadius: '8px', overflow: 'hidden' }}
+              >
+                <Table size="small">
+                  <TableHead sx={{ backgroundColor: '#f8fafc' }}>
+                    <TableRow>
+                      <TableCell sx={{ width: 48 }} />
+                      <TableCell sx={{ fontWeight: 'bold' }}>Aufgabe</TableCell>
+                      <TableCell sx={{ fontWeight: 'bold' }}>Bewertete Arbeiten</TableCell>
+                      <TableCell sx={{ fontWeight: 'bold' }}>Punkte-Schnitt</TableCell>
+                      <TableCell sx={{ fontWeight: 'bold' }}>Erfolgsquote</TableCell>
+                      <TableCell sx={{ fontWeight: 'bold' }}>Status-Verteilung</TableCell>
+                      <TableCell sx={{ fontWeight: 'bold', textAlign: 'right' }}>
+                        Teilschritte
+                      </TableCell>
+                    </TableRow>
+                  </TableHead>
+                  <TableBody>
+                    {taskAnalysis.tasks.map((task) => {
+                      const isExpanded = Boolean(expandedTasks[task.id]);
+
+                      return (
+                        <React.Fragment key={task.id}>
+                          <TableRow
+                            hover
+                            sx={{
+                              '& > *': { borderBottom: isExpanded ? 'unset' : undefined },
+                              cursor: task.hasSteps ? 'pointer' : 'default',
+                              backgroundColor: isExpanded ? '#f8fafc' : 'inherit',
+                            }}
+                            onClick={() => {
+                              if (task.hasSteps) toggleTaskExpand(task.id);
+                            }}
+                          >
+                            <TableCell>
+                              {task.hasSteps ? (
+                                <IconButton
+                                  size="small"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    toggleTaskExpand(task.id);
+                                  }}
+                                  aria-label={
+                                    isExpanded ? 'Details schliessen' : 'Details aufklappen'
+                                  }
+                                >
+                                  {isExpanded ? <KeyboardArrowUpIcon /> : <KeyboardArrowDownIcon />}
+                                </IconButton>
+                              ) : null}
+                            </TableCell>
+                            <TableCell sx={{ fontWeight: 600 }}>
+                              <Stack spacing={0.5}>
+                                <Stack
+                                  direction="row"
+                                  spacing={1}
+                                  sx={{ alignItems: 'center', flexWrap: 'wrap' }}
+                                >
+                                  <Typography
+                                    variant="body2"
+                                    sx={{ fontWeight: 700, color: '#0f172a' }}
+                                  >
+                                    {task.title}
+                                  </Typography>
+                                  {task.hasMaxPointsDeviation && (
+                                    <Tooltip title="In mindestens einer korrigierten Arbeit weichen die Maximalpunkte von der Aufgabenvorlage ab.">
+                                      <Chip
+                                        label="Abweichende Maximalpunkte"
+                                        size="small"
+                                        color="warning"
+                                        variant="outlined"
+                                        sx={{ fontWeight: 650, fontSize: '0.72rem', height: 20 }}
+                                      />
+                                    </Tooltip>
+                                  )}
+                                  {task.uncertainStepsCount > 0 && (
+                                    <Chip
+                                      label={`⚠ KI unsicher (${task.uncertainStepsCount})`}
+                                      size="small"
+                                      sx={{
+                                        backgroundColor: '#fef3c7',
+                                        color: '#b45309',
+                                        border: '1px solid #f59e0b',
+                                        fontWeight: 700,
+                                        fontSize: '0.72rem',
+                                        height: 20,
+                                      }}
+                                    />
+                                  )}
+                                </Stack>
+                              </Stack>
+                            </TableCell>
+                            <TableCell>
+                              <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                                {`${task.gradedCount} / ${taskAnalysis.completedSubmissionsCount}`}
+                              </Typography>
+                              {task.ungradedCount > 0 && (
+                                <Typography
+                                  variant="caption"
+                                  sx={{ color: 'text.secondary', display: 'block' }}
+                                >
+                                  {`Nicht bewertet: ${task.ungradedCount}`}
+                                </Typography>
+                              )}
+                            </TableCell>
+                            <TableCell sx={{ fontWeight: 600 }}>
+                              {task.avgPoints !== null
+                                ? `${task.avgPoints.toFixed(1)} / ${task.canonicalMaxPoints} Pkt.`
+                                : '—'}
+                            </TableCell>
+                            <TableCell>
+                              {task.isZeroMaxPoints ? (
+                                <Tooltip title="Da die Aufgabe mit 0 Maximalpunkten definiert ist, kann keine Prozentquote berechnet werden.">
+                                  <Typography
+                                    variant="caption"
+                                    sx={{ color: 'text.secondary', fontStyle: 'italic' }}
+                                  >
+                                    0 Max. Punkte
+                                  </Typography>
+                                </Tooltip>
+                              ) : task.avgPercent !== null ? (
+                                <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
+                                  <Chip
+                                    label={`${task.avgPercent.toFixed(1)}%`}
+                                    size="small"
+                                    sx={{
+                                      backgroundColor:
+                                        task.avgPercent >= 75
+                                          ? '#dcfce7'
+                                          : task.avgPercent >= 50
+                                            ? '#fef9c3'
+                                            : '#fee2e2',
+                                      color:
+                                        task.avgPercent >= 75
+                                          ? '#15803d'
+                                          : task.avgPercent >= 50
+                                            ? '#a16207'
+                                            : '#b91c1c',
+                                      fontWeight: 700,
+                                    }}
+                                  />
+                                </Stack>
+                              ) : (
+                                '—'
+                              )}
+                            </TableCell>
+                            <TableCell>
+                              <Stack direction="row" spacing={0.5} sx={{ flexWrap: 'wrap' }}>
+                                <Tooltip title="Korrekt gelöst">
+                                  <Chip
+                                    label={`Korrekt: ${task.statusDistribution.korrekt}`}
+                                    size="small"
+                                    sx={{
+                                      backgroundColor: '#f0fdf4',
+                                      color: '#166534',
+                                      border: '1px solid #bbf7d0',
+                                      fontWeight: 650,
+                                      fontSize: '0.72rem',
+                                      height: 20,
+                                    }}
+                                  />
+                                </Tooltip>
+                                <Tooltip title="Folgefehler">
+                                  <Chip
+                                    label={`Folgefehler: ${task.statusDistribution.folgefehler}`}
+                                    size="small"
+                                    sx={{
+                                      backgroundColor: '#fffbeb',
+                                      color: '#92400e',
+                                      border: '1px solid #fde68a',
+                                      fontWeight: 650,
+                                      fontSize: '0.72rem',
+                                      height: 20,
+                                    }}
+                                  />
+                                </Tooltip>
+                                <Tooltip title="Fehler">
+                                  <Chip
+                                    label={`Fehler: ${task.statusDistribution.fehler}`}
+                                    size="small"
+                                    sx={{
+                                      backgroundColor: '#fef2f2',
+                                      color: '#991b1b',
+                                      border: '1px solid #fecaca',
+                                      fontWeight: 650,
+                                      fontSize: '0.72rem',
+                                      height: 20,
+                                    }}
+                                  />
+                                </Tooltip>
+                              </Stack>
+                            </TableCell>
+                            <TableCell sx={{ textAlign: 'right' }}>
+                              {task.hasSteps ? (
+                                <Button
+                                  size="small"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    toggleTaskExpand(task.id);
+                                  }}
+                                  sx={{ textTransform: 'none', fontWeight: 650 }}
+                                >
+                                  {isExpanded ? 'Schliessen' : `${task.steps.length} Schritte`}
+                                </Button>
+                              ) : (
+                                <Typography variant="caption" sx={{ color: 'text.secondary' }}>
+                                  Keine Teilschritte
+                                </Typography>
+                              )}
+                            </TableCell>
+                          </TableRow>
+
+                          {/* Collapsible Step Details */}
+                          {task.hasSteps && (
+                            <TableRow sx={{ backgroundColor: '#f8fafc' }}>
+                              <TableCell style={{ paddingBottom: 0, paddingTop: 0 }} colSpan={7}>
+                                <Collapse in={isExpanded} timeout="auto" unmountOnExit>
+                                  <Box sx={{ py: 2, px: 1 }}>
+                                    {task.hasVaryingStepStructure && (
+                                      <Alert severity="warning" sx={{ mb: 2, borderRadius: '8px' }}>
+                                        Hinweis: Unterschiedliche Teilschritt-Struktur zwischen den
+                                        Arbeiten erkannt (Schrittanzahl oder -indizes variieren).
+                                        Die Gruppierung dient als Orientierungshilfe.
+                                      </Alert>
+                                    )}
+
+                                    <Typography
+                                      variant="subtitle2"
+                                      sx={{ fontWeight: 800, color: '#0f172a', mb: 1.5 }}
+                                    >
+                                      Teilschritt-Analyse &amp; Fehlerschwerpunkte ({task.title})
+                                    </Typography>
+
+                                    <TableContainer
+                                      component={Box}
+                                      sx={{
+                                        backgroundColor: '#ffffff',
+                                        border: '1px solid #e2e8f0',
+                                        borderRadius: '8px',
+                                        overflow: 'hidden',
+                                      }}
+                                    >
+                                      <Table size="small">
+                                        <TableHead sx={{ backgroundColor: '#f1f5f9' }}>
+                                          <TableRow>
+                                            <TableCell sx={{ fontWeight: 'bold' }}>
+                                              Schritt
+                                            </TableCell>
+                                            <TableCell sx={{ fontWeight: 'bold' }}>
+                                              Bezeichnung / Beschreibung
+                                            </TableCell>
+                                            <TableCell sx={{ fontWeight: 'bold' }}>
+                                              Erfasste Arbeiten
+                                            </TableCell>
+                                            <TableCell sx={{ fontWeight: 'bold' }}>
+                                              Punkte-Schnitt
+                                            </TableCell>
+                                            <TableCell sx={{ fontWeight: 'bold' }}>
+                                              Fehler-Verteilung
+                                            </TableCell>
+                                            <TableCell
+                                              sx={{ fontWeight: 'bold', textAlign: 'right' }}
+                                            >
+                                              KI-Unsicherheit
+                                            </TableCell>
+                                          </TableRow>
+                                        </TableHead>
+                                        <TableBody>
+                                          {task.steps.map((st) => (
+                                            <TableRow key={st.schrittIndex}>
+                                              <TableCell sx={{ fontWeight: 700 }}>
+                                                {`Schritt ${st.schrittIndex + 1}`}
+                                              </TableCell>
+                                              <TableCell sx={{ maxWidth: 320 }}>
+                                                <Typography
+                                                  variant="body2"
+                                                  sx={{ color: '#0f172a' }}
+                                                >
+                                                  {st.schrittText}
+                                                </Typography>
+                                              </TableCell>
+                                              <TableCell>{`${st.count} Arbeiten`}</TableCell>
+                                              <TableCell sx={{ fontWeight: 600 }}>
+                                                {`${st.avgErreichtePunkte.toFixed(1)} / ${st.avgMaximalPunkte.toFixed(1)} Pkt.`}
+                                              </TableCell>
+                                              <TableCell>
+                                                <Stack
+                                                  direction="row"
+                                                  spacing={0.5}
+                                                  sx={{ flexWrap: 'wrap' }}
+                                                >
+                                                  {st.errorCounts.KeinFehler > 0 && (
+                                                    <Chip
+                                                      label={`Kein Fehler: ${st.errorCounts.KeinFehler}`}
+                                                      size="small"
+                                                      sx={{
+                                                        backgroundColor: '#f0fdf4',
+                                                        color: '#166534',
+                                                        fontSize: '0.72rem',
+                                                        height: 20,
+                                                      }}
+                                                    />
+                                                  )}
+                                                  {st.errorCounts.Rechenfehler > 0 && (
+                                                    <Chip
+                                                      label={`Rechenfehler: ${st.errorCounts.Rechenfehler}`}
+                                                      size="small"
+                                                      sx={{
+                                                        backgroundColor: '#fef2f2',
+                                                        color: '#991b1b',
+                                                        fontSize: '0.72rem',
+                                                        height: 20,
+                                                      }}
+                                                    />
+                                                  )}
+                                                  {st.errorCounts.Folgefehler > 0 && (
+                                                    <Chip
+                                                      label={`Folgefehler: ${st.errorCounts.Folgefehler}`}
+                                                      size="small"
+                                                      sx={{
+                                                        backgroundColor: '#fffbeb',
+                                                        color: '#92400e',
+                                                        fontSize: '0.72rem',
+                                                        height: 20,
+                                                      }}
+                                                    />
+                                                  )}
+                                                  {st.errorCounts.SonstigerFehler > 0 && (
+                                                    <Chip
+                                                      label={`Sonstiger Fehler: ${st.errorCounts.SonstigerFehler}`}
+                                                      size="small"
+                                                      sx={{
+                                                        backgroundColor: '#f1f5f9',
+                                                        color: '#475569',
+                                                        fontSize: '0.72rem',
+                                                        height: 20,
+                                                      }}
+                                                    />
+                                                  )}
+                                                </Stack>
+                                              </TableCell>
+                                              <TableCell sx={{ textAlign: 'right' }}>
+                                                {st.uncertainCount > 0 ? (
+                                                  <Chip
+                                                    label={`⚠ ${st.uncertainCount} unsicher`}
+                                                    size="small"
+                                                    sx={{
+                                                      backgroundColor: '#fef3c7',
+                                                      color: '#b45309',
+                                                      border: '1px solid #f59e0b',
+                                                      fontWeight: 700,
+                                                      fontSize: '0.72rem',
+                                                      height: 20,
+                                                    }}
+                                                  />
+                                                ) : (
+                                                  <Typography
+                                                    variant="caption"
+                                                    sx={{ color: 'text.secondary' }}
+                                                  >
+                                                    —
+                                                  </Typography>
+                                                )}
+                                              </TableCell>
+                                            </TableRow>
+                                          ))}
+                                        </TableBody>
+                                      </Table>
+                                    </TableContainer>
+                                  </Box>
+                                </Collapse>
+                              </TableCell>
+                            </TableRow>
+                          )}
+                        </React.Fragment>
+                      );
+                    })}
+                  </TableBody>
+                </Table>
+              </TableContainer>
+            )}
+          </CardContent>
+        </Card>
 
         {/* 3. Class Roster Submissions Tracker */}
         <Card sx={{ borderRadius: '12px', border: '1px solid #e2e8f0', boxShadow: 'none' }}>
