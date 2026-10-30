@@ -79,8 +79,8 @@ test.describe('Full E2E Teacher & Mobile QR Relay Workflows', () => {
 
     await expect(page.getByText('Algebra Prüfung 1').first()).toBeVisible();
     await page
-      .getByRole('link', { name: /Musterlösung & Stats/i })
-      .or(page.getByRole('button', { name: /Musterlösung & Stats/i }))
+      .getByRole('link', { name: /Musterlösung & (Stats|Statistiken)/i })
+      .or(page.getByRole('button', { name: /Musterlösung & (Stats|Statistiken)/i }))
       .first()
       .click();
     await expect(page).toHaveURL(/\/exams\/.+/);
