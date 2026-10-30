@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { getSession } from '@/lib/session';
+import { serverCache, CacheTags, invalidateStudentCache } from '@/lib/cache';
 
 // GET: Fetch student details, analytics, grade trajectory, and AI feedback aggregation
 export async function GET(request: Request, { params }: { params: Promise<{ id: string }> }) {
@@ -11,6 +12,17 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
     }
 
     const { id: studentId } = await params;
+
+    const cacheKey = `teacher:${session.userId}:student:${studentId}:detail`;
+    const cached = await serverCache.get<{
+      student: unknown;
+      stats: unknown;
+      trajectory: unknown;
+      submissions: unknown;
+    }>(cacheKey);
+    if (cached) {
+      return NextResponse.json(cached);
+    }
 
     // Fetch student and verify teacher ownership
     const student = await db.student.findUnique({
@@ -96,7 +108,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
       date: s.createdAt.toLocaleDateString('de-CH'),
     }));
 
-    return NextResponse.json({
+    const responsePayload = {
       student: {
         id: student.id,
         name: student.name,
@@ -114,7 +126,18 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
       },
       trajectory,
       submissions: submissionsList,
+    };
+
+    await serverCache.set(cacheKey, responsePayload, {
+      tags: [
+        CacheTags.teacher(session.userId),
+        CacheTags.students(session.userId),
+        CacheTags.student(session.userId, studentId),
+        CacheTags.class(session.userId, student.classId),
+      ],
     });
+
+    return NextResponse.json(responsePayload);
   } catch (error) {
     console.error('Error fetching student details:', error);
     return NextResponse.json({ error: 'Fehler beim Laden der Schülerdetails.' }, { status: 500 });
@@ -166,6 +189,11 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
       },
     });
 
+    await invalidateStudentCache(session.userId, studentId, student.classId);
+    if (classId && classId !== student.classId) {
+      await invalidateStudentCache(session.userId, studentId, classId);
+    }
+
     return NextResponse.json({ success: true, student: updatedStudent });
   } catch (error) {
     console.error('Error updating student:', error);
@@ -201,6 +229,8 @@ export async function DELETE(request: Request, { params }: { params: Promise<{ i
     await db.student.delete({
       where: { id: studentId },
     });
+
+    await invalidateStudentCache(session.userId, studentId, student.classId);
 
     return NextResponse.json({ success: true, message: 'Schüler erfolgreich gelöscht.' });
   } catch (error) {

@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { getSession } from '@/lib/session';
+import { serverCache, CacheTags, invalidateExamCache } from '@/lib/cache';
 
 // GET: Fetch all exams created by the teacher across all their classes
 export async function GET() {
@@ -8,6 +9,12 @@ export async function GET() {
     const session = await getSession();
     if (!session) {
       return NextResponse.json({ error: 'Nicht autorisiert.' }, { status: 401 });
+    }
+
+    const cacheKey = `teacher:${session.userId}:exams:list`;
+    const cached = await serverCache.get<{ exams: unknown[] }>(cacheKey);
+    if (cached) {
+      return NextResponse.json(cached);
     }
 
     const exams = await db.exam.findMany({
@@ -68,7 +75,12 @@ export async function GET() {
       };
     });
 
-    return NextResponse.json({ exams: formatted });
+    const responsePayload = { exams: formatted };
+    await serverCache.set(cacheKey, responsePayload, {
+      tags: [CacheTags.teacher(session.userId), CacheTags.exams(session.userId)],
+    });
+
+    return NextResponse.json(responsePayload);
   } catch (error) {
     console.error('Error fetching global exams:', error);
     return NextResponse.json({ error: 'Fehler beim Laden der Prüfungen.' }, { status: 500 });
@@ -160,6 +172,8 @@ export async function POST(request: Request) {
 
       return newExam;
     });
+
+    await invalidateExamCache(session.userId, exam.id, classId);
 
     return NextResponse.json({ success: true, exam });
   } catch (error) {

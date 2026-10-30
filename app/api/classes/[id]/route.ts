@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { getSession } from '@/lib/session';
+import { serverCache, CacheTags, invalidateClassCache } from '@/lib/cache';
 
 // GET: Fetch class details, students roster, and class statistics
 export async function GET(request: Request, { params }: { params: Promise<{ id: string }> }) {
@@ -11,6 +12,17 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
     }
 
     const { id: classId } = await params;
+
+    const cacheKey = `teacher:${session.userId}:class:${classId}:detail`;
+    const cached = await serverCache.get<{
+      class: unknown;
+      stats: unknown;
+      students: unknown;
+      exams: unknown;
+    }>(cacheKey);
+    if (cached) {
+      return NextResponse.json(cached);
+    }
 
     // Verify class belongs to this teacher
     const schoolClass = await db.class.findFirst({
@@ -133,7 +145,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
       gradeDistribution,
     };
 
-    return NextResponse.json({
+    const responsePayload = {
       class: {
         id: schoolClass.id,
         name: schoolClass.name,
@@ -142,7 +154,17 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
       stats,
       students: studentsRoster,
       exams: examsList,
+    };
+
+    await serverCache.set(cacheKey, responsePayload, {
+      tags: [
+        CacheTags.teacher(session.userId),
+        CacheTags.classes(session.userId),
+        CacheTags.class(session.userId, classId),
+      ],
     });
+
+    return NextResponse.json(responsePayload);
   } catch (error) {
     console.error('Error fetching class details:', error);
     return NextResponse.json({ error: 'Fehler beim Laden der Klassendetails.' }, { status: 500 });
@@ -179,6 +201,8 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
       data: { name: name.trim() },
     });
 
+    await invalidateClassCache(session.userId, classId);
+
     return NextResponse.json({ success: true, class: updatedClass });
   } catch (error) {
     console.error('Error updating class:', error);
@@ -208,6 +232,8 @@ export async function DELETE(request: Request, { params }: { params: Promise<{ i
     await db.class.delete({
       where: { id: classId },
     });
+
+    await invalidateClassCache(session.userId, classId);
 
     return NextResponse.json({ success: true, message: 'Klasse erfolgreich gelöscht.' });
   } catch (error) {

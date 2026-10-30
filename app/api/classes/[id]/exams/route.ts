@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { getSession } from '@/lib/session';
+import { serverCache, CacheTags } from '@/lib/cache';
 
 export async function GET(request: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
@@ -11,6 +12,12 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
 
     // Await params promise in Next.js 16
     const { id: classId } = await params;
+
+    const cacheKey = `teacher:${session.userId}:class:${classId}:exams`;
+    const cached = await serverCache.get<{ exams: unknown[] }>(cacheKey);
+    if (cached) {
+      return NextResponse.json(cached);
+    }
 
     // Verify class belongs to this teacher
     const schoolClass = await db.class.findFirst({
@@ -26,7 +33,16 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
       orderBy: { createdAt: 'desc' },
     });
 
-    return NextResponse.json({ exams });
+    const responsePayload = { exams };
+    await serverCache.set(cacheKey, responsePayload, {
+      tags: [
+        CacheTags.teacher(session.userId),
+        CacheTags.class(session.userId, classId),
+        CacheTags.exams(session.userId),
+      ],
+    });
+
+    return NextResponse.json(responsePayload);
   } catch (error) {
     console.error('Error fetching exams:', error);
     return NextResponse.json({ error: 'Fehler beim Laden der Prüfungen.' }, { status: 500 });

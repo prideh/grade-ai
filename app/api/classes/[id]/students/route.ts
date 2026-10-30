@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { getSession } from '@/lib/session';
+import { serverCache, CacheTags, invalidateStudentCache } from '@/lib/cache';
 
 export async function GET(request: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
@@ -11,6 +12,12 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
 
     // Await params promise in Next.js 16
     const { id: classId } = await params;
+
+    const cacheKey = `teacher:${session.userId}:class:${classId}:students`;
+    const cached = await serverCache.get<{ students: unknown[] }>(cacheKey);
+    if (cached) {
+      return NextResponse.json(cached);
+    }
 
     // Verify class belongs to this teacher
     const schoolClass = await db.class.findFirst({
@@ -26,7 +33,16 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
       orderBy: { name: 'asc' },
     });
 
-    return NextResponse.json({ students });
+    const responsePayload = { students };
+    await serverCache.set(cacheKey, responsePayload, {
+      tags: [
+        CacheTags.teacher(session.userId),
+        CacheTags.class(session.userId, classId),
+        CacheTags.students(session.userId),
+      ],
+    });
+
+    return NextResponse.json(responsePayload);
   } catch (error) {
     console.error('Error fetching students:', error);
     return NextResponse.json({ error: 'Fehler beim Laden der Schüler.' }, { status: 500 });
@@ -63,6 +79,8 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
         classId,
       },
     });
+
+    await invalidateStudentCache(session.userId, student.id, classId);
 
     return NextResponse.json({ success: true, student });
   } catch (error) {

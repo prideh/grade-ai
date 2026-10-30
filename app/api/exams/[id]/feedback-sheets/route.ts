@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { getSession } from '@/lib/session';
+import { serverCache, CacheTags } from '@/lib/cache';
 
 export async function GET(request: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
@@ -10,6 +11,20 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
     }
 
     const { id: examId } = await params;
+
+    const cacheKey = `teacher:${session.userId}:exam:${examId}:feedback-sheets`;
+    const cached = await serverCache.get<{
+      examTitle: string;
+      subject: string;
+      className: string;
+      totalCount: number;
+      completedCount: number;
+      ungradedCount: number;
+      sheets: unknown[];
+    }>(cacheKey);
+    if (cached) {
+      return NextResponse.json(cached);
+    }
 
     const exam = await db.exam.findUnique({
       where: { id: examId },
@@ -81,7 +96,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
       };
     });
 
-    return NextResponse.json({
+    const responsePayload = {
       examTitle: exam.title,
       subject: exam.subject,
       className: exam.class.name,
@@ -89,7 +104,18 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
       completedCount: completedSubmissions.length,
       ungradedCount,
       sheets,
+    };
+
+    await serverCache.set(cacheKey, responsePayload, {
+      tags: [
+        CacheTags.teacher(session.userId),
+        CacheTags.exams(session.userId),
+        CacheTags.exam(session.userId, examId),
+        CacheTags.class(session.userId, exam.classId),
+      ],
     });
+
+    return NextResponse.json(responsePayload);
   } catch (error) {
     console.error('Error fetching feedback sheets:', error);
     return NextResponse.json(

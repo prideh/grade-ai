@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { getSession } from '@/lib/session';
 import { computeTaskAnalysis } from '@/lib/task-analysis';
+import { serverCache, CacheTags } from '@/lib/cache';
 
 export async function GET(request: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
@@ -11,6 +12,12 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
     }
 
     const { id: examId } = await params;
+
+    const cacheKey = `teacher:${session.userId}:exam:${examId}:task-analysis`;
+    const cached = await serverCache.get<{ success: boolean; taskAnalysis: unknown }>(cacheKey);
+    if (cached) {
+      return NextResponse.json(cached);
+    }
 
     const exam = await db.exam.findUnique({
       where: { id: examId },
@@ -46,10 +53,21 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
 
     const taskAnalysis = computeTaskAnalysis(exam.tasks, exam.submissions);
 
-    return NextResponse.json({
+    const responsePayload = {
       success: true,
       taskAnalysis,
+    };
+
+    await serverCache.set(cacheKey, responsePayload, {
+      tags: [
+        CacheTags.teacher(session.userId),
+        CacheTags.exams(session.userId),
+        CacheTags.exam(session.userId, examId),
+        CacheTags.class(session.userId, exam.classId),
+      ],
     });
+
+    return NextResponse.json(responsePayload);
   } catch (error) {
     console.error('Error fetching task analysis:', error);
     return NextResponse.json({ error: 'Fehler beim Laden der Aufgabenanalyse.' }, { status: 500 });

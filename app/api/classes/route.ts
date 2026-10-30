@@ -1,12 +1,19 @@
 import { NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { getSession } from '@/lib/session';
+import { serverCache, CacheTags, invalidateClassCache } from '@/lib/cache';
 
 export async function GET() {
   try {
     const session = await getSession();
     if (!session) {
       return NextResponse.json({ error: 'Nicht autorisiert.' }, { status: 401 });
+    }
+
+    const cacheKey = `teacher:${session.userId}:classes:list`;
+    const cached = await serverCache.get<{ classes: unknown[] }>(cacheKey);
+    if (cached) {
+      return NextResponse.json(cached);
     }
 
     const rawClasses = await db.class.findMany({
@@ -45,7 +52,12 @@ export async function GET() {
       };
     });
 
-    return NextResponse.json({ classes });
+    const responsePayload = { classes };
+    await serverCache.set(cacheKey, responsePayload, {
+      tags: [CacheTags.teacher(session.userId), CacheTags.classes(session.userId)],
+    });
+
+    return NextResponse.json(responsePayload);
   } catch (error) {
     console.error('Error fetching classes:', error);
     return NextResponse.json({ error: 'Fehler beim Laden der Klassen.' }, { status: 500 });
@@ -86,6 +98,8 @@ export async function POST(request: Request) {
         teacherId: session.userId,
       },
     });
+
+    await invalidateClassCache(session.userId);
 
     return NextResponse.json({ success: true, class: schoolClass });
   } catch (error) {

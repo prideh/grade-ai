@@ -1,12 +1,24 @@
 import { NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { getSession } from '@/lib/session';
+import { serverCache, CacheTags } from '@/lib/cache';
 
 export async function GET() {
   try {
     const session = await getSession();
     if (!session) {
       return NextResponse.json({ error: 'Nicht autorisiert.' }, { status: 401 });
+    }
+
+    const cacheKey = `teacher:${session.userId}:submissions:list`;
+    const cached = await serverCache.get<{
+      submissions: unknown[];
+      studentsByClass: unknown;
+      allExams: unknown[];
+      totalExamsCount: number;
+    }>(cacheKey);
+    if (cached) {
+      return NextResponse.json(cached);
     }
 
     // Fetch submissions, students, and all exams (lightweight metadata) in parallel without N+1 or heavy rubric payloads
@@ -118,7 +130,7 @@ export async function GET() {
       };
     });
 
-    return NextResponse.json({
+    const responsePayload = {
       submissions: mapped,
       studentsByClass,
       allExams: teacherExams.map((e) => ({
@@ -129,7 +141,13 @@ export async function GET() {
         className: e.class.name,
       })),
       totalExamsCount: teacherExams.length,
+    };
+
+    await serverCache.set(cacheKey, responsePayload, {
+      tags: [CacheTags.teacher(session.userId), CacheTags.submissions(session.userId)],
     });
+
+    return NextResponse.json(responsePayload);
   } catch (error) {
     console.error('Error fetching submissions:', error);
     return NextResponse.json({ error: 'Fehler beim Laden der Korrekturen.' }, { status: 500 });

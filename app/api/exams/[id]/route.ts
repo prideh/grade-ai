@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { getSession } from '@/lib/session';
 import { computeTaskAnalysis } from '@/lib/task-analysis';
+import { serverCache, CacheTags, invalidateExamCache } from '@/lib/cache';
 
 // GET: Fetch exam details, statistics, and submissions tracking (all class students)
 export async function GET(request: Request, { params }: { params: Promise<{ id: string }> }) {
@@ -12,6 +13,17 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
     }
 
     const { id: examId } = await params;
+
+    const cacheKey = `teacher:${session.userId}:exam:${examId}:detail`;
+    const cached = await serverCache.get<{
+      exam: unknown;
+      stats: unknown;
+      roster: unknown;
+      taskAnalysis: unknown;
+    }>(cacheKey);
+    if (cached) {
+      return NextResponse.json(cached);
+    }
 
     const exam = await db.exam.findUnique({
       where: { id: examId },
@@ -134,7 +146,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
 
     const taskAnalysis = computeTaskAnalysis(exam.tasks, exam.submissions);
 
-    return NextResponse.json({
+    const responsePayload = {
       exam: {
         id: exam.id,
         title: exam.title,
@@ -153,7 +165,18 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
       stats,
       roster: submissionsTracker,
       taskAnalysis,
+    };
+
+    await serverCache.set(cacheKey, responsePayload, {
+      tags: [
+        CacheTags.teacher(session.userId),
+        CacheTags.exams(session.userId),
+        CacheTags.exam(session.userId, examId),
+        CacheTags.class(session.userId, exam.classId),
+      ],
     });
+
+    return NextResponse.json(responsePayload);
   } catch (error) {
     console.error('Error fetching exam details:', error);
     return NextResponse.json({ error: 'Fehler beim Laden der Prüfungsdetails.' }, { status: 500 });
@@ -244,6 +267,8 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
       return updated;
     });
 
+    await invalidateExamCache(session.userId, examId, exam.classId);
+
     return NextResponse.json({ success: true, exam: updatedExam });
   } catch (error) {
     console.error('Error updating exam:', error);
@@ -279,6 +304,8 @@ export async function DELETE(request: Request, { params }: { params: Promise<{ i
     await db.exam.delete({
       where: { id: examId },
     });
+
+    await invalidateExamCache(session.userId, examId, exam.classId);
 
     return NextResponse.json({ success: true, message: 'Prüfung erfolgreich gelöscht.' });
   } catch (error) {

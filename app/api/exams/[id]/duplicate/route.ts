@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { getSession } from '@/lib/session';
+import { invalidateExamCache } from '@/lib/cache';
 
 export async function POST(request: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
@@ -111,6 +112,8 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
 
       return createdExam;
     });
+
+    await invalidateExamCache(session.userId, duplicatedExam.id, destinationClassId);
 
     return NextResponse.json({
       success: true,
