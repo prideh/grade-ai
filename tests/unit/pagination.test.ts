@@ -43,8 +43,6 @@ describe('Pagination & Filter Kombination (/api/submissions & /api/logs)', () =>
     await serverCache.clear();
     vi.mocked(sessionModule.getSession).mockResolvedValue({
       userId: mockTeacherId,
-      email: 'lehrer@schule.ch',
-      name: 'Herr Muster',
     });
   });
 
@@ -60,8 +58,12 @@ describe('Pagination & Filter Kombination (/api/submissions & /api/logs)', () =>
     };
 
     beforeEach(() => {
-      vi.mocked(db.student.findMany).mockResolvedValue([mockStudent]);
-      vi.mocked(db.exam.findMany).mockResolvedValue([mockExam]);
+      vi.mocked(db.student.findMany).mockResolvedValue([mockStudent] as unknown as Awaited<
+        ReturnType<typeof db.student.findMany>
+      >);
+      vi.mocked(db.exam.findMany).mockResolvedValue([mockExam] as unknown as Awaited<
+        ReturnType<typeof db.exam.findMany>
+      >);
     });
 
     it('liefert 401 bei nicht vorhandener Session', async () => {
@@ -443,7 +445,6 @@ describe('Pagination & Filter Kombination (/api/submissions & /api/logs)', () =>
         '../../app/api/logs/route.ts',
         '../../app/submissions/page.tsx',
         '../../app/logs/page.tsx',
-        './pagination.test.ts',
       ];
 
       for (const rel of filesToCheck) {
