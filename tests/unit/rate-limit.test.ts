@@ -27,6 +27,17 @@ vi.mock('@/lib/jwt', () => ({
   verifyMobileRelayToken: vi.fn(),
 }));
 
+vi.mock('@/lib/db', () => ({
+  db: {
+    submission: {
+      findUnique: vi.fn(),
+    },
+    exam: {
+      findUnique: vi.fn(),
+    },
+  },
+}));
+
 describe('AI Rate Limiting (lib/rate-limit.ts)', () => {
   const originalEnv = { ...process.env };
 

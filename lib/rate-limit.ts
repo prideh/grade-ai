@@ -401,3 +401,171 @@ export function createRateLimitResponse(
     }
   );
 }
+
+export interface AuthRateLimitConfig {
+  maxRequests: number;
+  windowSeconds: number;
+  windowMs: number;
+}
+
+export function getAuthRateLimitConfig(action: 'login' | 'register'): AuthRateLimitConfig {
+  let maxRequests = 5;
+  let windowSeconds = 60;
+
+  if (action === 'login') {
+    const envMax =
+      process.env.AUTH_RATE_LIMIT_LOGIN_MAX_REQUESTS || process.env.AUTH_RATE_LIMIT_MAX_REQUESTS;
+    if (envMax && Number.isFinite(Number(envMax)) && Number(envMax) > 0) {
+      maxRequests = Math.floor(Number(envMax));
+    }
+    const envWindow =
+      process.env.AUTH_RATE_LIMIT_LOGIN_WINDOW_SECONDS ||
+      process.env.AUTH_RATE_LIMIT_WINDOW_SECONDS;
+    if (envWindow && Number.isFinite(Number(envWindow)) && Number(envWindow) > 0) {
+      windowSeconds = Math.floor(Number(envWindow));
+    }
+  } else if (action === 'register') {
+    const envMax =
+      process.env.AUTH_RATE_LIMIT_REGISTER_MAX_REQUESTS || process.env.AUTH_RATE_LIMIT_MAX_REQUESTS;
+    if (envMax && Number.isFinite(Number(envMax)) && Number(envMax) > 0) {
+      maxRequests = Math.floor(Number(envMax));
+    }
+    const envWindow =
+      process.env.AUTH_RATE_LIMIT_REGISTER_WINDOW_SECONDS ||
+      process.env.AUTH_RATE_LIMIT_WINDOW_SECONDS;
+    if (envWindow && Number.isFinite(Number(envWindow)) && Number(envWindow) > 0) {
+      windowSeconds = Math.floor(Number(envWindow));
+    }
+  }
+
+  return {
+    maxRequests,
+    windowSeconds,
+    windowMs: windowSeconds * 1000,
+  };
+}
+
+export interface CheckAuthRateLimitOptions {
+  action: 'login' | 'register';
+  email?: string;
+  ip?: string;
+  limit?: number;
+  windowMs?: number;
+  store?: RateLimitStore;
+}
+
+export interface AuthRateLimitResult extends RateLimitResult {
+  failedClosed?: boolean;
+}
+
+export function extractClientIp(request: Request): string {
+  const forwarded = request.headers.get('x-forwarded-for');
+  if (forwarded) {
+    const firstIp = forwarded.split(',')[0].trim();
+    if (firstIp) return firstIp;
+  }
+  const realIp = request.headers.get('x-real-ip');
+  if (realIp && realIp.trim()) {
+    return realIp.trim();
+  }
+  return '127.0.0.1';
+}
+
+/**
+ * Prueft das Ratenlimit fuer Authentifizierungs-Endpunkte (Login & Register).
+ *
+ * Schutzarchitektur:
+ * 1. IP-basiertes Ratenlimit verhindert Credential Stuffing und Massenregistrierungen.
+ * 2. E-Mail-basiertes Ratenlimit verhindert gezielte Brute-Force-Attacken auf einzelne Konten.
+ * 3. Fail-Closed Verhalten: Im Gegensatz zu KI-Korrekturen (Fail-Open) darf ein Ausfall
+ *    des Limit-Speichers keine unbegrenzten Passwortversuche erlauben. Speicherfehler
+ *    weisen Anfragen sicher ab (Fail-Closed).
+ */
+export async function checkAuthRateLimit(
+  options: CheckAuthRateLimitOptions
+): Promise<AuthRateLimitResult> {
+  const config = getAuthRateLimitConfig(options.action);
+  const limit = options.limit ?? config.maxRequests;
+  const windowMs = options.windowMs ?? config.windowMs;
+  const store = options.store ?? getRateLimitStore();
+
+  const normalizedIp = (options.ip || '').trim().toLowerCase();
+  const normalizedEmail = (options.email || '').trim().toLowerCase();
+
+  try {
+    // 1. IP-basiertes Ratenlimit pruefen
+    if (normalizedIp) {
+      const ipKey = `auth:${options.action}:ip:${normalizedIp}`;
+      const ipResult = await store.consume(ipKey, limit, windowMs);
+      if (!ipResult.allowed) {
+        return ipResult;
+      }
+    }
+
+    // 2. E-Mail-basiertes Ratenlimit pruefen
+    if (normalizedEmail) {
+      const emailKey = `auth:${options.action}:email:${normalizedEmail}`;
+      const emailResult = await store.consume(emailKey, limit, windowMs);
+      if (!emailResult.allowed) {
+        return emailResult;
+      }
+    }
+
+    return {
+      allowed: true,
+      limit,
+      remaining: Math.max(0, limit - 1),
+      retryAfterSeconds: 0,
+      resetMs: 0,
+    };
+  } catch (error) {
+    // Sicheres Verhalten (Fail-Closed): Bei Speicherfehlern keine unbegrenzten Versuche zulassen
+    console.error(
+      `[AuthRateLimit] Speicherfehler beim Pruefen des Auth-Limits fuer ${options.action}. Anfrage wird abgewiesen (Fail-Closed):`,
+      error
+    );
+    return {
+      allowed: false,
+      limit,
+      remaining: 0,
+      retryAfterSeconds: config.windowSeconds,
+      resetMs: config.windowMs,
+      failedClosed: true,
+    };
+  }
+}
+
+export function createAuthRateLimitResponse(
+  result: AuthRateLimitResult,
+  action: 'login' | 'register',
+  customMessage?: string
+): NextResponse {
+  let defaultMessage =
+    action === 'login'
+      ? 'Zu viele Anmeldeversuche. Bitte warten Sie einen Moment, bevor Sie es erneut versuchen.'
+      : 'Zu viele Registrierungsversuche. Bitte warten Sie einen Moment, bevor Sie es erneut versuchen.';
+
+  if (result.failedClosed) {
+    defaultMessage =
+      'Authentifizierungsdienst vorübergehend nicht verfügbar. Bitte versuchen Sie es in Kürze erneut.';
+  }
+
+  const message = customMessage || defaultMessage;
+
+  return NextResponse.json(
+    {
+      error: message,
+      retryAfter: result.retryAfterSeconds,
+    },
+    {
+      status: 429,
+      headers: {
+        'Retry-After': String(result.retryAfterSeconds),
+        'X-RateLimit-Limit': String(result.limit),
+        'X-RateLimit-Remaining': String(result.remaining),
+        'X-RateLimit-Reset': String(result.retryAfterSeconds),
+        'X-RateLimit-Type': 'auth',
+      },
+    }
+  );
+}

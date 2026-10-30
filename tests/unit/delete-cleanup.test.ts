@@ -5,11 +5,7 @@ import { DELETE as deleteStudent } from '@/app/api/students/[id]/route';
 import { DELETE as deleteSubmission } from '@/app/api/submissions/[id]/route';
 import * as sessionModule from '@/lib/session';
 import { db } from '@/lib/db';
-import {
-  deleteSubmissionScanFiles,
-  deleteExamScanFiles,
-  StorageCleanupError,
-} from '@/lib/storage-cleanup';
+import { deleteSubmissionScanFiles, StorageCleanupError } from '@/lib/storage-cleanup';
 import fs from 'fs';
 import path from 'path';
 

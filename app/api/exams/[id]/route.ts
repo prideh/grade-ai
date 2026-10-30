@@ -3,7 +3,7 @@ import { db } from '@/lib/db';
 import { getSession } from '@/lib/session';
 import { computeTaskAnalysis } from '@/lib/task-analysis';
 import { serverCache, CacheTags, invalidateExamCache, invalidateLogsCache } from '@/lib/cache';
-import { parseExamMetadata, embedExamMetadata, isExamApproved } from '@/lib/exam-meta';
+import { parseExamMetadata, embedExamMetadata } from '@/lib/exam-meta';
 import { deleteExamScanFiles, StorageCleanupError } from '@/lib/storage-cleanup';
 
 // GET: Fetch exam details, statistics, and submissions tracking (all class students)

@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { hashPassword } from '@/lib/auth';
 import { createSession } from '@/lib/session';
+import { checkAuthRateLimit, createAuthRateLimitResponse, extractClientIp } from '@/lib/rate-limit';
 
 export async function POST(request: Request) {
   try {
@@ -19,6 +20,17 @@ export async function POST(request: Request) {
         { error: 'Das Passwort muss mindestens 6 Zeichen lang sein.' },
         { status: 400 }
       );
+    }
+
+    // Ratenlimit gegen Massenregistrierungen und Brute-Force (IP- und E-Mail-basiert)
+    const clientIp = extractClientIp(request);
+    const rateLimit = await checkAuthRateLimit({
+      action: 'register',
+      email: typeof email === 'string' ? email : undefined,
+      ip: clientIp,
+    });
+    if (!rateLimit.allowed) {
+      return createAuthRateLimitResponse(rateLimit, 'register');
     }
 
     // Check if email already exists

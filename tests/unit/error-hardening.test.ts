@@ -7,6 +7,8 @@ import { POST as generatePost } from '@/app/api/exams/generate/route';
 import { POST as regenerateTaskPost } from '@/app/api/exams/[id]/regenerate-task/route';
 import * as sessionModule from '@/lib/session';
 import * as jwtModule from '@/lib/jwt';
+import * as authModule from '@/lib/auth';
+import * as rateLimitModule from '@/lib/rate-limit';
 import { db } from '@/lib/db';
 import fs from 'fs';
 import path from 'path';
@@ -58,14 +60,11 @@ vi.mock('@/lib/db', () => ({
 }));
 
 vi.mock('@/lib/rate-limit', () => ({
-  checkAiRateLimit: vi.fn().mockResolvedValue({
-    allowed: true,
-    limit: 60,
-    remaining: 59,
-    retryAfterSeconds: 0,
-    resetMs: 0,
-  }),
+  checkAiRateLimit: vi.fn(),
   createRateLimitResponse: vi.fn(),
+  checkAuthRateLimit: vi.fn(),
+  createAuthRateLimitResponse: vi.fn(),
+  extractClientIp: vi.fn(),
 }));
 
 vi.mock('@/lib/cache', () => ({
@@ -92,6 +91,22 @@ vi.mock('@/lib/cache', () => ({
 describe('Haertung: Interne Fehlermeldungen nicht an API-Clients zurueckgeben', () => {
   beforeEach(() => {
     vi.restoreAllMocks();
+    vi.mocked(rateLimitModule.checkAiRateLimit).mockResolvedValue({
+      allowed: true,
+      limit: 60,
+      remaining: 59,
+      retryAfterSeconds: 0,
+      resetMs: 0,
+    });
+    vi.mocked(rateLimitModule.checkAuthRateLimit).mockResolvedValue({
+      allowed: true,
+      limit: 5,
+      remaining: 4,
+      retryAfterSeconds: 0,
+      resetMs: 0,
+    });
+    vi.mocked(rateLimitModule.extractClientIp).mockReturnValue('127.0.0.1');
+    vi.mocked(authModule.verifyPassword).mockResolvedValue(false);
   });
 
   describe('POST /api/auth/login', () => {

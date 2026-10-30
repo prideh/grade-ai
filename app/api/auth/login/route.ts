@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { verifyPassword } from '@/lib/auth';
 import { createSession } from '@/lib/session';
+import { checkAuthRateLimit, createAuthRateLimitResponse, extractClientIp } from '@/lib/rate-limit';
 
 // Precomputed 16-byte hex salt + 64-byte hex key for constant-time dummy verification when user is not found
 const DUMMY_PASSWORD_HASH = '00000000000000000000000000000000:' + '0'.repeat(128);
@@ -12,6 +13,17 @@ export async function POST(request: Request) {
 
     if (!email || !password) {
       return NextResponse.json({ error: 'Bitte gib E-Mail und Passwort ein.' }, { status: 400 });
+    }
+
+    // Ratenlimit gegen Brute-Force-Angriffe (IP- und E-Mail-basiert)
+    const clientIp = extractClientIp(request);
+    const rateLimit = await checkAuthRateLimit({
+      action: 'login',
+      email: typeof email === 'string' ? email : undefined,
+      ip: clientIp,
+    });
+    if (!rateLimit.allowed) {
+      return createAuthRateLimitResponse(rateLimit, 'login');
     }
 
     // Find the teacher by email
