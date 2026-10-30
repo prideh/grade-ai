@@ -1036,9 +1036,8 @@ export async function POST(request: Request) {
     });
   } catch (error) {
     console.error('Error in mobile relay upload:', error);
-    const errMsg = error instanceof Error ? error.message : String(error);
     return NextResponse.json(
-      { error: 'Smartphone-Upload fehlgeschlagen: ' + errMsg },
+      { error: 'Smartphone-Upload fehlgeschlagen. Bitte versuchen Sie es später erneut.' },
       { status: 500 }
     );
   }

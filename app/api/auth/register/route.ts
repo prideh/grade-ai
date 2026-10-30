@@ -60,9 +60,7 @@ export async function POST(request: Request) {
     console.error('Error in teacher registration API:', error);
     return NextResponse.json(
       {
-        error:
-          'Registrierung fehlgeschlagen: ' +
-          (error instanceof Error ? error.message : String(error)),
+        error: 'Registrierung fehlgeschlagen. Bitte versuchen Sie es später erneut.',
       },
       { status: 500 }
     );

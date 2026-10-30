@@ -168,8 +168,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     console.error('Error regenerating single task:', error);
     return NextResponse.json(
       {
-        error:
-          error instanceof Error ? error.message : 'Fehler bei der Neu-Generierung der Aufgabe.',
+        error: 'Fehler bei der Neu-Generierung der Aufgabe. Bitte versuchen Sie es später erneut.',
       },
       { status: 500 }
     );

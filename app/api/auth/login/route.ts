@@ -45,7 +45,7 @@ export async function POST(request: Request) {
     console.error('Error in teacher login API:', error);
     return NextResponse.json(
       {
-        error: 'Login fehlgeschlagen: ' + (error instanceof Error ? error.message : String(error)),
+        error: 'Anmeldung fehlgeschlagen. Bitte versuchen Sie es später erneut.',
       },
       { status: 500 }
     );

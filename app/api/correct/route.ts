@@ -766,7 +766,9 @@ export async function POST(request: Request) {
     });
   } catch (error) {
     console.error('Error in API /correct route (sync part):', error);
-    const errMessage = error instanceof Error ? error.message : String(error);
-    return NextResponse.json({ error: 'Upload fehlgeschlagen: ' + errMessage }, { status: 500 });
+    return NextResponse.json(
+      { error: 'Upload fehlgeschlagen. Bitte versuchen Sie es später erneut.' },
+      { status: 500 }
+    );
   }
 }

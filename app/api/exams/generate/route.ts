@@ -183,9 +183,7 @@ export async function POST(request: Request) {
     return NextResponse.json(
       {
         error:
-          error instanceof Error
-            ? error.message
-            : 'Fehler bei der Generierung der Prüfung aus Unterrichtsmaterial.',
+          'Fehler bei der Generierung der Prüfung aus Unterrichtsmaterial. Bitte versuchen Sie es später erneut.',
       },
       { status: 500 }
     );
