@@ -308,8 +308,6 @@ describe('Kostenkontrolle: Grössenlimits für Unterrichtsmaterial und Scans', (
     it('POST /api/exams/generate lehnt übergrosses Unterrichtsmaterial mit 413 ab', async () => {
       vi.mocked(sessionModule.getSession).mockResolvedValue({
         userId: 'teacher-1',
-        email: 't@example.ch',
-        name: 'Teacher',
       });
 
       process.env.MAX_MATERIAL_TEXT_CHARS = '200';
@@ -331,14 +329,12 @@ describe('Kostenkontrolle: Grössenlimits für Unterrichtsmaterial und Scans', (
     it('POST /api/correct lehnt übergrosse Schülerarbeit mit 413 ab', async () => {
       vi.mocked(sessionModule.getSession).mockResolvedValue({
         userId: 'teacher-1',
-        email: 't@example.ch',
-        name: 'Teacher',
       });
 
       process.env.GEMINI_API_KEY = 'test-key';
       process.env.MAX_SCAN_FILE_SIZE_BYTES = '1024'; // 1 KB
 
-      const fakeLargeScan = new File([new Uint8Array(2048)], 'scan.pdf', {
+      const fakeLargeScan = new File(['x'.repeat(2048)], 'scan.pdf', {
         type: 'application/pdf',
       });
       const formData = new FormData();
@@ -358,6 +354,7 @@ describe('Kostenkontrolle: Grössenlimits für Unterrichtsmaterial und Scans', (
 
     it('POST /api/mobile-relay/upload lehnt zu viele Seiten mit 413 ab', async () => {
       vi.mocked(jwtModule.verifyMobileRelayToken).mockResolvedValue({
+        purpose: 'mobile_relay',
         sessionId: 'sess-1',
         teacherId: 'teacher-1',
         targetMode: 'SUBMISSION',
@@ -367,9 +364,9 @@ describe('Kostenkontrolle: Grössenlimits für Unterrichtsmaterial und Scans', (
 
       const formData = new FormData();
       formData.append('token', 'valid-token');
-      formData.append('pages', new File([new Uint8Array(10)], 'p1.jpg', { type: 'image/jpeg' }));
-      formData.append('pages', new File([new Uint8Array(10)], 'p2.jpg', { type: 'image/jpeg' }));
-      formData.append('pages', new File([new Uint8Array(10)], 'p3.jpg', { type: 'image/jpeg' }));
+      formData.append('pages', new File(['page1'], 'p1.jpg', { type: 'image/jpeg' }));
+      formData.append('pages', new File(['page2'], 'p2.jpg', { type: 'image/jpeg' }));
+      formData.append('pages', new File(['page3'], 'p3.jpg', { type: 'image/jpeg' }));
 
       const req = new Request('http://localhost/api/mobile-relay/upload', {
         method: 'POST',
@@ -385,8 +382,6 @@ describe('Kostenkontrolle: Grössenlimits für Unterrichtsmaterial und Scans', (
     it('POST /api/exams/parse-rubric lehnt übergrosse Musterlösung mit 413 ab', async () => {
       vi.mocked(sessionModule.getSession).mockResolvedValue({
         userId: 'teacher-1',
-        email: 't@example.ch',
-        name: 'Teacher',
       });
 
       process.env.MAX_RUBRIC_TEXT_CHARS = '100';

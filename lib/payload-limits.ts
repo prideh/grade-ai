@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { Buffer } from 'node:buffer';
 
 /**
  * Konfigurierbare Grössen- und Längenlimits für API-Payloads (Kostenkontrolle und Schutz).
