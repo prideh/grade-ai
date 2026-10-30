@@ -338,7 +338,7 @@ export function getActiveStorageDriverName(): 's3' | 'filesystem' {
 /**
  * Gibt eine einmalige Start-Logzeile mit dem konfigurierten Storage-Treiber aus.
  */
-export function logActiveStorageDriver(): void {
+export function logActiveStorageDriver(isProduction = process.env.NODE_ENV === 'production'): void {
   const driverName = getActiveStorageDriverName();
   if (driverName === 's3') {
     const bucket = process.env.S3_BUCKET || '';
@@ -351,7 +351,7 @@ export function logActiveStorageDriver(): void {
     const localDir =
       process.env.STORAGE_LOCAL_DIR ||
       path.join(/*turbopackIgnore: true*/ process.cwd(), 'storage', 'uploads');
-    const isEphemeral = process.env.NODE_ENV === 'production' && !process.env.STORAGE_LOCAL_DIR;
+    const isEphemeral = isProduction && !process.env.STORAGE_LOCAL_DIR;
     if (isEphemeral) {
       console.warn(
         `[Storage] WARNUNG: FilesystemStorageAdapter laeuft auf ephemerem Dateisystem in Produktion! Uploads gehen bei Render-Neustarts/Deploys verloren. Setzen Sie S3_BUCKET oder STORAGE_LOCAL_DIR.`

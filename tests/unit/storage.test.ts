@@ -206,7 +206,7 @@ describe('Storage System (lib/storage.ts)', () => {
 
       const adapter = new S3StorageAdapter(r2Config);
       const fetchSpy = vi.spyOn(global, 'fetch').mockResolvedValue(
-        new Response(Buffer.from('R2_TEST_DATA'), {
+        new Response('R2_TEST_DATA', {
           status: 200,
           headers: { 'content-type': 'image/png' },
         })
@@ -279,11 +279,10 @@ describe('Storage System (lib/storage.ts)', () => {
     });
 
     it('gibt eine deutliche Warnung aus wenn Filesystem in Produktion ohne Persistent Disk laeuft', () => {
-      process.env.NODE_ENV = 'production';
       delete process.env.STORAGE_LOCAL_DIR;
 
       const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
-      logActiveStorageDriver();
+      logActiveStorageDriver(true);
 
       expect(warnSpy).toHaveBeenCalledWith(
         expect.stringContaining(
