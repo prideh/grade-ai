@@ -3,6 +3,7 @@
 import * as React from 'react';
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import {
   Box,
   Typography,
@@ -77,6 +78,7 @@ interface ExamListItem extends PrismaExamItem {
 }
 
 export default function ExamsPage() {
+  const router = useRouter();
   const [exams, setExams] = useState<ExamListItem[]>([]);
   const [classes, setClasses] = useState<SimpleClass[]>([]);
   const [activeClassId, setActiveClassId] = useState<string>('');
@@ -322,20 +324,14 @@ export default function ExamsPage() {
     setCopyGradingNotes(exam.gradingNotes || '');
     setCopyGradingFormula((exam.gradingFormula as GradingFormula) || 'LINEAR_60');
     setCopyGradeRounding((exam.gradeRounding as GradeRounding) || '0.1');
-
-    const otherClasses = classes.filter((c) => c.id !== exam.classId);
-    if (otherClasses.length > 0) {
-      setCopyTargetClassId(otherClasses[0].id);
-    } else {
-      setCopyTargetClassId('');
-    }
-
+    setCopyTargetClassId(exam.classId); // Target class: same class by default
     setCopyError('');
     setOpenCopy(true);
   };
 
   const handleCopyExam = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!copySourceExam) return;
     if (!copyTitle.trim() || !copySubject.trim() || !copyTargetClassId) {
       setCopyError('Bitte fülle alle Pflichtfelder aus.');
       return;
@@ -345,38 +341,39 @@ export default function ExamsPage() {
     setCopyError('');
 
     try {
-      const res = await fetch('/api/exams', {
+      const res = await fetch(`/api/exams/${copySourceExam.id}/duplicate`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          title: copyTitle,
-          subject: copySubject,
+          title: copyTitle.trim(),
+          targetClassId: copyTargetClassId,
+          subject: copySubject.trim(),
           maxPoints: Number(copyMaxPoints),
           rubricText: copyRubric,
-          examTemplateText: copySourceExam?.examTemplateText || null,
           gradingNotes: copyGradingNotes || null,
           gradingFormula: copyGradingFormula,
           gradeRounding: copyGradeRounding,
-          classId: copyTargetClassId,
-          tasks:
-            copySourceExam?.tasks && copySourceExam.tasks.length > 0
-              ? copySourceExam.tasks
-              : undefined,
         }),
       });
 
       if (!res.ok) {
-        const errorMsg = await getErrorMessage(res, 'Prüfung konnte nicht kopiert werden.');
+        const errorMsg = await getErrorMessage(res, 'Prüfung konnte nicht dupliziert werden.');
         setCopyError(errorMsg);
         return;
       }
 
+      const data = await res.json();
       setOpenCopy(false);
       setCopySourceExam(null);
-      setActiveClassId(copyTargetClassId); // Automatically select the tab of the class for the copied exam
-      fetchData(); // Refresh list
+
+      const newExamId = data.id || data.exam?.id;
+      if (newExamId) {
+        router.push(`/exams/${newExamId}`);
+      } else {
+        fetchData();
+      }
     } catch (err) {
-      setCopyError(err instanceof Error ? err.message : 'Prüfung konnte nicht kopiert werden.');
+      setCopyError(err instanceof Error ? err.message : 'Prüfung konnte nicht dupliziert werden.');
     } finally {
       setCopyLoading(false);
     }
@@ -801,7 +798,7 @@ export default function ExamsPage() {
                             '&:hover': { backgroundColor: '#f1f5f9', color: '#0f172a' },
                           }}
                         >
-                          Kopieren
+                          Prüfung duplizieren
                         </Button>
                         <Link href={`/exams/${ex.id}`} passHref style={{ textDecoration: 'none' }}>
                           <Button
@@ -1246,15 +1243,16 @@ export default function ExamsPage() {
         >
           <form onSubmit={handleCopyExam}>
             <DialogTitle sx={{ fontWeight: 800, color: '#0f172a', letterSpacing: '-0.01em' }}>
-              Prüfung kopieren
+              Prüfung duplizieren
             </DialogTitle>
             <DialogContent>
               <Stack spacing={2.5} sx={{ mt: 1 }}>
                 {copyError && <Alert severity="error">{copyError}</Alert>}
 
                 <Typography variant="body2" sx={{ color: 'text.secondary', mb: 1 }}>
-                  Kopiere die Prüfung <strong>{copySourceExam?.title}</strong> in eine andere
-                  Klasse. Alle Einstellungen und der Erwartungshorizont werden übernommen.
+                  Dupliziere die Prüfung <strong>{copySourceExam?.title}</strong>. Alle
+                  Einstellungen, Aufgaben und der Erwartungshorizont werden übernommen (ohne
+                  Schülerabgaben).
                 </Typography>
 
                 <Grid container spacing={2}>
@@ -1427,7 +1425,7 @@ export default function ExamsPage() {
                     borderRadius: '8px',
                   }}
                 >
-                  {copyLoading ? <CircularProgress size={20} /> : 'Kopieren'}
+                  {copyLoading ? <CircularProgress size={20} /> : 'Duplizieren'}
                 </Button>
               </Stack>
             </DialogActions>

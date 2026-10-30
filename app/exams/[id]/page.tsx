@@ -36,6 +36,7 @@ import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import { getErrorMessage } from '@/lib/api-error';
 import DeleteIcon from '@mui/icons-material/Delete';
 import EditIcon from '@mui/icons-material/Edit';
+import ContentCopyIcon from '@mui/icons-material/ContentCopy';
 import AssessmentIcon from '@mui/icons-material/Assessment';
 import TrendingUpIcon from '@mui/icons-material/TrendingUp';
 import StarsIcon from '@mui/icons-material/Stars';
@@ -117,6 +118,72 @@ export default function ExamDetailsPage() {
   const [qrOpen, setQrOpen] = useState(false);
   const [qrTargetMode, setQrTargetMode] = useState<'SUBMISSION' | 'RUBRIC'>('SUBMISSION');
   const [qrStudent, setQrStudent] = useState<{ id: string; name: string } | null>(null);
+
+  // Duplicate Exam State
+  const [openDuplicate, setOpenDuplicate] = useState(false);
+  const [duplicateTitle, setDuplicateTitle] = useState('');
+  const [duplicateTargetClassId, setDuplicateTargetClassId] = useState('');
+  const [allClasses, setAllClasses] = useState<{ id: string; name: string }[]>([]);
+  const [duplicateLoading, setDuplicateLoading] = useState(false);
+  const [duplicateError, setDuplicateError] = useState('');
+
+  const handleOpenDuplicate = async () => {
+    setDuplicateTitle(exam ? `${exam.title} (Kopie)` : '');
+    setDuplicateTargetClassId(exam ? exam.classId : '');
+    setDuplicateError('');
+    setOpenDuplicate(true);
+
+    if (allClasses.length === 0) {
+      try {
+        const res = await fetch('/api/classes');
+        if (res.ok) {
+          const data = await res.json();
+          setAllClasses(data.classes || []);
+        }
+      } catch {
+        // Fallback: ignore
+      }
+    }
+  };
+
+  const handleDuplicateExam = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!duplicateTitle.trim()) {
+      setDuplicateError('Bitte gib einen Titel für die duplizierte Prüfung an.');
+      return;
+    }
+
+    setDuplicateLoading(true);
+    setDuplicateError('');
+
+    try {
+      const res = await fetch(`/api/exams/${examId}/duplicate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          title: duplicateTitle.trim(),
+          targetClassId: duplicateTargetClassId || undefined,
+        }),
+      });
+
+      if (!res.ok) {
+        const msg = await getErrorMessage(res, 'Prüfung konnte nicht dupliziert werden.');
+        setDuplicateError(msg);
+        return;
+      }
+
+      const data = await res.json();
+      setOpenDuplicate(false);
+      const newExamId = data.id || data.exam?.id;
+      if (newExamId) {
+        router.push(`/exams/${newExamId}`);
+      }
+    } catch (err) {
+      setDuplicateError(err instanceof Error ? err.message : 'Fehler beim Duplizieren.');
+    } finally {
+      setDuplicateLoading(false);
+    }
+  };
 
   const handleExportCsv = () => {
     if (!exam || roster.length === 0) return;
@@ -371,6 +438,24 @@ export default function ExamDetailsPage() {
             </Box>
 
             <Stack direction="row" spacing={1.5} sx={{ flexWrap: 'wrap' }}>
+              <Button
+                variant="outlined"
+                startIcon={<ContentCopyIcon />}
+                onClick={handleOpenDuplicate}
+                sx={{
+                  borderRadius: '8px',
+                  textTransform: 'none',
+                  fontWeight: 650,
+                  color: '#1b77d1',
+                  borderColor: '#cbd5e1',
+                  '&:hover': {
+                    borderColor: '#1b77d1',
+                    backgroundColor: 'rgba(27, 119, 209, 0.04)',
+                  },
+                }}
+              >
+                Prüfung duplizieren
+              </Button>
               <Button
                 variant="contained"
                 startIcon={<QrCodeScannerIcon />}
@@ -1154,6 +1239,82 @@ export default function ExamDetailsPage() {
             )}
           </CardContent>
         </Card>
+
+        {/* Duplicate Exam Dialog */}
+        <Dialog
+          open={openDuplicate}
+          onClose={(_e, reason) => {
+            if (duplicateLoading || reason === 'backdropClick') return;
+            setOpenDuplicate(false);
+          }}
+          maxWidth="xs"
+          fullWidth
+        >
+          <form onSubmit={handleDuplicateExam}>
+            <DialogTitle sx={{ fontWeight: 800, color: '#0f172a' }}>
+              Prüfung duplizieren
+            </DialogTitle>
+            <DialogContent>
+              <Stack spacing={2} sx={{ mt: 1 }}>
+                {duplicateError && <Alert severity="error">{duplicateError}</Alert>}
+                <Typography variant="body2" sx={{ color: 'text.secondary' }}>
+                  Erstellt eine Kopie aller Aufgaben, des Erwartungshorizonts und der
+                  Bewertungseinstellungen. Schülerabgaben werden nicht übernommen.
+                </Typography>
+                <TextField
+                  label="Neuer Prüfungstitel"
+                  fullWidth
+                  variant="outlined"
+                  value={duplicateTitle}
+                  onChange={(e) => setDuplicateTitle(e.target.value)}
+                  autoFocus
+                  required
+                  sx={{ '& .MuiOutlinedInput-root': { borderRadius: '8px' } }}
+                />
+                {allClasses.length > 0 && (
+                  <FormControl fullWidth>
+                    <InputLabel id="duplicate-class-label">Zielklasse</InputLabel>
+                    <Select
+                      labelId="duplicate-class-label"
+                      value={duplicateTargetClassId}
+                      label="Zielklasse"
+                      onChange={(e) => setDuplicateTargetClassId(e.target.value)}
+                      sx={{ borderRadius: '8px' }}
+                    >
+                      {allClasses.map((c) => (
+                        <MenuItem key={c.id} value={c.id}>
+                          {c.name} {c.id === exam?.classId && '(Aktuelle Klasse)'}
+                        </MenuItem>
+                      ))}
+                    </Select>
+                  </FormControl>
+                )}
+              </Stack>
+            </DialogContent>
+            <DialogActions sx={{ p: 2, pt: 0 }}>
+              <Button
+                onClick={() => setOpenDuplicate(false)}
+                disabled={duplicateLoading}
+                sx={{ textTransform: 'none', fontWeight: 650 }}
+              >
+                Abbrechen
+              </Button>
+              <Button
+                type="submit"
+                variant="contained"
+                disabled={duplicateLoading || !duplicateTitle.trim()}
+                sx={{
+                  textTransform: 'none',
+                  fontWeight: 700,
+                  backgroundColor: '#1b77d1',
+                  borderRadius: '8px',
+                }}
+              >
+                {duplicateLoading ? <CircularProgress size={20} /> : 'Duplizieren'}
+              </Button>
+            </DialogActions>
+          </form>
+        </Dialog>
 
         {/* Delete Exam Dialog Confirmation */}
         <Dialog
