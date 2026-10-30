@@ -4,3 +4,9 @@ package-lock.json
 .system_generated/
 out/
 build/
+coverage/
+lib/generated/
+playwright-report/
+test-results/
+blob-report/
+storage/

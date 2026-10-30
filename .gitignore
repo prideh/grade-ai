@@ -43,6 +43,33 @@ next-env.d.ts
 
 /lib/generated/prisma
 
-# local uploads
+# local uploads & storage
 /public/uploads/
 /storage/uploads/
+/storage/
+/tmp-test-storage/
+
+# playwright e2e & test reports
+/test-results/
+/playwright-report/
+/blob-report/
+/playwright/.cache/
+/playwright/.auth/
+
+# agent & tooling scratch
+.system_generated/
+.claude/
+
+# keys & local databases
+*.key
+*.crt
+*.db
+*.sqlite
+*.sqlite3
+
+# os & editor
+Thumbs.db
+Desktop.ini
+.vscode/*
+!.vscode/extensions.json
+.idea/
