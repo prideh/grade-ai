@@ -13,9 +13,16 @@ export const SECURITY_HEADERS = {
   // camera video feeds, and client-side blob/data URLs until a verified nonce-based CSP is tested.
 } as const;
 
-export function applySecurityHeaders(response: NextResponse): NextResponse {
+export function applySecurityHeaders(response: NextResponse, pathname?: string): NextResponse {
   for (const [key, value] of Object.entries(SECURITY_HEADERS)) {
     response.headers.set(key, value);
+  }
+  if (pathname) {
+    if (pathname === '/') {
+      response.headers.set('X-Robots-Tag', 'index, follow');
+    } else {
+      response.headers.set('X-Robots-Tag', 'noindex, nofollow');
+    }
   }
   return response;
 }
@@ -112,21 +119,21 @@ export async function proxy(request: NextRequest) {
     const response = NextResponse.redirect(new URL('/login', request.url));
     // Purge the old/invalid session cookie from the browser
     response.cookies.delete(SESSION_COOKIE_NAME);
-    return applySecurityHeaders(response);
+    return applySecurityHeaders(response, pathname);
   }
 
   // Redirect authenticated users away from login/register back to the dashboard
   if (user && (pathname === '/login' || pathname === '/register')) {
     const response = NextResponse.redirect(new URL('/dashboard', request.url));
     const slidingRes = await handleSlidingSession(response, payload, user.userId);
-    return applySecurityHeaders(slidingRes);
+    return applySecurityHeaders(slidingRes, pathname);
   }
 
   // Purge the cookie if it is present but invalid/expired to prevent redirect loops or invalid token fetches
   if (!user && session) {
     const response = NextResponse.next();
     response.cookies.delete(SESSION_COOKIE_NAME);
-    return applySecurityHeaders(response);
+    return applySecurityHeaders(response, pathname);
   }
 
   // Slide session for authenticated active users
@@ -137,10 +144,10 @@ export async function proxy(request: NextRequest) {
       user.userId,
       request
     );
-    return applySecurityHeaders(slidingRes);
+    return applySecurityHeaders(slidingRes, pathname);
   }
 
-  return applySecurityHeaders(NextResponse.next());
+  return applySecurityHeaders(NextResponse.next(), pathname);
 }
 
 // Intercept all page and API routes while bypassing static files and next assets

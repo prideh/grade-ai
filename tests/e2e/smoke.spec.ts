@@ -64,4 +64,26 @@ test.describe('Smoke Tests — Critical Availability, Security Boundaries & Orth
     expect(apiHeaders['x-frame-options']).toBe('DENY');
     expect(apiHeaders['referrer-policy']).toBe('strict-origin-when-cross-origin');
   });
+
+  test('6. SEO routes /robots.txt and /sitemap.xml return 200 OK and landing page has OG & canonical meta tags', async ({
+    page,
+    request,
+  }) => {
+    const robotsRes = await request.get('/robots.txt');
+    expect(robotsRes.status()).toBe(200);
+    const robotsText = await robotsRes.text();
+    expect(robotsText).toContain('Allow:');
+
+    const sitemapRes = await request.get('/sitemap.xml');
+    expect(sitemapRes.status()).toBe(200);
+    const sitemapText = await sitemapRes.text();
+    expect(sitemapText).toContain('<urlset');
+
+    const landingRes = await page.goto('/');
+    expect(landingRes?.status()).toBe(200);
+    const ogTitle = await page.locator('meta[property="og:title"]').getAttribute('content');
+    expect(ogTitle).toContain('GradeAI');
+    const canonical = await page.locator('link[rel="canonical"]').getAttribute('href');
+    expect(canonical).toBe('/');
+  });
 });
