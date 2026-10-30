@@ -45,7 +45,8 @@ const escolaTheme = createTheme({
     },
   },
   typography: {
-    fontFamily: '"Nunito", "Inter", "system-ui", "-apple-system", sans-serif',
+    fontFamily:
+      'system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif',
     h1: {
       fontWeight: 800,
       letterSpacing: '-0.02em',

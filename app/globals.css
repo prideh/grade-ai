@@ -1,5 +1,3 @@
-@import url('https://fonts.googleapis.com/css2?family=Nunito:wght@300;400;500;600;700;800&family=Inter:wght@300;400;500;600;700&family=Architects+Daughter&display=swap');
-
 :root {
   /* Clean Swiss Light Theme variables by default */
   --bg-primary: #f8fafc;
@@ -31,8 +29,10 @@
   --glass-blur: none;
   --shadow-premium: 0 1px 3px rgba(0, 0, 0, 0.05);
 
-  --font-sans: 'Nunito', 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
-  --font-heading: 'Nunito', sans-serif;
+  --font-sans:
+    system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  --font-heading:
+    system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
 }
 
 /* Global resets */

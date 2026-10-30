@@ -431,15 +431,34 @@ export default function Home() {
         sx={{
           padding: '24px 40px',
           borderTop: '1px solid #e2e8f0',
-          textAlign: 'center',
           backgroundColor: '#ffffff',
           color: '#666666',
           fontSize: '0.85rem',
           fontWeight: 500,
           zIndex: 5,
+          display: 'flex',
+          flexDirection: { xs: 'column', sm: 'row' },
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          gap: 1.5,
         }}
       >
-        © 2026 GradeAi. Die intelligente Prüfungskorrektur für Schweizer Lehrpersonen.
+        <Typography variant="body2" sx={{ color: '#666666' }}>
+          © 2026 GradeAi. Die intelligente Prüfungskorrektur für Schweizer Lehrpersonen.
+        </Typography>
+        <Stack direction="row" spacing={3}>
+          <Link
+            href="/privacy"
+            style={{
+              color: '#1b77d1',
+              textDecoration: 'none',
+              fontWeight: 600,
+              fontSize: '0.85rem',
+            }}
+          >
+            Datenschutzerklärung
+          </Link>
+        </Stack>
       </Box>
     </Box>
   );

@@ -250,6 +250,17 @@ export default function LoginPage() {
                   Jetzt registrieren
                 </Link>
               </Typography>
+              <Typography
+                variant="caption"
+                sx={{ color: 'text.secondary', display: 'block', mt: 2 }}
+              >
+                <Link
+                  href="/privacy"
+                  style={{ color: '#64748b', textDecoration: 'none', fontWeight: 500 }}
+                >
+                  Datenschutzerklärung
+                </Link>
+              </Typography>
             </Box>
           </CardContent>
         </Card>

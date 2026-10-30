@@ -274,6 +274,30 @@ export default function RegisterPage() {
                     'Account erstellen'
                   )}
                 </Button>
+
+                <Typography
+                  variant="caption"
+                  sx={{
+                    color: 'text.secondary',
+                    textAlign: 'center',
+                    display: 'block',
+                    mt: 1,
+                    lineHeight: 1.5,
+                  }}
+                >
+                  Mit der Registrierung akzeptieren Sie unsere{' '}
+                  <Link
+                    href="/privacy"
+                    style={{
+                      color: '#1b77d1',
+                      fontWeight: 600,
+                      textDecoration: 'underline',
+                    }}
+                  >
+                    Datenschutzerklärung
+                  </Link>
+                  .
+                </Typography>
               </Stack>
             </form>
 
