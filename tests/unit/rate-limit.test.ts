@@ -5,6 +5,7 @@ import {
   checkAiRateLimit,
   createRateLimitResponse,
   getRateLimitConfig,
+  getQuotaConfig,
   resetRateLimits,
   InMemoryRateLimitStore,
   type RateLimitStore,
@@ -15,6 +16,8 @@ import { POST as correctPost } from '@/app/api/correct/route';
 import { POST as generatePost } from '@/app/api/exams/generate/route';
 import { POST as regenerateTaskPost } from '@/app/api/exams/[id]/regenerate-task/route';
 import { POST as uploadPost } from '@/app/api/mobile-relay/upload/route';
+import { POST as parseRubricPost } from '@/app/api/exams/parse-rubric/route';
+import { POST as replacePost } from '@/app/api/submissions/[id]/replace/route';
 
 vi.mock('@/lib/session', () => ({
   getSession: vi.fn(),
@@ -40,6 +43,18 @@ describe('AI Rate Limiting (lib/rate-limit.ts)', () => {
     delete process.env.AI_RATE_LIMIT_GENERATE_MAX_REQUESTS;
     delete process.env.AI_RATE_LIMIT_REGENERATE_TASK_MAX_REQUESTS;
     delete process.env.AI_RATE_LIMIT_MOBILE_RELAY_UPLOAD_MAX_REQUESTS;
+    delete process.env.AI_RATE_LIMIT_PARSE_RUBRIC_MAX_REQUESTS;
+    delete process.env.AI_RATE_LIMIT_REPLACE_MAX_REQUESTS;
+    delete process.env.AI_QUOTA_MAX_REQUESTS;
+    delete process.env.AI_QUOTA_LIMIT;
+    delete process.env.AI_QUOTA_WINDOW_SECONDS;
+    delete process.env.AI_QUOTA_WINDOW_DAYS;
+    delete process.env.AI_QUOTA_WINDOW_HOURS;
+    delete process.env.AI_QUOTA_PERIOD;
+    delete process.env.AI_QUOTA_RELAY_MAX_REQUESTS;
+    delete process.env.AI_QUOTA_RELAY_LIMIT;
+    delete process.env.AI_QUOTA_PARSE_RUBRIC_MAX_REQUESTS;
+    delete process.env.AI_QUOTA_REPLACE_MAX_REQUESTS;
     resetRateLimits();
   });
 
@@ -514,6 +529,192 @@ describe('AI Rate Limiting (lib/rate-limit.ts)', () => {
     });
   });
 
+  describe('Kumulatives Kontingent (getQuotaConfig & checkAiRateLimit)', () => {
+    it('ist standardmaessig deaktiviert, wenn keine Env gesetzt ist (reines Burst-Limit)', () => {
+      const config = getQuotaConfig();
+      expect(config.enabled).toBe(false);
+      expect(config.maxRequests).toBe(0);
+      expect(config.windowMs).toBe(0);
+    });
+
+    it('konfiguriert Kontingent via AI_QUOTA_MAX_REQUESTS mit Standard-24h-Fenster', () => {
+      process.env.AI_QUOTA_MAX_REQUESTS = '500';
+      const config = getQuotaConfig();
+      expect(config.enabled).toBe(true);
+      expect(config.maxRequests).toBe(500);
+      expect(config.windowMs).toBe(86400 * 1000); // 24h
+    });
+
+    it('unterstuetzt flexible Zeitfenster (Sekunden, Tage, Stunden, Periode)', () => {
+      process.env.AI_QUOTA_MAX_REQUESTS = '100';
+
+      // Sekunden
+      process.env.AI_QUOTA_WINDOW_SECONDS = '3600';
+      expect(getQuotaConfig().windowMs).toBe(3600 * 1000);
+      delete process.env.AI_QUOTA_WINDOW_SECONDS;
+
+      // Tage
+      process.env.AI_QUOTA_WINDOW_DAYS = '7';
+      expect(getQuotaConfig().windowMs).toBe(7 * 86400 * 1000);
+      delete process.env.AI_QUOTA_WINDOW_DAYS;
+
+      // Stunden
+      process.env.AI_QUOTA_WINDOW_HOURS = '12';
+      expect(getQuotaConfig().windowMs).toBe(12 * 3600 * 1000);
+      delete process.env.AI_QUOTA_WINDOW_HOURS;
+
+      // Monat
+      process.env.AI_QUOTA_PERIOD = 'month';
+      expect(getQuotaConfig().windowMs).toBe(30 * 86400 * 1000);
+    });
+
+    it('erlaubt Anfragen solange das kumulative Kontingent nicht erschoepft ist', async () => {
+      process.env.AI_RATE_LIMIT_MAX_REQUESTS = '100'; // Hohes Burst-Limit
+      process.env.AI_QUOTA_MAX_REQUESTS = '3';
+      const store = new InMemoryRateLimitStore();
+
+      const res1 = await checkAiRateLimit({
+        identifier: 'quota-user-1',
+        scope: 'teacher',
+        store,
+      });
+      expect(res1.allowed).toBe(true);
+      expect(res1.quota?.remaining).toBe(2);
+
+      const res2 = await checkAiRateLimit({
+        identifier: 'quota-user-1',
+        scope: 'teacher',
+        store,
+      });
+      expect(res2.allowed).toBe(true);
+      expect(res2.quota?.remaining).toBe(1);
+
+      const res3 = await checkAiRateLimit({
+        identifier: 'quota-user-1',
+        scope: 'teacher',
+        store,
+      });
+      expect(res3.allowed).toBe(true);
+      expect(res3.quota?.remaining).toBe(0);
+
+      // 4. Anfrage ueberschreitet das kumulative Kontingent
+      const res4 = await checkAiRateLimit({
+        identifier: 'quota-user-1',
+        scope: 'teacher',
+        store,
+      });
+      expect(res4.allowed).toBe(false);
+      expect(res4.quotaExceeded).toBe(true);
+      expect(res4.quotaType).toBe('cumulative');
+    });
+
+    it('erzeugt passenden 429-Header und Fehlermeldung bei Kontingentsueberschreitung', () => {
+      const quotaResult = {
+        allowed: false,
+        limit: 100,
+        remaining: 0,
+        retryAfterSeconds: 3600,
+        resetMs: 3600000,
+        quotaExceeded: true,
+        quotaType: 'cumulative' as const,
+      };
+
+      const response = createRateLimitResponse(quotaResult);
+      expect(response.status).toBe(429);
+      expect(response.headers.get('X-RateLimit-Type')).toBe('cumulative-quota');
+      expect(response.headers.get('Retry-After')).toBe('3600');
+    });
+  });
+
+  describe('Endpunkt-Integration: app/api/exams/parse-rubric/route.ts', () => {
+    it('lehnt Anfragen mit 429 ab, wenn Ratenlimit oder Kontingent erschoepft ist', async () => {
+      process.env.AI_RATE_LIMIT_MAX_REQUESTS = '1';
+      vi.mocked(sessionModule.getSession).mockResolvedValue({ userId: 'lehrer-parse-test' });
+
+      // Kontingent verbrauchen
+      await checkAiRateLimit({
+        identifier: 'lehrer-parse-test',
+        scope: 'teacher',
+        endpoint: 'parse-rubric',
+      });
+
+      const req = new Request('http://localhost:3000/api/exams/parse-rubric', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ rubricText: 'Aufgabe 1: 5 Punkte' }),
+      });
+
+      const res = await parseRubricPost(req);
+      expect(res.status).toBe(429);
+      expect(res.headers.get('Retry-After')).toBeTruthy();
+      const body = await res.json();
+      expect(body.error).toContain('Ratenlimit');
+    });
+
+    it('beeintraechtigt andere Lehrer nicht (Tenant-Trennung)', async () => {
+      process.env.AI_RATE_LIMIT_MAX_REQUESTS = '1';
+
+      await checkAiRateLimit({
+        identifier: 'lehrer-1',
+        scope: 'teacher',
+        endpoint: 'parse-rubric',
+      });
+
+      vi.mocked(sessionModule.getSession).mockResolvedValue({ userId: 'lehrer-2' });
+
+      const req = new Request('http://localhost:3000/api/exams/parse-rubric', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),
+      });
+
+      const res = await parseRubricPost(req);
+      expect(res.status).not.toBe(429);
+    });
+  });
+
+  describe('Endpunkt-Integration: app/api/submissions/[id]/replace/route.ts', () => {
+    it('lehnt Anfragen mit 429 ab, wenn Ratenlimit oder Kontingent erschoepft ist', async () => {
+      process.env.AI_RATE_LIMIT_MAX_REQUESTS = '1';
+      vi.mocked(sessionModule.getSession).mockResolvedValue({ userId: 'lehrer-replace-test' });
+
+      await checkAiRateLimit({
+        identifier: 'lehrer-replace-test',
+        scope: 'teacher',
+        endpoint: 'replace',
+      });
+
+      const req = new Request('http://localhost:3000/api/submissions/sub-1/replace', {
+        method: 'POST',
+      });
+
+      const res = await replacePost(req, { params: Promise.resolve({ id: 'sub-1' }) });
+      expect(res.status).toBe(429);
+      expect(res.headers.get('Retry-After')).toBeTruthy();
+      const body = await res.json();
+      expect(body.error).toContain('Ratenlimit');
+    });
+
+    it('beeintraechtigt andere Lehrer nicht (Tenant-Trennung)', async () => {
+      process.env.AI_RATE_LIMIT_MAX_REQUESTS = '1';
+
+      await checkAiRateLimit({
+        identifier: 'lehrer-1',
+        scope: 'teacher',
+        endpoint: 'replace',
+      });
+
+      vi.mocked(sessionModule.getSession).mockResolvedValue({ userId: 'lehrer-2' });
+
+      const req = new Request('http://localhost:3000/api/submissions/sub-1/replace', {
+        method: 'POST',
+      });
+
+      const res = await replacePost(req, { params: Promise.resolve({ id: 'sub-1' }) });
+      expect(res.status).not.toBe(429);
+    });
+  });
+
   describe('Schweizer Rechtschreibung (kein Eszett)', () => {
     it('enthaelt kein Eszett in allen betroffenen Quellcode- und Testdateien', async () => {
       const eszett = String.fromCharCode(0xdf);
@@ -523,6 +724,8 @@ describe('AI Rate Limiting (lib/rate-limit.ts)', () => {
         path.resolve(__dirname, '../../app/api/exams/generate/route.ts'),
         path.resolve(__dirname, '../../app/api/exams/[id]/regenerate-task/route.ts'),
         path.resolve(__dirname, '../../app/api/mobile-relay/upload/route.ts'),
+        path.resolve(__dirname, '../../app/api/exams/parse-rubric/route.ts'),
+        path.resolve(__dirname, '../../app/api/submissions/[id]/replace/route.ts'),
         path.resolve(__dirname, './rate-limit.test.ts'),
       ];
 

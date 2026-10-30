@@ -1,6 +1,7 @@
 import { NextResponse, after } from 'next/server';
 import { db } from '@/lib/db';
 import { getSession } from '@/lib/session';
+import { checkAiRateLimit, createRateLimitResponse } from '@/lib/rate-limit';
 import { DEFAULT_GEMINI_MODEL, runLiveGeminiCorrection } from '@/lib/gemini';
 import {
   calculateRawSwissGrade,
@@ -38,6 +39,16 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     const session = await getSession();
     if (!session) {
       return NextResponse.json({ error: 'Nicht autorisiert.' }, { status: 401 });
+    }
+
+    // Rate limiting for AI endpoints
+    const rateLimit = await checkAiRateLimit({
+      identifier: session.userId,
+      scope: 'teacher',
+      endpoint: 'replace',
+    });
+    if (!rateLimit.allowed) {
+      return createRateLimitResponse(rateLimit);
     }
 
     const { id: submissionId } = await params;

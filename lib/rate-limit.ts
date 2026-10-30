@@ -12,6 +12,13 @@ export interface RateLimitResult {
   retryAfterSeconds: number;
   resetMs: number;
   failedOpen?: boolean;
+  quotaExceeded?: boolean;
+  quotaType?: 'burst' | 'cumulative';
+  quota?: {
+    limit: number;
+    remaining: number;
+    resetMs: number;
+  };
 }
 
 export interface RateLimitStore {
@@ -102,7 +109,12 @@ export function setRateLimitStore(store: RateLimitStore | undefined): void {
 
 export function resetRateLimits(key?: string): void {
   const store = getRateLimitStore();
-  store.reset(key);
+  if (key) {
+    store.reset(key);
+    store.reset(`quota:${key}`);
+  } else {
+    store.reset();
+  }
 }
 
 export function getRateLimitConfig(options?: {
@@ -155,39 +167,195 @@ export function getRateLimitConfig(options?: {
   };
 }
 
+export interface QuotaConfig {
+  enabled: boolean;
+  maxRequests: number;
+  windowMs: number;
+}
+
+/**
+ * Ermittelt die Konfiguration des kumulativen Kontingents fuer KI-Anfragen.
+ *
+ * Verhalten bei fehlenden Umgebungsvariablen:
+ * Ist weder AI_QUOTA_MAX_REQUESTS noch AI_QUOTA_LIMIT gesetzt, ist das kumulative Kontingent
+ * vollstaendig deaktiviert (enabled = false). In diesem Fall greift ausschliesslich das Burst-Limit.
+ * Es gibt keine hartkodierten Budget-Zahlen ohne explizite Vorgabe.
+ *
+ * Konfigurationsmoeglichkeiten:
+ * - AI_QUOTA_MAX_REQUESTS / AI_QUOTA_LIMIT: Maximale Anzahl kumulativer Anfragen im Zeitraum
+ * - AI_QUOTA_WINDOW_SECONDS: Fensterlaenge in Sekunden (z. B. 86400 fuer 1 Tag)
+ * - AI_QUOTA_WINDOW_DAYS: Fensterlaenge in Tagen (z. B. 1 fuer Tag, 30 fuer Monat)
+ * - AI_QUOTA_WINDOW_HOURS: Fensterlaenge in Stunden
+ * - AI_QUOTA_PERIOD: 'day' / 'daily' (86400s) oder 'month' / 'monthly' (30 * 86400s)
+ * - Scope-spezifisch: AI_QUOTA_RELAY_MAX_REQUESTS / AI_QUOTA_RELAY_LIMIT
+ * - Endpunkt-spezifisch: AI_QUOTA_<ENDPOINT>_MAX_REQUESTS / AI_QUOTA_<ENDPOINT>_LIMIT
+ *
+ * Standardfenster bei gesetztem Limit ohne Zeitfenstervorgabe: 24 Stunden (86'400 Sekunden).
+ */
+export function getQuotaConfig(options?: { scope?: string; endpoint?: string }): QuotaConfig {
+  let enabled = false;
+  let maxRequests = 0;
+  let windowSeconds = 86400; // Standard: 24 Stunden (1 Tag)
+
+  const envMax = process.env.AI_QUOTA_MAX_REQUESTS || process.env.AI_QUOTA_LIMIT;
+  if (envMax && Number.isFinite(Number(envMax)) && Number(envMax) > 0) {
+    enabled = true;
+    maxRequests = Math.floor(Number(envMax));
+  }
+
+  if (options?.scope === 'relay') {
+    const relayMax = process.env.AI_QUOTA_RELAY_MAX_REQUESTS || process.env.AI_QUOTA_RELAY_LIMIT;
+    if (relayMax && Number.isFinite(Number(relayMax)) && Number(relayMax) > 0) {
+      enabled = true;
+      maxRequests = Math.floor(Number(relayMax));
+    }
+  }
+
+  if (options?.endpoint) {
+    const endpointKey = options.endpoint.toUpperCase().replace(/[^A-Z0-9]/g, '_');
+    const endpointMax =
+      process.env[`AI_QUOTA_${endpointKey}_MAX_REQUESTS`] ||
+      process.env[`AI_QUOTA_${endpointKey}_LIMIT`];
+    if (endpointMax && Number.isFinite(Number(endpointMax)) && Number(endpointMax) > 0) {
+      enabled = true;
+      maxRequests = Math.floor(Number(endpointMax));
+    }
+  }
+
+  if (!enabled) {
+    return {
+      enabled: false,
+      maxRequests: 0,
+      windowMs: 0,
+    };
+  }
+
+  const envWindowSeconds = process.env.AI_QUOTA_WINDOW_SECONDS;
+  const envWindowDays = process.env.AI_QUOTA_WINDOW_DAYS;
+  const envWindowHours = process.env.AI_QUOTA_WINDOW_HOURS;
+  const envPeriod = (process.env.AI_QUOTA_PERIOD || '').toLowerCase().trim();
+
+  if (
+    envWindowSeconds &&
+    Number.isFinite(Number(envWindowSeconds)) &&
+    Number(envWindowSeconds) > 0
+  ) {
+    windowSeconds = Math.floor(Number(envWindowSeconds));
+  } else if (envWindowDays && Number.isFinite(Number(envWindowDays)) && Number(envWindowDays) > 0) {
+    windowSeconds = Math.floor(Number(envWindowDays)) * 86400;
+  } else if (
+    envWindowHours &&
+    Number.isFinite(Number(envWindowHours)) &&
+    Number(envWindowHours) > 0
+  ) {
+    windowSeconds = Math.floor(Number(envWindowHours)) * 3600;
+  } else if (envPeriod === 'month' || envPeriod === 'monthly') {
+    windowSeconds = 30 * 86400;
+  } else if (envPeriod === 'day' || envPeriod === 'daily') {
+    windowSeconds = 86400;
+  }
+
+  return {
+    enabled: true,
+    maxRequests,
+    windowMs: windowSeconds * 1000,
+  };
+}
+
 export interface CheckRateLimitOptions {
   identifier: string;
   scope?: 'teacher' | 'relay' | string;
-  endpoint?: 'correct' | 'generate' | 'regenerate-task' | 'mobile-relay-upload' | string;
+  endpoint?:
+    | 'correct'
+    | 'generate'
+    | 'regenerate-task'
+    | 'mobile-relay-upload'
+    | 'parse-rubric'
+    | 'replace'
+    | string;
   limit?: number;
   windowMs?: number;
+  quotaLimit?: number;
+  quotaWindowMs?: number;
   store?: RateLimitStore;
 }
 
 export async function checkAiRateLimit(options: CheckRateLimitOptions): Promise<RateLimitResult> {
   const scope = options.scope || 'teacher';
-  const key = `${scope}:${options.identifier}`;
+  const burstKey = `${scope}:${options.identifier}`;
+  const quotaKey = `quota:${burstKey}`;
 
-  const config = getRateLimitConfig({
+  const burstConfig = getRateLimitConfig({
     scope: options.scope,
     endpoint: options.endpoint,
   });
 
-  const limit = options.limit ?? config.maxRequests;
-  const windowMs = options.windowMs ?? config.windowMs;
+  const quotaConfig = getQuotaConfig({
+    scope: options.scope,
+    endpoint: options.endpoint,
+  });
+
+  const burstLimit = options.limit ?? burstConfig.maxRequests;
+  const burstWindowMs = options.windowMs ?? burstConfig.windowMs;
   const store = options.store ?? getRateLimitStore();
 
+  const quotaLimit = options.quotaLimit ?? (quotaConfig.enabled ? quotaConfig.maxRequests : null);
+  const quotaWindowMs =
+    options.quotaWindowMs ?? (quotaConfig.enabled ? quotaConfig.windowMs : null);
+
   try {
-    return await store.consume(key, limit, windowMs);
+    // 1. Burst-Limit pruefen
+    const burstResult = await store.consume(burstKey, burstLimit, burstWindowMs);
+    if (!burstResult.allowed) {
+      return {
+        ...burstResult,
+        quotaExceeded: false,
+        quotaType: 'burst',
+      };
+    }
+
+    // 2. Kumulatives Kontingent pruefen (falls konfiguriert)
+    if (quotaLimit !== null && quotaWindowMs !== null) {
+      const quotaResult = await store.consume(quotaKey, quotaLimit, quotaWindowMs);
+      if (!quotaResult.allowed) {
+        return {
+          ...quotaResult,
+          quotaExceeded: true,
+          quotaType: 'cumulative',
+          quota: {
+            limit: quotaResult.limit,
+            remaining: quotaResult.remaining,
+            resetMs: quotaResult.resetMs,
+          },
+        };
+      }
+
+      return {
+        ...burstResult,
+        quotaExceeded: false,
+        quotaType: 'burst',
+        quota: {
+          limit: quotaResult.limit,
+          remaining: quotaResult.remaining,
+          resetMs: quotaResult.resetMs,
+        },
+      };
+    }
+
+    return {
+      ...burstResult,
+      quotaExceeded: false,
+      quotaType: 'burst',
+    };
   } catch (error) {
     // Definiertes Fehlverhalten: Ein Ausfall des Limit-Speichers darf den Korrekturfluss nicht unbemerkt blockieren (geloggtes Fail-Open).
     console.error(
-      `[RateLimit] Speicherfehler beim Pruefen des Ratenlimits fuer ${key}. Anfrage wird zugelassen (Fail-Open):`,
+      `[RateLimit] Speicherfehler beim Pruefen des Ratenlimits fuer ${burstKey}. Anfrage wird zugelassen (Fail-Open):`,
       error
     );
     return {
       allowed: true,
-      limit,
+      limit: burstLimit,
       remaining: 1,
       retryAfterSeconds: 0,
       resetMs: 0,
@@ -200,23 +368,36 @@ export function createRateLimitResponse(
   result: RateLimitResult,
   customMessage?: string
 ): NextResponse {
-  const message =
-    customMessage ||
+  let defaultMessage =
     'Ratenlimit ueberschritten. Zu viele KI-Anfragen. Bitte versuchen Sie es in Kuerze erneut.';
+
+  if (result.quotaExceeded) {
+    defaultMessage =
+      'Kumulatives KI-Kontingent erreicht. Das maximale Kontingent an KI-Anfragen fuer diesen Zeitraum ist erschoepft.';
+  }
+
+  const message = customMessage || defaultMessage;
+
+  const headers: Record<string, string> = {
+    'Retry-After': String(result.retryAfterSeconds),
+    'X-RateLimit-Limit': String(result.limit),
+    'X-RateLimit-Remaining': String(result.remaining),
+    'X-RateLimit-Reset': String(result.retryAfterSeconds),
+  };
+
+  if (result.quotaExceeded) {
+    headers['X-RateLimit-Type'] = 'cumulative-quota';
+  }
 
   return NextResponse.json(
     {
       error: message,
       retryAfter: result.retryAfterSeconds,
+      ...(result.quotaExceeded ? { quotaExceeded: true } : {}),
     },
     {
       status: 429,
-      headers: {
-        'Retry-After': String(result.retryAfterSeconds),
-        'X-RateLimit-Limit': String(result.limit),
-        'X-RateLimit-Remaining': String(result.remaining),
-        'X-RateLimit-Reset': String(result.retryAfterSeconds),
-      },
+      headers,
     }
   );
 }

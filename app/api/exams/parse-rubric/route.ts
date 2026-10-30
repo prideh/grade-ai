@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { getSession } from '@/lib/session';
+import { checkAiRateLimit, createRateLimitResponse } from '@/lib/rate-limit';
 import { GoogleGenAI, Type, ThinkingLevel, type Schema } from '@google/genai';
 import { DEFAULT_GEMINI_MODEL, appendReferenceMaterialToContents } from '@/lib/gemini';
 import {
@@ -39,6 +40,16 @@ export async function POST(request: Request) {
     const session = await getSession();
     if (!session) {
       return NextResponse.json({ error: 'Nicht autorisiert.' }, { status: 401 });
+    }
+
+    // Rate limiting for AI endpoints
+    const rateLimit = await checkAiRateLimit({
+      identifier: session.userId,
+      scope: 'teacher',
+      endpoint: 'parse-rubric',
+    });
+    if (!rateLimit.allowed) {
+      return createRateLimitResponse(rateLimit);
     }
 
     const body = await request.json();
