@@ -1072,6 +1072,7 @@ export default function CorrectWorkspace() {
                         src={activeUrl}
                         alt="Original Schülerarbeit Scan"
                         fill
+                        unoptimized
                         style={{
                           objectFit: 'contain',
                           padding: '12px',
