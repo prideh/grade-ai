@@ -1,18 +1,33 @@
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { getSession } from '@/lib/session';
 import { serverCache, CacheTags } from '@/lib/cache';
 
-export async function GET() {
+export async function GET(request?: Request | NextRequest) {
   try {
     const session = await getSession();
     if (!session) {
       return NextResponse.json({ error: 'Nicht autorisiert.' }, { status: 401 });
     }
 
-    const cacheKey = `teacher:${session.userId}:submissions:list`;
+    const url = request?.url ? new URL(request.url) : new URL('http://localhost/api/submissions');
+    const searchParams = url.searchParams;
+
+    const page = Math.max(1, parseInt(searchParams.get('page') || '1', 10) || 1);
+    const rawPageSize =
+      parseInt(searchParams.get('pageSize') || searchParams.get('limit') || '25', 10) || 25;
+    const pageSize = Math.min(100, Math.max(1, rawPageSize));
+    const cursor = searchParams.get('cursor')?.trim() || null;
+    const classId = searchParams.get('classId')?.trim() || null;
+    const examId = searchParams.get('examId')?.trim() || null;
+    const status = searchParams.get('status')?.trim() || null;
+    const search = searchParams.get('search')?.trim() || null;
+
+    const cacheKey = `teacher:${session.userId}:submissions:list:page=${page}:size=${pageSize}:cursor=${cursor || ''}:class=${classId || 'ALL'}:exam=${examId || 'ALL'}:status=${status || 'ALL'}:search=${encodeURIComponent(search || '')}`;
+
     const cached = await serverCache.get<{
       submissions: unknown[];
+      pagination: unknown;
       studentsByClass: unknown;
       allExams: unknown[];
       totalExamsCount: number;
@@ -21,16 +36,43 @@ export async function GET() {
       return NextResponse.json(cached);
     }
 
-    // Fetch submissions, students, and all exams (lightweight metadata) in parallel without N+1 or heavy rubric payloads
-    const [submissions, teacherStudents, teacherExams] = await Promise.all([
+    const examWhere: Record<string, unknown> = {
+      class: {
+        teacherId: session.userId,
+      },
+    };
+
+    if (classId && classId !== 'ALL') {
+      examWhere.classId = classId;
+    }
+
+    const where: Record<string, unknown> = {
+      exam: examWhere,
+    };
+
+    if (examId && examId !== 'ALL') {
+      where.examId = examId;
+    }
+
+    if (status && status !== 'ALL') {
+      where.status = status;
+    }
+
+    if (search) {
+      where.OR = [
+        { student: { name: { contains: search, mode: 'insensitive' } } },
+        { extractedStudentName: { contains: search, mode: 'insensitive' } },
+        { exam: { title: { contains: search, mode: 'insensitive' } } },
+      ];
+    }
+
+    const skip = (page - 1) * pageSize;
+
+    // Fetch total count, paginated submissions, students, and exams in parallel
+    const [totalCount, submissions, teacherStudents, teacherExams] = await Promise.all([
+      db.submission.count({ where }),
       db.submission.findMany({
-        where: {
-          exam: {
-            class: {
-              teacherId: session.userId,
-            },
-          },
-        },
+        where,
         include: {
           student: true,
           exam: {
@@ -50,6 +92,9 @@ export async function GET() {
         orderBy: {
           createdAt: 'desc',
         },
+        take: pageSize,
+        skip: cursor ? 1 : skip,
+        ...(cursor ? { cursor: { id: cursor } } : {}),
       }),
       db.student.findMany({
         where: {
@@ -130,8 +175,23 @@ export async function GET() {
       };
     });
 
+    const totalPages = Math.ceil(totalCount / pageSize) || 1;
+    const hasMore = cursor
+      ? submissions.length === pageSize
+      : skip + submissions.length < totalCount && submissions.length === pageSize;
+    const nextCursor =
+      submissions.length === pageSize ? (submissions[submissions.length - 1]?.id ?? null) : null;
+
     const responsePayload = {
       submissions: mapped,
+      pagination: {
+        page,
+        pageSize,
+        total: totalCount,
+        totalPages,
+        hasMore,
+        nextCursor,
+      },
       studentsByClass,
       allExams: teacherExams.map((e) => ({
         id: e.id,

@@ -1,7 +1,7 @@
 'use client';
 
 import * as React from 'react';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import {
   Box,
@@ -28,6 +28,7 @@ import {
   CircularProgress,
   Divider,
   Button,
+  TablePagination,
 } from '@mui/material';
 import SearchIcon from '@mui/icons-material/Search';
 import InfoOutlinedIcon from '@mui/icons-material/InfoOutlined';
@@ -59,29 +60,33 @@ interface CorrectionLog {
   errorMessage: string | null;
 }
 
+interface LogsApiResponse {
+  logs: CorrectionLog[];
+  pagination?: {
+    page: number;
+    pageSize: number;
+    total: number;
+    totalPages: number;
+    hasMore: boolean;
+    nextCursor: string | null;
+  };
+  stats?: {
+    total: number;
+    completed: number;
+    failed: number;
+    averageDurationSeconds: number;
+    successRate: number;
+  };
+}
+
 export default function LogsPage() {
   const router = useRouter();
 
-  const fetchLogsApi = React.useCallback(async () => {
-    const res = await fetch('/api/logs');
-    if (!res.ok) {
-      throw new Error('Protokolle konnten nicht geladen werden.');
-    }
-    const data = await res.json();
-    return (data.logs || []) as CorrectionLog[];
-  }, []);
-
-  const {
-    data: cachedLogs,
-    loading,
-    error,
-    revalidate: fetchLogs,
-  } = useDataCache<CorrectionLog[]>('/api/logs', fetchLogsApi);
-
-  const logs = cachedLogs || [];
-
-  // Filter states
+  // Pagination & filter states
+  const [page, setPage] = useState(0);
+  const [rowsPerPage, setRowsPerPage] = useState(25);
   const [search, setSearch] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('ALL');
   const [actionFilter, setActionFilter] = useState('ALL');
 
@@ -89,10 +94,35 @@ export default function LogsPage() {
   const [selectedLog, setSelectedLog] = useState<CorrectionLog | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
 
+  // Debounce search input
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedSearch(search);
+    }, 250);
+    return () => clearTimeout(timer);
+  }, [search]);
+
+  const handleSearchChange = (value: string) => {
+    setSearch(value);
+    setPage(0);
+  };
+
+  const handleStatusChange = (value: string) => {
+    setStatusFilter(value);
+    setPage(0);
+  };
+
+  const handleActionChange = (value: string) => {
+    setActionFilter(value);
+    setPage(0);
+  };
+
   const handleResetFilters = () => {
     setSearch('');
+    setDebouncedSearch('');
     setStatusFilter('ALL');
     setActionFilter('ALL');
+    setPage(0);
   };
 
   const handleOpenDrawer = (log: CorrectionLog) => {
@@ -105,33 +135,70 @@ export default function LogsPage() {
     setSelectedLog(null);
   };
 
-  // Filter calculations
-  const filteredLogs = logs.filter((log) => {
-    const matchesSearch =
-      log.className.toLowerCase().includes(search.toLowerCase()) ||
-      log.examTitle.toLowerCase().includes(search.toLowerCase()) ||
-      log.studentName.toLowerCase().includes(search.toLowerCase());
+  const logsUrl = React.useMemo(() => {
+    const params = new URLSearchParams();
+    params.set('page', String(page + 1));
+    params.set('pageSize', String(rowsPerPage));
+    if (statusFilter !== 'ALL') {
+      params.set('status', statusFilter);
+    }
+    if (actionFilter !== 'ALL') {
+      params.set('actionType', actionFilter);
+    }
+    if (debouncedSearch.trim()) {
+      params.set('search', debouncedSearch.trim());
+    }
+    return `/api/logs?${params.toString()}`;
+  }, [page, rowsPerPage, statusFilter, actionFilter, debouncedSearch]);
 
-    const matchesStatus = statusFilter === 'ALL' || log.status === statusFilter;
+  const fetchLogsApi = React.useCallback(async (url: string) => {
+    const res = await fetch(url);
+    if (!res.ok) {
+      throw new Error('Protokolle konnten nicht geladen werden.');
+    }
+    return (await res.json()) as LogsApiResponse;
+  }, []);
 
-    const matchesAction = actionFilter === 'ALL' || log.actionType === actionFilter;
+  const {
+    data: cachedLogsResponse,
+    loading,
+    error,
+    revalidate: fetchLogs,
+  } = useDataCache<LogsApiResponse | CorrectionLog[]>(logsUrl, fetchLogsApi);
 
-    return matchesSearch && matchesStatus && matchesAction;
-  });
+  const logs = Array.isArray(cachedLogsResponse)
+    ? cachedLogsResponse
+    : cachedLogsResponse?.logs || [];
+
+  const pagination =
+    !Array.isArray(cachedLogsResponse) && cachedLogsResponse?.pagination
+      ? cachedLogsResponse.pagination
+      : undefined;
+
+  const totalCount = pagination?.total ?? logs.length;
+
+  const stats =
+    !Array.isArray(cachedLogsResponse) && cachedLogsResponse?.stats
+      ? cachedLogsResponse.stats
+      : undefined;
 
   // Stats Calculations
   const completedLogs = logs.filter((l) => l.status === 'COMPLETED');
   const failedLogs = logs.filter((l) => l.status === 'FAILED');
 
   const averageDuration =
-    completedLogs.length > 0
+    stats?.averageDurationSeconds ??
+    (completedLogs.length > 0
       ? completedLogs.reduce((sum, l) => sum + (l.durationMs || 0), 0) / completedLogs.length / 1000
-      : 0;
+      : 0);
 
   const successRate =
-    completedLogs.length + failedLogs.length > 0
+    stats?.successRate ??
+    (completedLogs.length + failedLogs.length > 0
       ? (completedLogs.length / (completedLogs.length + failedLogs.length)) * 100
-      : 0;
+      : 0);
+
+  const totalLogsCount = stats?.total ?? totalCount;
 
   const getStatusChip = (status: string) => {
     switch (status) {
@@ -390,7 +457,7 @@ export default function LogsPage() {
                           variant="h5"
                           sx={{ fontWeight: 850, color: '#0f172a', mt: 0.2 }}
                         >
-                          {loading ? '...' : logs.length}
+                          {loading ? '...' : totalLogsCount}
                         </Typography>
                       </Box>
                     </Stack>
@@ -417,7 +484,7 @@ export default function LogsPage() {
                     size="small"
                     fullWidth
                     value={search}
-                    onChange={(e) => setSearch(e.target.value)}
+                    onChange={(e) => handleSearchChange(e.target.value)}
                     slotProps={{
                       input: {
                         startAdornment: <SearchIcon sx={{ color: 'text.secondary', mr: 1 }} />,
@@ -438,7 +505,7 @@ export default function LogsPage() {
                       labelId="status-filter-label"
                       label="Status"
                       value={statusFilter}
-                      onChange={(e) => setStatusFilter(e.target.value)}
+                      onChange={(e) => handleStatusChange(e.target.value)}
                       sx={{ borderRadius: '8px', textAlign: 'left' }}
                     >
                       <MenuItem value="ALL">Alle Status</MenuItem>
@@ -457,7 +524,7 @@ export default function LogsPage() {
                       labelId="action-filter-label"
                       label="Aktionstyp"
                       value={actionFilter}
-                      onChange={(e) => setActionFilter(e.target.value)}
+                      onChange={(e) => handleActionChange(e.target.value)}
                       sx={{ borderRadius: '8px', textAlign: 'left' }}
                     >
                       <MenuItem value="ALL">Alle Typen</MenuItem>
@@ -482,7 +549,10 @@ export default function LogsPage() {
                 overflow: 'hidden',
               }}
             >
-              {logs.length === 0 ? (
+              {totalLogsCount === 0 &&
+              !search &&
+              statusFilter === 'ALL' &&
+              actionFilter === 'ALL' ? (
                 <Box
                   sx={{
                     py: 10,
@@ -566,7 +636,7 @@ export default function LogsPage() {
                     Korrektur starten
                   </Button>
                 </Box>
-              ) : filteredLogs.length === 0 ? (
+              ) : totalCount === 0 ? (
                 <Box
                   sx={{
                     py: 10,
@@ -651,92 +721,128 @@ export default function LogsPage() {
                   </Button>
                 </Box>
               ) : (
-                <Table>
-                  <TableHead sx={{ backgroundColor: '#f8fafc' }}>
-                    <TableRow>
-                      <TableCell sx={{ fontWeight: 800, color: '#475569', fontSize: '0.85rem' }}>
-                        Zeitstempel
-                      </TableCell>
-                      <TableCell sx={{ fontWeight: 800, color: '#475569', fontSize: '0.85rem' }}>
-                        Schüler/in
-                      </TableCell>
-                      <TableCell sx={{ fontWeight: 800, color: '#475569', fontSize: '0.85rem' }}>
-                        Prüfung / Klasse
-                      </TableCell>
-                      <TableCell sx={{ fontWeight: 800, color: '#475569', fontSize: '0.85rem' }}>
-                        Aktionstyp
-                      </TableCell>
-                      <TableCell sx={{ fontWeight: 800, color: '#475569', fontSize: '0.85rem' }}>
-                        Modell
-                      </TableCell>
-                      <TableCell sx={{ fontWeight: 800, color: '#475569', fontSize: '0.85rem' }}>
-                        Dauer
-                      </TableCell>
-                      <TableCell sx={{ fontWeight: 800, color: '#475569', fontSize: '0.85rem' }}>
-                        Status
-                      </TableCell>
-                      <TableCell sx={{ width: '60px' }}></TableCell>
-                    </TableRow>
-                  </TableHead>
-                  <TableBody>
-                    {filteredLogs.map((log) => (
-                      <TableRow
-                        key={log.id}
-                        hover
-                        sx={{
-                          '&:last-child td, &:last-child th': { border: 0 },
-                          cursor: 'pointer',
-                        }}
-                        onClick={() => handleOpenDrawer(log)}
-                      >
-                        <TableCell sx={{ color: '#0f172a', fontSize: '0.875rem' }}>
-                          {new Date(log.createdAt).toLocaleString('de-CH', {
-                            day: '2-digit',
-                            month: '2-digit',
-                            year: 'numeric',
-                            hour: '2-digit',
-                            minute: '2-digit',
-                            second: '2-digit',
-                          })}
+                <>
+                  <Table>
+                    <TableHead sx={{ backgroundColor: '#f8fafc' }}>
+                      <TableRow>
+                        <TableCell sx={{ fontWeight: 800, color: '#475569', fontSize: '0.85rem' }}>
+                          Zeitstempel
                         </TableCell>
-                        <TableCell sx={{ fontWeight: 700, color: '#1e293b', fontSize: '0.875rem' }}>
-                          {log.studentName === 'Automatische Zuordnung' ? (
-                            <Box component="span" sx={{ color: 'text.secondary', fontWeight: 500 }}>
-                              🤖 Auto-Match
-                            </Box>
-                          ) : (
-                            log.studentName
-                          )}
+                        <TableCell sx={{ fontWeight: 800, color: '#475569', fontSize: '0.85rem' }}>
+                          Schüler/in
                         </TableCell>
-                        <TableCell sx={{ fontSize: '0.875rem', color: '#1e293b' }}>
-                          <Typography variant="body2" sx={{ fontWeight: 650, color: '#0f172a' }}>
-                            {log.examTitle}
-                          </Typography>
-                          <Typography variant="caption" sx={{ color: 'text.secondary' }}>
-                            {log.className}
-                          </Typography>
+                        <TableCell sx={{ fontWeight: 800, color: '#475569', fontSize: '0.85rem' }}>
+                          Prüfung / Klasse
                         </TableCell>
-                        <TableCell sx={{ color: '#475569', fontSize: '0.825rem', fontWeight: 600 }}>
-                          {getActionLabel(log.actionType)}
+                        <TableCell sx={{ fontWeight: 800, color: '#475569', fontSize: '0.85rem' }}>
+                          Aktionstyp
                         </TableCell>
-                        <TableCell
-                          sx={{ color: '#475569', fontSize: '0.825rem', fontFamily: 'monospace' }}
-                        >
-                          {log.modelUsed}
+                        <TableCell sx={{ fontWeight: 800, color: '#475569', fontSize: '0.85rem' }}>
+                          Modell
                         </TableCell>
-                        <TableCell sx={{ color: '#475569', fontSize: '0.85rem', fontWeight: 600 }}>
-                          {log.durationMs ? `${(log.durationMs / 1000).toFixed(1)}s` : '—'}
+                        <TableCell sx={{ fontWeight: 800, color: '#475569', fontSize: '0.85rem' }}>
+                          Dauer
                         </TableCell>
-                        <TableCell>{getStatusChip(log.status)}</TableCell>
-                        <TableCell onClick={(e) => e.stopPropagation()}>
-                          <IconButton size="small" onClick={() => handleOpenDrawer(log)}>
-                            <InfoOutlinedIcon sx={{ color: '#64748b', fontSize: '1.25rem' }} />
-                          </IconButton>
+                        <TableCell sx={{ fontWeight: 800, color: '#475569', fontSize: '0.85rem' }}>
+                          Status
                         </TableCell>
+                        <TableCell sx={{ width: '60px' }}></TableCell>
                       </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
+                    </TableHead>
+                    <TableBody>
+                      {logs.map((log) => (
+                        <TableRow
+                          key={log.id}
+                          hover
+                          sx={{
+                            '&:last-child td, &:last-child th': { border: 0 },
+                            cursor: 'pointer',
+                          }}
+                          onClick={() => handleOpenDrawer(log)}
+                        >
+                          <TableCell sx={{ color: '#0f172a', fontSize: '0.875rem' }}>
+                            {new Date(log.createdAt).toLocaleString('de-CH', {
+                              day: '2-digit',
+                              month: '2-digit',
+                              year: 'numeric',
+                              hour: '2-digit',
+                              minute: '2-digit',
+                              second: '2-digit',
+                            })}
+                          </TableCell>
+                          <TableCell
+                            sx={{ fontWeight: 700, color: '#1e293b', fontSize: '0.875rem' }}
+                          >
+                            {log.studentName === 'Automatische Zuordnung' ? (
+                              <Box
+                                component="span"
+                                sx={{ color: 'text.secondary', fontWeight: 500 }}
+                              >
+                                🤖 Auto-Match
+                              </Box>
+                            ) : (
+                              log.studentName
+                            )}
+                          </TableCell>
+                          <TableCell sx={{ fontSize: '0.875rem', color: '#1e293b' }}>
+                            <Typography variant="body2" sx={{ fontWeight: 650, color: '#0f172a' }}>
+                              {log.examTitle}
+                            </Typography>
+                            <Typography variant="caption" sx={{ color: 'text.secondary' }}>
+                              {log.className}
+                            </Typography>
+                          </TableCell>
+                          <TableCell
+                            sx={{ color: '#475569', fontSize: '0.825rem', fontWeight: 600 }}
+                          >
+                            {getActionLabel(log.actionType)}
+                          </TableCell>
+                          <TableCell
+                            sx={{ color: '#475569', fontSize: '0.825rem', fontFamily: 'monospace' }}
+                          >
+                            {log.modelUsed}
+                          </TableCell>
+                          <TableCell
+                            sx={{ color: '#475569', fontSize: '0.85rem', fontWeight: 600 }}
+                          >
+                            {log.durationMs ? `${(log.durationMs / 1000).toFixed(1)}s` : '—'}
+                          </TableCell>
+                          <TableCell>{getStatusChip(log.status)}</TableCell>
+                          <TableCell onClick={(e) => e.stopPropagation()}>
+                            <IconButton size="small" onClick={() => handleOpenDrawer(log)}>
+                              <InfoOutlinedIcon sx={{ color: '#64748b', fontSize: '1.25rem' }} />
+                            </IconButton>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                  <TablePagination
+                    component="div"
+                    count={totalCount}
+                    page={page}
+                    onPageChange={(_e, newPage) => setPage(newPage)}
+                    rowsPerPage={rowsPerPage}
+                    onRowsPerPageChange={(e) => {
+                      setRowsPerPage(parseInt(e.target.value, 10));
+                      setPage(0);
+                    }}
+                    rowsPerPageOptions={[10, 25, 50, 100]}
+                    labelRowsPerPage="Einträge pro Seite:"
+                    labelDisplayedRows={({ from, to, count }) =>
+                      `${from}–${to} von ${count !== -1 ? count : `mehr als ${to}`}`
+                    }
+                    sx={{
+                      borderTop: '1px solid #cbd5e1',
+                      backgroundColor: '#ffffff',
+                      '.MuiTablePagination-selectLabel, .MuiTablePagination-displayedRows': {
+                        fontSize: '0.85rem',
+                        color: '#475569',
+                        fontWeight: 500,
+                      },
+                    }}
+                  />
+                </>
               )}
             </TableContainer>
           </>

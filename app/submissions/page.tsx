@@ -1,7 +1,7 @@
 'use client';
 
 import * as React from 'react';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import {
   Box,
@@ -31,6 +31,7 @@ import {
   DialogTitle,
   DialogContent,
   DialogActions,
+  TablePagination,
 } from '@mui/material';
 import HistoryIcon from '@mui/icons-material/History';
 import { getErrorMessage } from '@/lib/api-error';
@@ -68,12 +69,73 @@ interface SubmissionData {
   uncertainStepsCount?: number;
 }
 
+interface SubmissionsResponse {
+  submissions: SubmissionData[];
+  pagination?: {
+    page: number;
+    pageSize: number;
+    total: number;
+    totalPages: number;
+    hasMore: boolean;
+    nextCursor: string | null;
+  };
+  totalExamsCount?: number;
+}
+
 export default function SubmissionsPage() {
-  const fetchSubmissionsApi = React.useCallback(async () => {
-    const res = await fetch('/api/submissions');
+  // Pagination & filter state
+  const [page, setPage] = useState(0);
+  const [rowsPerPage, setRowsPerPage] = useState(25);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
+  const [selectedClassId, setSelectedClassId] = useState('ALL');
+  const [selectedExamId, setSelectedExamId] = useState('ALL');
+
+  // Debounce search query to avoid excessive API requests
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedSearch(searchQuery);
+    }, 250);
+    return () => clearTimeout(timer);
+  }, [searchQuery]);
+
+  const handleSearchChange = (value: string) => {
+    setSearchQuery(value);
+    setPage(0);
+  };
+
+  const handleClassChange = (value: string) => {
+    setSelectedClassId(value);
+    setSelectedExamId('ALL');
+    setPage(0);
+  };
+
+  const handleExamChange = (value: string) => {
+    setSelectedExamId(value);
+    setPage(0);
+  };
+
+  const submissionsUrl = React.useMemo(() => {
+    const params = new URLSearchParams();
+    params.set('status', 'COMPLETED');
+    params.set('page', String(page + 1));
+    params.set('pageSize', String(rowsPerPage));
+    if (selectedClassId !== 'ALL') {
+      params.set('classId', selectedClassId);
+    }
+    if (selectedExamId !== 'ALL') {
+      params.set('examId', selectedExamId);
+    }
+    if (debouncedSearch.trim()) {
+      params.set('search', debouncedSearch.trim());
+    }
+    return `/api/submissions?${params.toString()}`;
+  }, [page, rowsPerPage, selectedClassId, selectedExamId, debouncedSearch]);
+
+  const fetchSubmissionsApi = React.useCallback(async (url: string) => {
+    const res = await fetch(url);
     if (!res.ok) throw new Error('Fehler beim Laden der Korrekturen.');
-    const data = await res.json();
-    return (data.submissions || []) as SubmissionData[];
+    return (await res.json()) as SubmissionsResponse;
   }, []);
 
   const fetchClassesApi = React.useCallback(async () => {
@@ -95,10 +157,7 @@ export default function SubmissionsPage() {
     loading: submissionsLoading,
     error: submissionsError,
     revalidate: revalidateSubmissions,
-  } = useDataCache<SubmissionData[] | { submissions?: SubmissionData[] }>(
-    '/api/submissions',
-    fetchSubmissionsApi
-  );
+  } = useDataCache<SubmissionsResponse | SubmissionData[]>(submissionsUrl, fetchSubmissionsApi);
 
   const {
     data: cachedClasses,
@@ -117,6 +176,14 @@ export default function SubmissionsPage() {
   const submissions = Array.isArray(cachedSubmissions)
     ? cachedSubmissions
     : cachedSubmissions?.submissions || [];
+
+  const pagination =
+    !Array.isArray(cachedSubmissions) && cachedSubmissions?.pagination
+      ? cachedSubmissions.pagination
+      : undefined;
+
+  const totalCount = pagination?.total ?? submissions.length;
+
   const classes = Array.isArray(cachedClasses) ? cachedClasses : cachedClasses?.classes || [];
   const exams = Array.isArray(cachedExams) ? cachedExams : cachedExams?.exams || [];
   const loading =
@@ -132,11 +199,6 @@ export default function SubmissionsPage() {
   const [deleteTargetId, setDeleteTargetId] = useState<string | null>(null);
   const [deleteLoading, setDeleteLoading] = useState(false);
   const [deleteError, setDeleteError] = useState('');
-
-  // Filter States
-  const [searchQuery, setSearchQuery] = useState('');
-  const [selectedClassId, setSelectedClassId] = useState('ALL');
-  const [selectedExamId, setSelectedExamId] = useState('ALL');
 
   const handleDeleteSubmission = (id: string) => {
     setDeleteError('');
@@ -162,28 +224,17 @@ export default function SubmissionsPage() {
       const idToDelete = deleteTargetId;
       setDeleteTargetId(null);
       invalidateSubmissions(idToDelete);
-      await fetchData();
+      if (submissions.length === 1 && page > 0) {
+        setPage((prev) => Math.max(0, prev - 1));
+      } else {
+        await fetchData();
+      }
     } catch (err) {
       setDeleteError(err instanceof Error ? err.message : 'Fehler beim Löschen.');
     } finally {
       setDeleteLoading(false);
     }
   };
-
-  // Filter Logic
-  const filteredSubmissions = submissions
-    .filter((sub) => sub.status === 'COMPLETED')
-    .filter((sub) => {
-      // 1. Search Query (name or exam title)
-      const matchSearch =
-        sub.studentName.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        sub.examTitle.toLowerCase().includes(searchQuery.toLowerCase());
-
-      const matchClassId = selectedClassId === 'ALL' || sub.classId === selectedClassId;
-      const matchExamId = selectedExamId === 'ALL' || sub.examId === selectedExamId;
-
-      return matchSearch && matchClassId && matchExamId;
-    });
 
   return (
     <DashboardLayout>
@@ -225,7 +276,7 @@ export default function SubmissionsPage() {
                     <TextField
                       placeholder="Schüler/in oder Prüfung suchen..."
                       value={searchQuery}
-                      onChange={(e) => setSearchQuery(e.target.value)}
+                      onChange={(e) => handleSearchChange(e.target.value)}
                       fullWidth
                       variant="outlined"
                       size="small"
@@ -250,10 +301,7 @@ export default function SubmissionsPage() {
                         labelId="class-filter-label"
                         value={selectedClassId}
                         label="Klasse"
-                        onChange={(e) => {
-                          setSelectedClassId(e.target.value);
-                          setSelectedExamId('ALL'); // Reset exam filter when class changes
-                        }}
+                        onChange={(e) => handleClassChange(e.target.value)}
                         sx={{ borderRadius: '8px' }}
                       >
                         <MenuItem value="ALL">Alle Klassen</MenuItem>
@@ -274,7 +322,7 @@ export default function SubmissionsPage() {
                         labelId="exam-filter-label"
                         value={selectedExamId}
                         label="Prüfung"
-                        onChange={(e) => setSelectedExamId(e.target.value)}
+                        onChange={(e) => handleExamChange(e.target.value)}
                         sx={{ borderRadius: '8px' }}
                       >
                         <MenuItem value="ALL">Alle Prüfungen</MenuItem>
@@ -295,7 +343,7 @@ export default function SubmissionsPage() {
             </Card>
 
             {/* Submissions Grid Table */}
-            {filteredSubmissions.length === 0 ? (
+            {totalCount === 0 ? (
               <Card
                 sx={{
                   borderRadius: '12px',
@@ -332,7 +380,7 @@ export default function SubmissionsPage() {
                     </TableRow>
                   </TableHead>
                   <TableBody>
-                    {filteredSubmissions.map((sub) => {
+                    {submissions.map((sub) => {
                       const isUnassigned = !sub.studentId;
                       return (
                         <TableRow
@@ -455,6 +503,30 @@ export default function SubmissionsPage() {
                     })}
                   </TableBody>
                 </Table>
+                <TablePagination
+                  component="div"
+                  count={totalCount}
+                  page={page}
+                  onPageChange={(_e, newPage) => setPage(newPage)}
+                  rowsPerPage={rowsPerPage}
+                  onRowsPerPageChange={(e) => {
+                    setRowsPerPage(parseInt(e.target.value, 10));
+                    setPage(0);
+                  }}
+                  rowsPerPageOptions={[10, 25, 50, 100]}
+                  labelRowsPerPage="Einträge pro Seite:"
+                  labelDisplayedRows={({ from, to, count }) =>
+                    `${from}–${to} von ${count !== -1 ? count : `mehr als ${to}`}`
+                  }
+                  sx={{
+                    borderTop: '1px solid #e2e8f0',
+                    '.MuiTablePagination-selectLabel, .MuiTablePagination-displayedRows': {
+                      fontSize: '0.875rem',
+                      color: '#475569',
+                      fontWeight: 500,
+                    },
+                  }}
+                />
               </TableContainer>
             )}
           </>
