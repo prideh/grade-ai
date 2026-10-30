@@ -5,12 +5,23 @@ import { regenerateSingleTask, replaceTaskInText } from '@/lib/exam-generator';
 import { parseExamMetadata, embedExamMetadata, isExamApproved } from '@/lib/exam-meta';
 import { invalidateExamCache } from '@/lib/cache';
 import { getStorageAdapter } from '@/lib/storage';
+import { checkAiRateLimit, createRateLimitResponse } from '@/lib/rate-limit';
 
 export async function POST(request: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
     const session = await getSession();
     if (!session) {
       return NextResponse.json({ error: 'Nicht autorisiert.' }, { status: 401 });
+    }
+
+    // Rate limiting for AI endpoints
+    const rateLimit = await checkAiRateLimit({
+      identifier: session.userId,
+      scope: 'teacher',
+      endpoint: 'regenerate-task',
+    });
+    if (!rateLimit.allowed) {
+      return createRateLimitResponse(rateLimit);
     }
 
     const { id: examId } = await params;

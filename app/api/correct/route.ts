@@ -21,6 +21,7 @@ import {
   LLM_PROMPT_VERSIONS,
 } from '@/lib/llm-cache';
 import { isExamApproved } from '@/lib/exam-meta';
+import { checkAiRateLimit, createRateLimitResponse } from '@/lib/rate-limit';
 import crypto from 'crypto';
 
 // Allowed student exam MIME types and safe file extensions
@@ -65,6 +66,16 @@ export async function POST(request: Request) {
     const session = await getSession();
     if (!session) {
       return NextResponse.json({ error: 'Nicht autorisiert.' }, { status: 401 });
+    }
+
+    // Rate limiting for AI endpoints
+    const rateLimit = await checkAiRateLimit({
+      identifier: session.userId,
+      scope: 'teacher',
+      endpoint: 'correct',
+    });
+    if (!rateLimit.allowed) {
+      return createRateLimitResponse(rateLimit);
     }
 
     const formData = await request.formData();

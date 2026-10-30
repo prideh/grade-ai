@@ -5,12 +5,23 @@ import { generateExamFromMaterial } from '@/lib/exam-generator';
 import { embedExamMetadata } from '@/lib/exam-meta';
 import { invalidateExamCache } from '@/lib/cache';
 import { getStorageAdapter } from '@/lib/storage';
+import { checkAiRateLimit, createRateLimitResponse } from '@/lib/rate-limit';
 
 export async function POST(request: Request) {
   try {
     const session = await getSession();
     if (!session) {
       return NextResponse.json({ error: 'Nicht autorisiert.' }, { status: 401 });
+    }
+
+    // Rate limiting for AI endpoints
+    const rateLimit = await checkAiRateLimit({
+      identifier: session.userId,
+      scope: 'teacher',
+      endpoint: 'generate',
+    });
+    if (!rateLimit.allowed) {
+      return createRateLimitResponse(rateLimit);
     }
 
     const body = await request.json();

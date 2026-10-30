@@ -25,6 +25,7 @@ import {
 } from '@/lib/llm-cache';
 import crypto from 'crypto';
 import { isExamApproved } from '@/lib/exam-meta';
+import { checkAiRateLimit, createRateLimitResponse } from '@/lib/rate-limit';
 
 function parseStoredMaterial(
   rawText?: string | null
@@ -77,6 +78,16 @@ export async function POST(request: Request) {
         { error: 'QR-Sitzung abgelaufen oder ungültig. Bitte neuen QR-Code scannen.' },
         { status: 401 }
       );
+    }
+
+    // Rate limiting for AI endpoints via relay token / teacher
+    const rateLimit = await checkAiRateLimit({
+      identifier: payload.sessionId || payload.teacherId,
+      scope: 'relay',
+      endpoint: 'mobile-relay-upload',
+    });
+    if (!rateLimit.allowed) {
+      return createRateLimitResponse(rateLimit);
     }
 
     if (rawPages.length === 0) {
