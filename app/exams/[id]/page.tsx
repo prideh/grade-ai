@@ -1,7 +1,7 @@
 'use client';
 
 import * as React from 'react';
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import Link from 'next/link';
 import {
@@ -57,6 +57,7 @@ import { BarChart } from '@mui/x-charts/BarChart';
 import DashboardLayout from '@/components/DashboardLayout';
 import ErrorState from '@/components/ErrorState';
 import QrScannerDialog from '@/components/QrScannerDialog';
+import { useDataCache, invalidateExams, invalidateSubmissions } from '@/lib/dataCache';
 import {
   GRADING_FORMULA_OPTIONS,
   GRADE_ROUNDING_OPTIONS,
@@ -100,28 +101,17 @@ interface ExamRosterStudent {
   uncertainStepsCount?: number;
 }
 
+interface ExamDetailsApiResponse {
+  exam: ExamData;
+  stats: ExamStats;
+  roster: ExamRosterStudent[];
+  taskAnalysis: ExamTaskAnalysis | null;
+}
+
 export default function ExamDetailsPage() {
   const router = useRouter();
   const params = useParams();
   const examId = params.id as string;
-
-  // Data States
-  const [exam, setExam] = useState<ExamData | null>(null);
-  const [stats, setStats] = useState<ExamStats | null>(null);
-  const [roster, setRoster] = useState<ExamRosterStudent[]>([]);
-  const [taskAnalysis, setTaskAnalysis] = useState<ExamTaskAnalysis | null>(null);
-  const [expandedTasks, setExpandedTasks] = useState<Record<string, boolean>>({});
-
-  const toggleTaskExpand = (taskId: string) => {
-    setExpandedTasks((prev) => ({
-      ...prev,
-      [taskId]: !prev[taskId],
-    }));
-  };
-
-  // Loading & Error States
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState('');
 
   // Rubric Editing
   const [rubricText, setRubricText] = useState('');
@@ -130,7 +120,57 @@ export default function ExamDetailsPage() {
   const [gradeRounding, setGradeRounding] = useState<GradeRounding>('0.1');
   const [editingRubric, setEditingRubric] = useState(false);
   const [saveLoading, setSaveLoading] = useState(false);
+  const [saveError, setSaveError] = useState('');
   const [uploadedFileName, setUploadedFileName] = useState('');
+
+  const fetchExamDetailsApi = React.useCallback(async () => {
+    const res = await fetch(`/api/exams/${examId}`);
+    if (!res.ok) {
+      if (res.status === 404) {
+        router.replace('/exams');
+        throw new Error('Prüfung nicht gefunden.');
+      }
+      throw new Error('Prüfungsdetails konnten nicht geladen werden.');
+    }
+    const data = await res.json();
+    return data as ExamDetailsApiResponse;
+  }, [examId, router]);
+
+  const {
+    data: cachedExamDetails,
+    loading,
+    error,
+    revalidate: fetchData,
+  } = useDataCache<ExamDetailsApiResponse>(
+    examId ? `/api/exams/${examId}` : null,
+    fetchExamDetailsApi,
+    {
+      onSuccess: (data) => {
+        setRubricText((prev) => (editingRubric ? prev : data.exam.rubricText || ''));
+        setGradingNotes((prev) => (editingRubric ? prev : data.exam.gradingNotes || ''));
+        setGradingFormula((prev) =>
+          editingRubric ? prev : (data.exam.gradingFormula as GradingFormula) || 'LINEAR_60'
+        );
+        setGradeRounding((prev) =>
+          editingRubric ? prev : (data.exam.gradeRounding as GradeRounding) || '0.1'
+        );
+      },
+    }
+  );
+
+  const exam = cachedExamDetails?.exam || null;
+  const stats = cachedExamDetails?.stats || null;
+  const roster = cachedExamDetails?.roster || [];
+  const taskAnalysis = cachedExamDetails?.taskAnalysis || null;
+
+  const [expandedTasks, setExpandedTasks] = useState<Record<string, boolean>>({});
+
+  const toggleTaskExpand = (taskId: string) => {
+    setExpandedTasks((prev) => ({
+      ...prev,
+      [taskId]: !prev[taskId],
+    }));
+  };
 
   // QR Scanner Dialog
   const [qrOpen, setQrOpen] = useState(false);
@@ -190,6 +230,7 @@ export default function ExamDetailsPage() {
         return;
       }
 
+      invalidateExams(undefined, duplicateTargetClassId || exam?.classId);
       const data = await res.json();
       setOpenDuplicate(false);
       const newExamId = data.id || data.exam?.id;
@@ -276,48 +317,10 @@ export default function ExamDetailsPage() {
   const [openDelete, setOpenDelete] = useState(false);
   const [deleteError, setDeleteError] = useState('');
 
-  // Fetch Exam details
-  const fetchData = React.useCallback(async () => {
-    try {
-      const res = await fetch(`/api/exams/${examId}`);
-      setError('');
-
-      if (!res.ok) {
-        if (res.status === 404) {
-          router.replace('/exams');
-          return;
-        }
-        throw new Error('Prüfungsdetails konnten nicht geladen werden.');
-      }
-
-      const data = await res.json();
-      setExam(data.exam);
-      setStats(data.stats);
-      setRoster(data.roster || []);
-      setTaskAnalysis(data.taskAnalysis || null);
-      setRubricText(data.exam.rubricText || '');
-      setGradingNotes(data.exam.gradingNotes || '');
-      setGradingFormula((data.exam.gradingFormula as GradingFormula) || 'LINEAR_60');
-      setGradeRounding((data.exam.gradeRounding as GradeRounding) || '0.1');
-      setUploadedFileName('');
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Ein unerwarteter Fehler ist aufgetreten.');
-    } finally {
-      setLoading(false);
-    }
-  }, [examId, router]);
-
-  useEffect(() => {
-    if (examId) {
-      Promise.resolve().then(() => {
-        fetchData();
-      });
-    }
-  }, [examId, fetchData]);
-
   // SAVE updated rubric text
   const handleSaveRubric = async () => {
     setSaveLoading(true);
+    setSaveError('');
     try {
       const res = await fetch(`/api/exams/${examId}`, {
         method: 'PUT',
@@ -331,14 +334,15 @@ export default function ExamDetailsPage() {
       });
       if (!res.ok) {
         const msg = await getErrorMessage(res, 'Musterlösung konnte nicht aktualisiert werden.');
-        setError(msg);
+        setSaveError(msg);
         return;
       }
       setEditingRubric(false);
       setUploadedFileName('');
-      fetchData();
+      invalidateExams(examId, exam?.classId);
+      await fetchData();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Fehler beim Speichern.');
+      setSaveError(err instanceof Error ? err.message : 'Fehler beim Speichern.');
     } finally {
       setSaveLoading(false);
     }
@@ -355,6 +359,8 @@ export default function ExamDetailsPage() {
         setDeleteError(msg);
         return;
       }
+      invalidateExams(examId, exam?.classId);
+      invalidateSubmissions(undefined, examId, exam?.classId);
       setOpenDelete(false);
       router.push('/exams');
     } catch (err) {
@@ -390,8 +396,6 @@ export default function ExamDetailsPage() {
             title="Fehler beim Laden der Prüfungsdetails"
             message={error}
             onRetry={() => {
-              setLoading(true);
-              setError('');
               fetchData();
             }}
           />
@@ -764,7 +768,13 @@ export default function ExamDetailsPage() {
                     <Button
                       size="small"
                       startIcon={<EditIcon />}
-                      onClick={() => setEditingRubric(true)}
+                      onClick={() => {
+                        setRubricText(exam?.rubricText || '');
+                        setGradingNotes(exam?.gradingNotes || '');
+                        setGradingFormula((exam?.gradingFormula as GradingFormula) || 'LINEAR_60');
+                        setGradeRounding((exam?.gradeRounding as GradeRounding) || '0.1');
+                        setEditingRubric(true);
+                      }}
                     >
                       Bearbeiten
                     </Button>
@@ -803,6 +813,7 @@ export default function ExamDetailsPage() {
 
                 {editingRubric ? (
                   <Stack spacing={2} sx={{ flexGrow: 1 }}>
+                    {saveError && <Alert severity="error">{saveError}</Alert>}
                     <Grid container spacing={1.5}>
                       <Grid size={{ xs: 12, sm: 6 }}>
                         <FormControl fullWidth size="small">

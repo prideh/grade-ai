@@ -50,6 +50,13 @@ import ArrowForwardIcon from '@mui/icons-material/ArrowForward';
 import { BarChart } from '@mui/x-charts/BarChart';
 import DashboardLayout from '@/components/DashboardLayout';
 import ErrorState from '@/components/ErrorState';
+import {
+  useDataCache,
+  invalidateClasses,
+  invalidateExams,
+  invalidateSubmissions,
+  invalidateStudents,
+} from '@/lib/dataCache';
 
 interface ClassData {
   id: string;
@@ -97,21 +104,60 @@ interface BulkStudentItem {
   decision: 'add' | 'skip';
 }
 
+interface ClassDetailsApiResponse {
+  class: ClassData;
+  stats: ClassStats;
+  students: StudentRosterItem[];
+  exams: ExamRosterItem[];
+}
+
 export default function ClassDetailsPage() {
   const router = useRouter();
   const params = useParams();
   const classId = params.id as string;
 
-  // Data State
-  const [classData, setClassData] = useState<ClassData | null>(null);
-  const [stats, setStats] = useState<ClassStats | null>(null);
-  const [students, setStudents] = useState<StudentRosterItem[]>([]);
-  const [exams, setExams] = useState<ExamRosterItem[]>([]);
+  const fetchClassDetailsApi = React.useCallback(async () => {
+    const res = await fetch(`/api/classes/${classId}`);
+    if (!res.ok) {
+      if (res.status === 404) {
+        router.replace('/classes');
+        throw new Error('Klasse nicht gefunden.');
+      }
+      throw new Error('Klassendetails konnten nicht geladen werden.');
+    }
+    const data = await res.json();
+    return data as ClassDetailsApiResponse;
+  }, [classId, router]);
+
+  const {
+    data: cachedDetails,
+    loading,
+    error,
+    revalidate: fetchData,
+  } = useDataCache<ClassDetailsApiResponse>(
+    classId ? `/api/classes/${classId}` : null,
+    fetchClassDetailsApi
+  );
+
+  const classData = cachedDetails?.class || null;
+  const stats = cachedDetails?.stats || null;
+  const students = cachedDetails?.students || [];
+  const exams = cachedDetails?.exams || [];
+
   const [allClasses, setAllClasses] = useState<SimpleClassInfo[]>([]); // For student transfer selection
 
-  // Loading & Error States
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState('');
+  useEffect(() => {
+    let active = true;
+    fetch('/api/classes')
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (active && data?.classes) setAllClasses(data.classes);
+      })
+      .catch(() => {});
+    return () => {
+      active = false;
+    };
+  }, []);
 
   // Dialogs States
   const [openAddStudent, setOpenAddStudent] = useState(false);
@@ -232,6 +278,7 @@ export default function ClassDetailsPage() {
     }
 
     // Refresh roster after creating students
+    invalidateStudents(undefined, classId);
     await fetchData();
 
     setBulkResult({
@@ -244,50 +291,6 @@ export default function ClassDetailsPage() {
     setBulkStep('result');
     setBulkLoading(false);
   };
-
-  // Fetch Class Details
-  const fetchData = React.useCallback(async () => {
-    try {
-      const res = await fetch(`/api/classes/${classId}`);
-
-      // Call setState ONLY after the first await to satisfy react-hooks/set-state-in-effect
-      setError('');
-
-      if (!res.ok) {
-        if (res.status === 404) {
-          router.replace('/classes');
-          return;
-        }
-        throw new Error('Klassendetails konnten nicht geladen werden.');
-      }
-
-      const data = await res.json();
-      setClassData(data.class);
-      setStats(data.stats);
-      setStudents(data.students || []);
-      setExams(data.exams || []);
-      setEditedClassName(data.class.name);
-
-      // Fetch all classes for transfer select list
-      const classesRes = await fetch('/api/classes');
-      if (classesRes.ok) {
-        const classesData = await classesRes.json();
-        setAllClasses(classesData.classes || []);
-      }
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Ein unerwarteter Fehler ist aufgetreten.');
-    } finally {
-      setLoading(false);
-    }
-  }, [classId, router]);
-
-  useEffect(() => {
-    if (classId) {
-      Promise.resolve().then(() => {
-        fetchData();
-      });
-    }
-  }, [classId, fetchData]);
 
   // ADD Student
   const handleAddStudent = async (e: React.FormEvent) => {
@@ -318,7 +321,8 @@ export default function ClassDetailsPage() {
 
       setOpenAddStudent(false);
       setNewStudentName('');
-      fetchData(); // Refresh data
+      invalidateStudents(undefined, classId);
+      await fetchData(); // Refresh data
     } catch (err) {
       setStudentActionError(err instanceof Error ? err.message : 'Fehler beim Hinzufügen.');
     } finally {
@@ -353,7 +357,9 @@ export default function ClassDetailsPage() {
       setOpenTransfer(false);
       setSelectedStudent(null);
       setTargetClassId('');
-      fetchData(); // Refresh
+      invalidateStudents(selectedStudent.id, classId);
+      invalidateClasses(targetClassId);
+      await fetchData(); // Refresh
     } catch (err) {
       setStudentActionError(err instanceof Error ? err.message : 'Fehler beim Transfer.');
     } finally {
@@ -380,7 +386,9 @@ export default function ClassDetailsPage() {
 
       setOpenDeleteStudent(false);
       setSelectedStudent(null);
-      fetchData(); // Refresh
+      invalidateStudents(selectedStudent.id, classId);
+      invalidateSubmissions(undefined, undefined, classId, selectedStudent.id);
+      await fetchData(); // Refresh
     } catch (err) {
       setStudentActionError(err instanceof Error ? err.message : 'Fehler beim Löschen.');
     } finally {
@@ -399,6 +407,9 @@ export default function ClassDetailsPage() {
         setDeleteClassError(errorMsg);
         return;
       }
+      invalidateClasses(classId);
+      invalidateExams(undefined, classId);
+      invalidateSubmissions(undefined, undefined, classId);
       setOpenDeleteClass(false);
       router.push('/classes');
     } catch (err) {
@@ -427,7 +438,10 @@ export default function ClassDetailsPage() {
         return;
       }
       setOpenEditClass(false);
-      fetchData();
+      invalidateClasses(classId);
+      invalidateExams(undefined, classId);
+      invalidateSubmissions(undefined, undefined, classId);
+      await fetchData();
     } catch (err) {
       setEditClassError(err instanceof Error ? err.message : 'Fehler beim Ändern des Namens.');
     } finally {
@@ -461,8 +475,6 @@ export default function ClassDetailsPage() {
             title="Fehler beim Laden der Klassendetails"
             message={error}
             onRetry={() => {
-              setLoading(true);
-              setError('');
               fetchData();
             }}
           />

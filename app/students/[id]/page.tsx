@@ -1,7 +1,6 @@
 'use client';
 
 import * as React from 'react';
-import { useState, useEffect } from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import Link from 'next/link';
 import {
@@ -37,6 +36,7 @@ import WorkspacePremiumIcon from '@mui/icons-material/WorkspacePremium';
 import { LineChart } from '@mui/x-charts/LineChart';
 import DashboardLayout from '@/components/DashboardLayout';
 import ErrorState from '@/components/ErrorState';
+import { useDataCache } from '@/lib/dataCache';
 
 interface StudentData {
   id: string;
@@ -71,53 +71,45 @@ interface SubmissionHistoryData {
   date: string;
 }
 
+interface StudentDetailsApiResponse {
+  student: StudentData;
+  stats: StatsData;
+  trajectory: TrajectoryData[];
+  submissions: SubmissionHistoryData[];
+}
+
 export default function StudentDetailsPage() {
   const router = useRouter();
   const params = useParams();
   const studentId = params.id as string;
 
-  // Data States
-  const [student, setStudent] = useState<StudentData | null>(null);
-  const [stats, setStats] = useState<StatsData | null>(null);
-  const [trajectory, setTrajectory] = useState<TrajectoryData[]>([]);
-  const [submissions, setSubmissions] = useState<SubmissionHistoryData[]>([]);
-
-  // Loading & Error States
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState('');
-
-  // Fetch Student details and analytics
-  const fetchData = React.useCallback(async () => {
-    try {
-      const res = await fetch(`/api/students/${studentId}`);
-      setError('');
-      if (!res.ok) {
-        if (res.status === 404) {
-          router.replace('/classes');
-          return;
-        }
-        throw new Error('Schülerdetails konnten nicht geladen werden.');
+  const fetchStudentApi = React.useCallback(async () => {
+    const res = await fetch(`/api/students/${studentId}`);
+    if (!res.ok) {
+      if (res.status === 404) {
+        router.replace('/classes');
+        throw new Error('Schüler nicht gefunden.');
       }
-
-      const data = await res.json();
-      setStudent(data.student);
-      setStats(data.stats);
-      setTrajectory(data.trajectory || []);
-      setSubmissions(data.submissions || []);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Ein unerwarteter Fehler ist aufgetreten.');
-    } finally {
-      setLoading(false);
+      throw new Error('Schülerdetails konnten nicht geladen werden.');
     }
+    const data = await res.json();
+    return data as StudentDetailsApiResponse;
   }, [studentId, router]);
 
-  useEffect(() => {
-    if (studentId) {
-      Promise.resolve().then(() => {
-        fetchData();
-      });
-    }
-  }, [studentId, fetchData]);
+  const {
+    data: cachedDetails,
+    loading,
+    error,
+    revalidate: fetchData,
+  } = useDataCache<StudentDetailsApiResponse>(
+    studentId ? `/api/students/${studentId}` : null,
+    fetchStudentApi
+  );
+
+  const student = cachedDetails?.student || null;
+  const stats = cachedDetails?.stats || null;
+  const trajectory = cachedDetails?.trajectory || [];
+  const submissions = cachedDetails?.submissions || [];
 
   if (loading) {
     return (
@@ -145,8 +137,6 @@ export default function StudentDetailsPage() {
             title="Fehler beim Laden der Schülerdetails"
             message={error}
             onRetry={() => {
-              setLoading(true);
-              setError('');
               fetchData();
             }}
           />

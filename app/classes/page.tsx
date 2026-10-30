@@ -1,7 +1,7 @@
 'use client';
 
 import * as React from 'react';
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import Link from 'next/link';
 import {
   Box,
@@ -34,6 +34,7 @@ import StarIcon from '@mui/icons-material/Star';
 import StarBorderIcon from '@mui/icons-material/StarBorder';
 import DashboardLayout from '@/components/DashboardLayout';
 import ErrorState from '@/components/ErrorState';
+import { useDataCache, invalidateClasses } from '@/lib/dataCache';
 
 interface PrismaClassInfo {
   id: string;
@@ -50,9 +51,44 @@ interface ClassListItem extends PrismaClassInfo {
 }
 
 export default function ClassesPage() {
-  const [classes, setClasses] = useState<ClassListItem[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState('');
+  const fetchClassesApi = React.useCallback(async () => {
+    const res = await fetch('/api/classes');
+    if (!res.ok) throw new Error('Fehler beim Laden der Klassen.');
+    const data = await res.json();
+
+    const loadedClasses: ClassListItem[] = (data.classes || []).map(
+      (cls: PrismaClassInfo & { totalExams?: number; averageGrade?: string }) => ({
+        ...cls,
+        totalExams: cls.totalExams ?? 0,
+        averageGrade: cls.averageGrade || 'N/A',
+      })
+    );
+
+    return loadedClasses;
+  }, []);
+
+  const {
+    data: cachedClasses,
+    loading,
+    error,
+    revalidate: fetchClasses,
+  } = useDataCache<ClassListItem[] | { classes?: ClassListItem[] }>(
+    '/api/classes',
+    fetchClassesApi
+  );
+
+  const classes = React.useMemo(() => {
+    const raw = Array.isArray(cachedClasses) ? cachedClasses : cachedClasses?.classes || [];
+    return raw.map((cls: ClassListItem & { studentsCount?: number }) => ({
+      ...cls,
+      _count: {
+        students: cls._count?.students ?? cls.studentsCount ?? 0,
+      },
+      totalExams: cls.totalExams ?? 0,
+      averageGrade: cls.averageGrade || 'N/A',
+    }));
+  }, [cachedClasses]);
+
   const [defaultClassId, setDefaultClassId] = useState<string | null>(() => {
     if (typeof window !== 'undefined') {
       return localStorage.getItem('gradeai_default_class_id');
@@ -112,7 +148,8 @@ export default function ClassesPage() {
       setOpenRename(false);
       setRenameTargetClass(null);
       setRenamedClassName('');
-      fetchClasses();
+      invalidateClasses(renameTargetClass.id);
+      await fetchClasses();
     } catch (err) {
       setRenameError(
         err instanceof Error ? err.message : 'Klassenname konnte nicht geändert werden.'
@@ -121,36 +158,6 @@ export default function ClassesPage() {
       setRenameLoading(false);
     }
   };
-
-  // Fetch all classes
-  const fetchClasses = React.useCallback(async () => {
-    try {
-      const res = await fetch('/api/classes');
-      setError('');
-      if (!res.ok) throw new Error('Fehler beim Laden der Klassen.');
-      const data = await res.json();
-
-      const loadedClasses: ClassListItem[] = (data.classes || []).map(
-        (cls: PrismaClassInfo & { totalExams?: number; averageGrade?: string }) => ({
-          ...cls,
-          totalExams: cls.totalExams ?? 0,
-          averageGrade: cls.averageGrade || 'N/A',
-        })
-      );
-
-      setClasses(loadedClasses);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Ein unerwarteter Fehler ist aufgetreten.');
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    Promise.resolve().then(() => {
-      fetchClasses();
-    });
-  }, [fetchClasses]);
 
   const handleCreateClass = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -177,7 +184,8 @@ export default function ClassesPage() {
 
       setOpenCreate(false);
       setNewClassName('');
-      fetchClasses(); // Refresh
+      invalidateClasses();
+      await fetchClasses();
     } catch (err) {
       setCreateError(err instanceof Error ? err.message : 'Klasse konnte nicht erstellt werden.');
     } finally {
@@ -236,8 +244,6 @@ export default function ClassesPage() {
             title="Fehler beim Laden der Klassen"
             message={error}
             onRetry={() => {
-              setLoading(true);
-              setError('');
               fetchClasses();
             }}
           />

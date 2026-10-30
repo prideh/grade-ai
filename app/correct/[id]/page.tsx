@@ -37,6 +37,7 @@ import { getErrorMessage } from '@/lib/api-error';
 import AddIcon from '@mui/icons-material/Add';
 import QrCodeScannerIcon from '@mui/icons-material/QrCodeScanner';
 import QrScannerDialog from '@/components/QrScannerDialog';
+import { invalidateSubmissions } from '@/lib/dataCache';
 
 import { ExamCorrectionResult, CorrectedTask, CorrectedStep } from '../../../lib/gemini';
 import { calculateSwissGrade, parseStudentExamUrls } from '../../../lib/grading';
@@ -58,6 +59,7 @@ interface WorkspaceSubmission extends ExamCorrectionResult {
   errorMessage?: string | null;
   studentId?: string | null;
   classId?: string | null;
+  isReused?: boolean;
 }
 
 export default function CorrectWorkspace() {
@@ -132,6 +134,7 @@ export default function CorrectWorkspace() {
       setAddTaskTitle('');
       setAddTaskMaxPoints(5);
 
+      invalidateSubmissions(id as string, data?.examId, data?.classId, data?.studentId);
       // Refresh state without hard page reload
       await loadSubmission();
     } catch (err) {
@@ -144,7 +147,7 @@ export default function CorrectWorkspace() {
   // Debounced auto-save function to prevent network storms
   const saveTimeoutRef = React.useRef<NodeJS.Timeout | null>(null);
 
-  const saveToDatabase = (updatedData: ExamCorrectionResult, immediate = false) => {
+  const saveToDatabase = (updatedData: WorkspaceSubmission, immediate = false) => {
     setSaveStatus('saving');
     if (saveTimeoutRef.current) {
       clearTimeout(saveTimeoutRef.current);
@@ -163,6 +166,12 @@ export default function CorrectWorkspace() {
         if (res.ok) {
           setShowSaveToast(true);
           setSaveStatus('saved');
+          invalidateSubmissions(
+            id as string,
+            updatedData.examId,
+            updatedData.classId,
+            updatedData.studentId
+          );
         } else {
           setSaveStatus('error');
         }
@@ -812,6 +821,22 @@ export default function CorrectWorkspace() {
           </Stack>
 
           <Stack direction="row" spacing={3} sx={{ alignItems: 'center' }}>
+            {data.isReused && (
+              <Tooltip title="Dieses Korrekturergebnis wurde aus dem KI-Cache für identische Eingaben wiederverwendet.">
+                <Chip
+                  size="small"
+                  label="Ergebnis wiederverwendet"
+                  sx={{
+                    fontWeight: 700,
+                    borderRadius: '8px',
+                    backgroundColor: '#f1f5f9',
+                    color: '#475569',
+                    border: '1px solid #cbd5e1',
+                    fontSize: '0.75rem',
+                  }}
+                />
+              </Tooltip>
+            )}
             <Stack direction="row" spacing={1.5} sx={{ alignItems: 'center' }}>
               <Typography
                 variant="body2"

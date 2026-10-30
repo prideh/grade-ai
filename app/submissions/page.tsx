@@ -1,7 +1,7 @@
 'use client';
 
 import * as React from 'react';
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import Link from 'next/link';
 import {
   Box,
@@ -38,6 +38,7 @@ import SearchIcon from '@mui/icons-material/Search';
 import DeleteIcon from '@mui/icons-material/Delete';
 import DashboardLayout from '@/components/DashboardLayout';
 import ErrorState from '@/components/ErrorState';
+import { useDataCache, invalidateSubmissions } from '@/lib/dataCache';
 
 interface ClassData {
   id: string;
@@ -68,14 +69,66 @@ interface SubmissionData {
 }
 
 export default function SubmissionsPage() {
-  // Data States
-  const [submissions, setSubmissions] = useState<SubmissionData[]>([]);
-  const [classes, setClasses] = useState<ClassData[]>([]);
-  const [exams, setExams] = useState<ExamData[]>([]);
+  const fetchSubmissionsApi = React.useCallback(async () => {
+    const res = await fetch('/api/submissions');
+    if (!res.ok) throw new Error('Fehler beim Laden der Korrekturen.');
+    const data = await res.json();
+    return (data.submissions || []) as SubmissionData[];
+  }, []);
 
-  // Loading & Error States
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState('');
+  const fetchClassesApi = React.useCallback(async () => {
+    const res = await fetch('/api/classes');
+    if (!res.ok) throw new Error('Fehler beim Laden der Klassen.');
+    const data = await res.json();
+    return (data.classes || []) as ClassData[];
+  }, []);
+
+  const fetchExamsApi = React.useCallback(async () => {
+    const res = await fetch('/api/exams');
+    if (!res.ok) throw new Error('Fehler beim Laden der Prüfungen.');
+    const data = await res.json();
+    return (data.exams || []) as ExamData[];
+  }, []);
+
+  const {
+    data: cachedSubmissions,
+    loading: submissionsLoading,
+    error: submissionsError,
+    revalidate: revalidateSubmissions,
+  } = useDataCache<SubmissionData[] | { submissions?: SubmissionData[] }>(
+    '/api/submissions',
+    fetchSubmissionsApi
+  );
+
+  const {
+    data: cachedClasses,
+    loading: classesLoading,
+    error: classesError,
+    revalidate: revalidateClasses,
+  } = useDataCache<ClassData[] | { classes?: ClassData[] }>('/api/classes', fetchClassesApi);
+
+  const {
+    data: cachedExams,
+    loading: examsLoading,
+    error: examsError,
+    revalidate: revalidateExams,
+  } = useDataCache<ExamData[] | { exams?: ExamData[] }>('/api/exams', fetchExamsApi);
+
+  const submissions = Array.isArray(cachedSubmissions)
+    ? cachedSubmissions
+    : cachedSubmissions?.submissions || [];
+  const classes = Array.isArray(cachedClasses) ? cachedClasses : cachedClasses?.classes || [];
+  const exams = Array.isArray(cachedExams) ? cachedExams : cachedExams?.exams || [];
+  const loading =
+    (submissionsLoading && !cachedSubmissions) ||
+    (classesLoading && !cachedClasses) ||
+    (examsLoading && !cachedExams);
+  const error = submissionsError || classesError || examsError || '';
+
+  const fetchData = React.useCallback(async () => {
+    await Promise.all([revalidateSubmissions(), revalidateClasses(), revalidateExams()]);
+  }, [revalidateSubmissions, revalidateClasses, revalidateExams]);
+
   const [deleteTargetId, setDeleteTargetId] = useState<string | null>(null);
   const [deleteLoading, setDeleteLoading] = useState(false);
   const [deleteError, setDeleteError] = useState('');
@@ -84,42 +137,6 @@ export default function SubmissionsPage() {
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedClassId, setSelectedClassId] = useState('ALL');
   const [selectedExamId, setSelectedExamId] = useState('ALL');
-
-  // Fetch all data
-  const fetchData = React.useCallback(async () => {
-    try {
-      // Fetch classes
-      const classesRes = await fetch('/api/classes');
-      setError('');
-
-      if (!classesRes.ok) throw new Error('Fehler beim Laden der Klassen.');
-      const classesData = await classesRes.json();
-      setClasses(classesData.classes || []);
-
-      // Fetch exams
-      const examsRes = await fetch('/api/exams');
-      if (!examsRes.ok) throw new Error('Fehler beim Laden der Prüfungen.');
-      const examsData = await examsRes.json();
-      setExams(examsData.exams || []);
-
-      // Fetch all submissions (we fetch a larger subset for global listing)
-      const res = await fetch('/api/submissions');
-      if (!res.ok) throw new Error('Fehler beim Laden der Korrekturen.');
-      const data = await res.json();
-
-      setSubmissions(data.submissions || []);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Ein unerwarteter Fehler ist aufgetreten.');
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    Promise.resolve().then(() => {
-      fetchData();
-    });
-  }, [fetchData]);
 
   const handleDeleteSubmission = (id: string) => {
     setDeleteError('');
@@ -142,8 +159,10 @@ export default function SubmissionsPage() {
         return;
       }
 
+      const idToDelete = deleteTargetId;
       setDeleteTargetId(null);
-      fetchData();
+      invalidateSubmissions(idToDelete);
+      await fetchData();
     } catch (err) {
       setDeleteError(err instanceof Error ? err.message : 'Fehler beim Löschen.');
     } finally {
@@ -188,8 +207,6 @@ export default function SubmissionsPage() {
             title="Fehler beim Laden der Korrekturen"
             message={error}
             onRetry={() => {
-              setLoading(true);
-              setError('');
               fetchData();
             }}
           />

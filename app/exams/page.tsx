@@ -1,7 +1,7 @@
 'use client';
 
 import * as React from 'react';
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import {
@@ -41,6 +41,7 @@ import QrCodeScannerIcon from '@mui/icons-material/QrCodeScanner';
 import DashboardLayout from '@/components/DashboardLayout';
 import ErrorState from '@/components/ErrorState';
 import QrScannerDialog from '@/components/QrScannerDialog';
+import { useDataCache, invalidateExams } from '@/lib/dataCache';
 import {
   GRADING_FORMULA_OPTIONS,
   GRADE_ROUNDING_OPTIONS,
@@ -79,11 +80,100 @@ interface ExamListItem extends PrismaExamItem {
 
 export default function ExamsPage() {
   const router = useRouter();
-  const [exams, setExams] = useState<ExamListItem[]>([]);
-  const [classes, setClasses] = useState<SimpleClass[]>([]);
-  const [activeClassId, setActiveClassId] = useState<string>('');
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState('');
+
+  const fetchExamsApi = React.useCallback(async () => {
+    const res = await fetch('/api/exams');
+    if (!res.ok) throw new Error('Fehler beim Laden der Prüfungen.');
+    const examsData = await res.json();
+    return (examsData.exams || []).map((ex: PrismaExamItem & { averageGrade?: string }) => ({
+      ...ex,
+      averageGrade: ex.averageGrade || 'N/A',
+    }));
+  }, []);
+
+  const fetchClassesApi = React.useCallback(async () => {
+    const res = await fetch('/api/classes');
+    if (!res.ok) throw new Error('Fehler beim Laden der Klassen.');
+    const classesData = await res.json();
+    return (classesData.classes || []).map(
+      (cls: {
+        id: string;
+        name: string;
+        createdAt?: string;
+        _count?: { students?: number };
+        totalExams?: number;
+        averageGrade?: string;
+      }) => ({
+        ...cls,
+        id: cls.id,
+        name: cls.name,
+        _count: {
+          students: cls._count?.students || 0,
+        },
+        studentsCount: cls._count?.students || 0,
+        totalExams: cls.totalExams ?? 0,
+        averageGrade: cls.averageGrade || 'N/A',
+      })
+    );
+  }, []);
+
+  const {
+    data: cachedExams,
+    loading: examsLoading,
+    error: examsError,
+    revalidate: revalidateExams,
+  } = useDataCache<ExamListItem[] | { exams?: ExamListItem[] }>('/api/exams', fetchExamsApi);
+
+  const {
+    data: cachedClasses,
+    loading: classesLoading,
+    error: classesError,
+    revalidate: revalidateClasses,
+  } = useDataCache<SimpleClass[] | { classes?: SimpleClass[] }>('/api/classes', fetchClassesApi);
+
+  const exams = React.useMemo(() => {
+    const raw = Array.isArray(cachedExams) ? cachedExams : cachedExams?.exams || [];
+    return raw.map((ex: ExamListItem) => ({
+      ...ex,
+      averageGrade: ex.averageGrade || 'N/A',
+    }));
+  }, [cachedExams]);
+
+  const classes = React.useMemo(() => {
+    const raw = Array.isArray(cachedClasses) ? cachedClasses : cachedClasses?.classes || [];
+    return raw.map((cls: SimpleClass & { _count?: { students?: number } }) => ({
+      ...cls,
+      studentsCount: cls.studentsCount ?? cls._count?.students ?? 0,
+      totalExams: cls.totalExams ?? 0,
+      averageGrade: cls.averageGrade || 'N/A',
+    }));
+  }, [cachedClasses]);
+  const loading = (examsLoading && !cachedExams) || (classesLoading && !cachedClasses);
+  const error = examsError || classesError || '';
+
+  const fetchData = React.useCallback(async () => {
+    await Promise.all([revalidateExams(), revalidateClasses()]);
+  }, [revalidateExams, revalidateClasses]);
+
+  const [activeTabClassId, setActiveTabClassId] = useState<string>('');
+  const activeClassId = React.useMemo(() => {
+    if (activeTabClassId && classes.some((c) => c.id === activeTabClassId)) {
+      return activeTabClassId;
+    }
+    const defaultId =
+      typeof window !== 'undefined' ? localStorage.getItem('gradeai_default_class_id') : null;
+    const hasDefault = defaultId && classes.some((c) => c.id === defaultId);
+    return hasDefault ? (defaultId as string) : (classes[0]?.id ?? '');
+  }, [classes, activeTabClassId]);
+
+  const [dialogClassId, setDialogClassId] = useState<string>('');
+  const selectedClassId = React.useMemo(() => {
+    if (dialogClassId && classes.some((c) => c.id === dialogClassId)) {
+      return dialogClassId;
+    }
+    return activeClassId || (classes[0]?.id ?? '');
+  }, [classes, dialogClassId, activeClassId]);
+
   const [defaultClassId] = useState<string | null>(() => {
     if (typeof window !== 'undefined') {
       return localStorage.getItem('gradeai_default_class_id');
@@ -190,82 +280,8 @@ export default function ExamsPage() {
     setExamMaxPoints(20);
   };
 
-  const [selectedClassId, setSelectedClassId] = useState('');
   const [createLoading, setCreateLoading] = useState(false);
   const [createError, setCreateError] = useState('');
-
-  // Fetch all exams & classes
-  const fetchData = React.useCallback(async () => {
-    try {
-      const [classesRes, examsRes] = await Promise.all([
-        fetch('/api/classes'),
-        fetch('/api/exams'),
-      ]);
-      setError('');
-
-      if (!classesRes.ok) throw new Error('Fehler beim Laden der Klassen.');
-      const classesData = await classesRes.json();
-      const loadedClasses: SimpleClass[] = (classesData.classes || []).map(
-        (cls: {
-          id: string;
-          name: string;
-          _count?: { students?: number };
-          totalExams?: number;
-          averageGrade?: string;
-        }) => ({
-          id: cls.id,
-          name: cls.name,
-          studentsCount: cls._count?.students || 0,
-          totalExams: cls.totalExams ?? 0,
-          averageGrade: cls.averageGrade || 'N/A',
-        })
-      );
-      setClasses(loadedClasses);
-
-      if (!examsRes.ok) throw new Error('Fehler beim Laden der Prüfungen.');
-      const examsData = await examsRes.json();
-
-      const detailedExams: ExamListItem[] = (examsData.exams || []).map(
-        (ex: PrismaExamItem & { averageGrade?: string }) => ({
-          ...ex,
-          averageGrade: ex.averageGrade || 'N/A',
-        })
-      );
-
-      setExams(detailedExams);
-
-      if (loadedClasses.length > 0) {
-        // Pre-select default class if available, else first class
-        const defaultId =
-          typeof window !== 'undefined' ? localStorage.getItem('gradeai_default_class_id') : null;
-        const hasDefault = defaultId && loadedClasses.some((c) => c.id === defaultId);
-        const initialSelectionId = hasDefault ? defaultId : loadedClasses[0].id;
-
-        setActiveClassId((prev) => {
-          if (prev && loadedClasses.some((c) => c.id === prev)) {
-            return prev;
-          }
-          return initialSelectionId || '';
-        });
-        setSelectedClassId((prev) => {
-          if (prev && loadedClasses.some((c) => c.id === prev)) {
-            return prev;
-          }
-          return initialSelectionId || '';
-        });
-      }
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Ein unerwarteter Fehler ist aufgetreten.');
-    } finally {
-      setLoading(false);
-    }
-  }, [setSelectedClassId]);
-
-  useEffect(() => {
-    Promise.resolve().then(() => {
-      fetchData();
-    });
-  }, [fetchData]);
 
   const handleCreateExam = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -306,8 +322,9 @@ export default function ExamsPage() {
       setExamGradingNotes('');
       setUploadedFileName('');
       setParsedTasks([]);
-      setActiveClassId(selectedClassId); // Automatically select the tab of the class for the new exam
-      fetchData(); // Refresh list
+      setActiveTabClassId(selectedClassId); // Automatically select the tab of the class for the new exam
+      invalidateExams(undefined, selectedClassId);
+      await fetchData(); // Refresh list
     } catch (err) {
       setCreateError(err instanceof Error ? err.message : 'Prüfung konnte nicht erstellt werden.');
     } finally {
@@ -366,11 +383,12 @@ export default function ExamsPage() {
       setOpenCopy(false);
       setCopySourceExam(null);
 
+      invalidateExams(undefined, copyTargetClassId);
       const newExamId = data.id || data.exam?.id;
       if (newExamId) {
         router.push(`/exams/${newExamId}`);
       } else {
-        fetchData();
+        await fetchData();
       }
     } catch (err) {
       setCopyError(err instanceof Error ? err.message : 'Prüfung konnte nicht dupliziert werden.');
@@ -432,8 +450,6 @@ export default function ExamsPage() {
             title="Fehler beim Laden der Prüfungen"
             message={error}
             onRetry={() => {
-              setLoading(true);
-              setError('');
               fetchData();
             }}
           />
@@ -470,8 +486,8 @@ export default function ExamsPage() {
                       <Card
                         key={cls.id}
                         onClick={() => {
-                          setActiveClassId(cls.id);
-                          setSelectedClassId(cls.id);
+                          setActiveTabClassId(cls.id);
+                          setDialogClassId(cls.id);
                         }}
                         sx={{
                           minWidth: '220px',
@@ -882,7 +898,7 @@ export default function ExamsPage() {
                         labelId="class-label"
                         value={selectedClassId}
                         label="Zielklasse"
-                        onChange={(e) => setSelectedClassId(e.target.value)}
+                        onChange={(e) => setDialogClassId(e.target.value)}
                         required
                         sx={{ borderRadius: '8px' }}
                       >

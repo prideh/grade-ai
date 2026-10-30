@@ -57,6 +57,12 @@ import DashboardLayout from '@/components/DashboardLayout';
 import QrScannerDialog from '@/components/QrScannerDialog';
 import { getCachedTeacher, setCachedTeacher } from '@/lib/sessionCache';
 import {
+  fetchWithCache,
+  invalidateSubmissions,
+  invalidateExams,
+  invalidateClasses,
+} from '@/lib/dataCache';
+import {
   GRADING_FORMULA_OPTIONS,
   GRADE_ROUNDING_OPTIONS,
   SUBJECT_PROFILES,
@@ -150,6 +156,7 @@ export default function Dashboard() {
       if (!res.ok) {
         throw new Error('Abbrechen fehlgeschlagen.');
       }
+      invalidateSubmissions(subId);
       fetchRecentSubmissions();
     } catch (err) {
       console.error('Error canceling/deleting submission on dismiss:', err);
@@ -266,19 +273,19 @@ export default function Dashboard() {
   // 2. Fetch classes from DB
   const fetchClasses = React.useCallback(async () => {
     try {
-      const res = await fetch('/api/classes');
-      if (res.ok) {
-        const data = await res.json();
-        setClasses(data.classes || []);
-        // Pre-select default class if available, else first class
-        if (data.classes && data.classes.length > 0) {
-          const stored = localStorage.getItem('gradeai_default_class_id');
-          const classExists = data.classes.some((c: DashboardClass) => c.id === stored);
-          if (stored && classExists) {
-            handleClassChange(stored);
-          } else {
-            handleClassChange(data.classes[0].id);
-          }
+      const data = await fetchWithCache<{ classes: DashboardClass[] } | DashboardClass[]>(
+        '/api/classes'
+      );
+      const loadedClasses: DashboardClass[] = Array.isArray(data) ? data : data?.classes || [];
+      setClasses(loadedClasses);
+      // Pre-select default class if available, else first class
+      if (loadedClasses.length > 0) {
+        const stored = localStorage.getItem('gradeai_default_class_id');
+        const classExists = loadedClasses.some((c: DashboardClass) => c.id === stored);
+        if (stored && classExists) {
+          handleClassChange(stored);
+        } else {
+          handleClassChange(loadedClasses[0].id);
         }
       }
     } catch (err) {
@@ -287,33 +294,41 @@ export default function Dashboard() {
   }, [handleClassChange]);
 
   // 3. Fetch recent submissions history from DB
-  const fetchRecentSubmissions = React.useCallback(async () => {
+  const fetchRecentSubmissions = React.useCallback(async (forceRefresh = false) => {
     try {
-      const res = await fetch('/api/submissions');
-      if (res.ok) {
-        const data = await res.json();
-        const subs: DashboardSubmission[] = data.submissions || [];
-        setRecentSubmissions(subs);
-        if (data.studentsByClass) {
-          setStudentsByClass(data.studentsByClass);
-        }
-        if (Array.isArray(data.allExams)) {
-          setAllExams(data.allExams);
-        }
-        if (typeof data.totalExamsCount === 'number') {
-          setGlobalExamsCount(data.totalExamsCount);
-        }
-        // Pre-populate suggestedStudentId in assignState if not already chosen by teacher
-        setAssignState((prev) => {
-          const next = { ...prev };
-          for (const s of subs) {
-            if (s.studentName === 'Nicht zugeordnet' && s.suggestedStudentId && !next[s.id]) {
-              next[s.id] = s.suggestedStudentId;
-            }
-          }
-          return next;
-        });
+      if (forceRefresh) {
+        invalidateSubmissions();
       }
+      const data = await fetchWithCache<
+        | {
+            submissions: DashboardSubmission[];
+            studentsByClass?: Record<string, DashboardStudent[]>;
+            allExams?: GlobalExamOption[];
+            totalExamsCount?: number;
+          }
+        | DashboardSubmission[]
+      >('/api/submissions');
+      const subs: DashboardSubmission[] = Array.isArray(data) ? data : data?.submissions || [];
+      setRecentSubmissions(subs);
+      if (!Array.isArray(data) && data?.studentsByClass) {
+        setStudentsByClass(data.studentsByClass);
+      }
+      if (!Array.isArray(data) && Array.isArray(data?.allExams)) {
+        setAllExams(data.allExams);
+      }
+      if (!Array.isArray(data) && typeof data?.totalExamsCount === 'number') {
+        setGlobalExamsCount(data.totalExamsCount);
+      }
+      // Pre-populate suggestedStudentId in assignState if not already chosen by teacher
+      setAssignState((prev) => {
+        const next = { ...prev };
+        for (const s of subs) {
+          if (s.studentName === 'Nicht zugeordnet' && s.suggestedStudentId && !next[s.id]) {
+            next[s.id] = s.suggestedStudentId;
+          }
+        }
+        return next;
+      });
     } catch (err) {
       console.error('Error fetching recent submissions or global exams count:', err);
     }
@@ -378,7 +393,8 @@ export default function Dashboard() {
     if (!hasActiveJobs) return;
 
     const interval = setInterval(() => {
-      fetchRecentSubmissions();
+      invalidateSubmissions();
+      fetchRecentSubmissions(true);
     }, 3000);
 
     return () => clearInterval(interval);
@@ -454,7 +470,8 @@ export default function Dashboard() {
       }
 
       // Refresh submissions
-      fetchRecentSubmissions();
+      invalidateSubmissions(submissionId, targetExamId || undefined, undefined, studentId);
+      fetchRecentSubmissions(true);
       setAssignState((prev) => {
         const copy = { ...prev };
         delete copy[submissionId];
@@ -482,7 +499,8 @@ export default function Dashboard() {
         const errorData = await res.json();
         throw new Error(errorData.error || 'Ersetzen fehlgeschlagen.');
       }
-      fetchRecentSubmissions();
+      invalidateSubmissions(submissionId);
+      fetchRecentSubmissions(true);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Fehler beim Ersetzen.');
     } finally {
@@ -591,7 +609,12 @@ export default function Dashboard() {
 
       setStudentFiles([]);
       setLoading(false);
-      fetchRecentSubmissions();
+      invalidateSubmissions(undefined, resolvedExamId, selectedClassId);
+      if (selectedExamId === 'NEW') {
+        invalidateExams(resolvedExamId, selectedClassId);
+        invalidateClasses(selectedClassId);
+      }
+      fetchRecentSubmissions(true);
 
       // Immer auf dem Dashboard bleiben, damit die aktive Warteschlange direkt sichtbar ist und live mitverfolgt werden kann
       window.scrollTo({ top: 0, behavior: 'smooth' });

@@ -1,3 +1,5 @@
+import { clearDataCache } from './dataCache';
+
 export interface TeacherSession {
   id: string;
   name: string;
@@ -24,6 +26,7 @@ export function getHasCheckedAuth(): boolean {
 }
 
 export function clearSessionCache() {
+  clearDataCache();
   if (typeof window === 'undefined') return;
   cachedTeacher = null;
   hasCheckedAuth = false;

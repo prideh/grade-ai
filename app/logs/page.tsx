@@ -1,7 +1,7 @@
 'use client';
 
 import * as React from 'react';
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import {
   Box,
@@ -44,6 +44,7 @@ import ArrowForwardIcon from '@mui/icons-material/ArrowForward';
 import FilterAltOffIcon from '@mui/icons-material/FilterAltOff';
 import DashboardLayout from '@/components/DashboardLayout';
 import ErrorState from '@/components/ErrorState';
+import { useDataCache } from '@/lib/dataCache';
 
 interface CorrectionLog {
   id: string;
@@ -54,15 +55,30 @@ interface CorrectionLog {
   modelUsed: string;
   durationMs: number | null;
   status: 'PENDING' | 'PROCESSING' | 'COMPLETED' | 'FAILED' | 'CANCELLED';
-  actionType: 'ERSTELLT' | 'ERSETZT' | 'NEUSTART';
+  actionType: 'ERSTELLT' | 'ERSETZT' | 'NEUSTART' | 'WIEDERVERWENDET' | string;
   errorMessage: string | null;
 }
 
 export default function LogsPage() {
   const router = useRouter();
-  const [logs, setLogs] = useState<CorrectionLog[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+
+  const fetchLogsApi = React.useCallback(async () => {
+    const res = await fetch('/api/logs');
+    if (!res.ok) {
+      throw new Error('Protokolle konnten nicht geladen werden.');
+    }
+    const data = await res.json();
+    return (data.logs || []) as CorrectionLog[];
+  }, []);
+
+  const {
+    data: cachedLogs,
+    loading,
+    error,
+    revalidate: fetchLogs,
+  } = useDataCache<CorrectionLog[]>('/api/logs', fetchLogsApi);
+
+  const logs = cachedLogs || [];
 
   // Filter states
   const [search, setSearch] = useState('');
@@ -78,30 +94,6 @@ export default function LogsPage() {
     setStatusFilter('ALL');
     setActionFilter('ALL');
   };
-
-  const fetchLogs = async () => {
-    try {
-      setLoading(true);
-      setError(null);
-      const res = await fetch('/api/logs');
-      if (!res.ok) {
-        throw new Error('Protokolle konnten nicht geladen werden.');
-      }
-      const data = await res.json();
-      setLogs(data.logs);
-    } catch (err) {
-      console.error('Error fetching logs:', err);
-      setError(err instanceof Error ? err.message : 'Verbindungsfehler.');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    Promise.resolve().then(() => {
-      fetchLogs();
-    });
-  }, []);
 
   const handleOpenDrawer = (log: CorrectionLog) => {
     setSelectedLog(log);
@@ -223,8 +215,12 @@ export default function LogsPage() {
 
   const getActionLabel = (action: string) => {
     switch (action) {
+      case 'WIEDERVERWENDET':
+        return 'Ergebnis wiederverwendet';
       case 'ERSETZT':
         return 'Korrektur überschrieben';
+      case 'SCAN_ERSETZT':
+        return 'Scan ersetzt';
       case 'NEUSTART':
         return 'Fehlgeschlagene ersetzt';
       default:
@@ -466,6 +462,7 @@ export default function LogsPage() {
                     >
                       <MenuItem value="ALL">Alle Typen</MenuItem>
                       <MenuItem value="ERSTELLT">Neue Korrekturen</MenuItem>
+                      <MenuItem value="WIEDERVERWENDET">Ergebnis wiederverwendet</MenuItem>
                       <MenuItem value="ERSETZT">Korrekturen überschrieben</MenuItem>
                     </Select>
                   </FormControl>
