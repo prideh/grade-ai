@@ -804,19 +804,6 @@ export default function ClassDetailsPage() {
               <Stack direction="row" spacing={1} sx={{ flexWrap: 'wrap' }}>
                 <Button
                   variant="outlined"
-                  startIcon={<GroupAddIcon />}
-                  onClick={handleOpenBulkAdd}
-                  sx={{
-                    borderRadius: '8px',
-                    textTransform: 'none',
-                    fontWeight: 650,
-                    fontSize: '0.85rem',
-                  }}
-                >
-                  Mehrere Schüler hinzufügen
-                </Button>
-                <Button
-                  variant="outlined"
                   startIcon={<AddIcon />}
                   onClick={() => setOpenAddStudent(true)}
                   sx={{
@@ -827,6 +814,19 @@ export default function ClassDetailsPage() {
                   }}
                 >
                   Schüler/in hinzufügen
+                </Button>
+                <Button
+                  variant="outlined"
+                  startIcon={<GroupAddIcon />}
+                  onClick={handleOpenBulkAdd}
+                  sx={{
+                    borderRadius: '8px',
+                    textTransform: 'none',
+                    fontWeight: 650,
+                    fontSize: '0.85rem',
+                  }}
+                >
+                  Mehrere Schüler hinzufügen
                 </Button>
               </Stack>
             </Box>
@@ -841,14 +841,6 @@ export default function ClassDetailsPage() {
                 </Typography>
                 <Stack direction="row" spacing={1.5} sx={{ justifyContent: 'center' }}>
                   <Button
-                    variant="outlined"
-                    startIcon={<GroupAddIcon />}
-                    onClick={handleOpenBulkAdd}
-                    sx={{ borderRadius: '8px', textTransform: 'none', fontWeight: 650 }}
-                  >
-                    Mehrere Schüler hinzufügen
-                  </Button>
-                  <Button
                     variant="contained"
                     startIcon={<AddIcon />}
                     onClick={() => setOpenAddStudent(true)}
@@ -860,6 +852,14 @@ export default function ClassDetailsPage() {
                     }}
                   >
                     Schüler/in hinzufügen
+                  </Button>
+                  <Button
+                    variant="outlined"
+                    startIcon={<GroupAddIcon />}
+                    onClick={handleOpenBulkAdd}
+                    sx={{ borderRadius: '8px', textTransform: 'none', fontWeight: 650 }}
+                  >
+                    Mehrere Schüler hinzufügen
                   </Button>
                 </Stack>
               </Box>

@@ -51,7 +51,7 @@ test.describe('Full E2E Teacher & Mobile QR Relay Workflows', () => {
     await expect(page).toHaveURL(/\/classes\/.+/);
 
     // Add a student to the class
-    const addStudentBtn = page.getByRole('button', { name: /Schüler.*hinzufügen/i });
+    const addStudentBtn = page.getByRole('button', { name: /Schüler.*hinzufügen/i }).first();
     if (await addStudentBtn.isVisible()) {
       await addStudentBtn.click();
       await page.getByLabel(/Name/i).last().fill('Lukas Keller');
