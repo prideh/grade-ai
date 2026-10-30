@@ -49,6 +49,7 @@ export interface RawExamTask {
   title: string;
   maxPoints: number;
   orderIndex: number;
+  sourceReference?: string | null;
 }
 
 export interface StepAnalysis {
@@ -72,6 +73,7 @@ export interface TaskAnalysisItem {
   title: string;
   orderIndex: number;
   canonicalMaxPoints: number;
+  sourceReference?: string | null;
 
   gradedCount: number;
   ungradedCount: number;
@@ -289,6 +291,7 @@ export function computeTaskAnalysis(
       title: canonicalTask.title,
       orderIndex: canonicalTask.orderIndex,
       canonicalMaxPoints: canonicalTask.maxPoints,
+      sourceReference: canonicalTask.sourceReference || null,
       gradedCount,
       ungradedCount,
       avgPoints,

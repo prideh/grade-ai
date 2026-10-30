@@ -71,7 +71,10 @@ interface PrismaExamItem {
   gradingFormula?: string;
   gradeRounding?: string;
   submissionsCount: number;
-  tasks?: { taskId: string; title: string; maxPoints: number }[];
+  isGenerated?: boolean;
+  isApproved?: boolean;
+  approvedAt?: string | null;
+  tasks?: { taskId: string; title: string; maxPoints: number; sourceReference?: string | null }[];
 }
 
 interface ExamListItem extends PrismaExamItem {
@@ -185,6 +188,112 @@ export default function ExamsPage() {
   const [openCreate, setOpenCreate] = useState(false);
   const [qrRubricOpen, setQrRubricOpen] = useState(false);
   const [examTitle, setExamTitle] = useState('');
+
+  // Generate Exam State (Feature: generate exams from uploaded teaching material)
+  const [openGenerate, setOpenGenerate] = useState(false);
+  const [genTitle, setGenTitle] = useState('');
+  const [genClassId, setGenClassId] = useState('');
+  const [genSubject, setGenSubject] = useState('Mathematik');
+  const [genTopic, setGenTopic] = useState('');
+  const [genStufe, setGenStufe] = useState('Sekundarstufe I (7.–9. Klasse)');
+  const [genDifficulty, setGenDifficulty] = useState('Standard (Mittelschwer)');
+  const [genTotalPoints, setGenTotalPoints] = useState<number>(20);
+  const [genTaskCount, setGenTaskCount] = useState<number>(4);
+  const [genMaterialPayload, setGenMaterialPayload] = useState<{
+    mimeType: string;
+    data: string;
+  } | null>(null);
+  const [genMaterialText, setGenMaterialText] = useState('');
+  const [genMaterialFileName, setGenMaterialFileName] = useState('');
+  const [genLoading, setGenLoading] = useState(false);
+  const [genError, setGenError] = useState('');
+
+  const handleGenMaterialFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files[0]) {
+      const file = e.target.files[0];
+      setGenMaterialFileName(file.name);
+      setGenError('');
+
+      const reader = new FileReader();
+      if (file.type.startsWith('image/') || file.type === 'application/pdf') {
+        reader.onload = (event) => {
+          const dataUrl = event.target?.result as string;
+          if (dataUrl) {
+            const base64Data = dataUrl.split(',')[1];
+            setGenMaterialPayload({
+              mimeType: file.type || 'application/pdf',
+              data: base64Data,
+            });
+            setGenMaterialText('');
+          }
+        };
+        reader.readAsDataURL(file);
+      } else {
+        reader.onload = (event) => {
+          const text = event.target?.result as string;
+          if (text) {
+            setGenMaterialText(text);
+            setGenMaterialPayload(null);
+          }
+        };
+        reader.readAsText(file);
+      }
+    }
+  };
+
+  const handleGenerateExam = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const effectiveMaterial =
+      genMaterialPayload || (genMaterialText.trim() ? genMaterialText : null);
+
+    // Mandatory material upload check
+    if (!effectiveMaterial) {
+      setGenError(
+        'Das Hochladen von Unterrichtsmaterial ist erforderlich. GradeAI generiert Prüfungen ausschliesslich auf Basis Ihrer Unterlagen.'
+      );
+      return;
+    }
+
+    const targetClass = genClassId || selectedClassId;
+    if (!targetClass) {
+      setGenError('Bitte wähle eine Klasse aus.');
+      return;
+    }
+
+    setGenLoading(true);
+    setGenError('');
+
+    try {
+      const res = await fetch('/api/exams/generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          material: effectiveMaterial,
+          classId: targetClass,
+          title: genTitle.trim() || undefined,
+          subject: genSubject,
+          topic: genTopic.trim() || undefined,
+          stufe: genStufe,
+          difficulty: genDifficulty,
+          totalPoints: Number(genTotalPoints) || 20,
+          taskCount: Number(genTaskCount) || 4,
+        }),
+      });
+
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || 'Fehler bei der Generierung der Prüfung.');
+      }
+
+      setOpenGenerate(false);
+      invalidateExams(data.examId || data.exam?.id, targetClass);
+      router.push(`/exams/${data.examId || data.exam?.id}`);
+    } catch (err) {
+      setGenError(err instanceof Error ? err.message : 'Fehler bei der Generierung.');
+    } finally {
+      setGenLoading(false);
+    }
+  };
 
   // Copy Exam State
   const [openCopy, setOpenCopy] = useState(false);
@@ -423,26 +532,49 @@ export default function ExamsPage() {
               Definiere Prüfungen, passe Erwartungshorizonte an und vergleiche Klassenleistungen.
             </Typography>
           </Box>
-          <Button
-            variant="contained"
-            startIcon={<AddIcon />}
-            disabled={loading || !!error || classes.length === 0}
-            onClick={() => {
-              setCreateError('');
-              setOpenCreate(true);
-            }}
-            sx={{
-              padding: '10px 20px',
-              borderRadius: '8px',
-              fontWeight: 700,
-              textTransform: 'none',
-              backgroundColor: '#1b77d1',
-              boxShadow: '0 4px 10px rgba(27, 119, 209, 0.2)',
-              '&:hover': { backgroundColor: '#1565c0' },
-            }}
-          >
-            Prüfung anlegen
-          </Button>
+          <Stack direction="row" spacing={1.5} sx={{ flexWrap: 'wrap' }}>
+            <Button
+              variant="contained"
+              startIcon={<AutoAwesomeIcon />}
+              disabled={loading || !!error || classes.length === 0}
+              onClick={() => {
+                setGenError('');
+                setGenClassId(activeClassId || (classes[0]?.id ?? ''));
+                setOpenGenerate(true);
+              }}
+              sx={{
+                padding: '10px 20px',
+                borderRadius: '8px',
+                fontWeight: 700,
+                textTransform: 'none',
+                backgroundColor: '#0f172a',
+                boxShadow: '0 4px 10px rgba(15, 23, 42, 0.2)',
+                '&:hover': { backgroundColor: '#1e293b' },
+              }}
+            >
+              Prüfung generieren
+            </Button>
+            <Button
+              variant="outlined"
+              startIcon={<AddIcon />}
+              disabled={loading || !!error || classes.length === 0}
+              onClick={() => {
+                setCreateError('');
+                setOpenCreate(true);
+              }}
+              sx={{
+                padding: '10px 20px',
+                borderRadius: '8px',
+                fontWeight: 700,
+                textTransform: 'none',
+                borderColor: '#cbd5e1',
+                color: '#0f172a',
+                '&:hover': { backgroundColor: '#f8fafc', borderColor: '#94a3b8' },
+              }}
+            >
+              Manuell anlegen
+            </Button>
+          </Stack>
         </Box>
 
         {error ? (
@@ -683,17 +815,39 @@ export default function ExamsPage() {
                             >
                               {ex.title}
                             </Typography>
-                            <Chip
-                              label={ex.subject}
-                              size="small"
-                              sx={{
-                                backgroundColor: '#e3f2fd',
-                                color: '#1b77d1',
-                                fontWeight: 700,
-                                fontSize: '0.75rem',
-                                mb: 1,
-                              }}
-                            />
+                            <Stack direction="row" spacing={1} sx={{ flexWrap: 'wrap', mb: 1 }}>
+                              <Chip
+                                label={ex.subject}
+                                size="small"
+                                sx={{
+                                  backgroundColor: '#e3f2fd',
+                                  color: '#1b77d1',
+                                  fontWeight: 700,
+                                  fontSize: '0.75rem',
+                                }}
+                              />
+                              {ex.isGenerated && !ex.isApproved && (
+                                <Chip
+                                  label="Entwurf: Freigabe erforderlich"
+                                  size="small"
+                                  color="warning"
+                                  sx={{ fontWeight: 700, fontSize: '0.72rem', height: 24 }}
+                                />
+                              )}
+                              {ex.isApproved && ex.isGenerated && (
+                                <Chip
+                                  label="Freigegeben & Eingefroren"
+                                  size="small"
+                                  sx={{
+                                    backgroundColor: '#dcfce7',
+                                    color: '#15803d',
+                                    fontWeight: 700,
+                                    fontSize: '0.72rem',
+                                    height: 24,
+                                  }}
+                                />
+                              )}
+                            </Stack>
                           </Box>
                           <Box
                             sx={{
@@ -1444,6 +1598,325 @@ export default function ExamsPage() {
                   {copyLoading ? <CircularProgress size={20} /> : 'Duplizieren'}
                 </Button>
               </Stack>
+            </DialogActions>
+          </form>
+        </Dialog>
+
+        {/* Dialog for Generate Exam from Teaching Material */}
+        <Dialog
+          open={openGenerate}
+          onClose={(_e, reason) => {
+            if (genLoading || reason === 'backdropClick') return;
+            setOpenGenerate(false);
+          }}
+          maxWidth="md"
+          fullWidth
+        >
+          <form onSubmit={handleGenerateExam}>
+            <DialogTitle
+              sx={{ fontWeight: 800, color: '#0f172a', letterSpacing: '-0.01em', pb: 1 }}
+            >
+              <Stack direction="row" spacing={1.5} sx={{ alignItems: 'center' }}>
+                <AutoAwesomeIcon sx={{ color: '#0f172a' }} />
+                <Typography variant="h6" sx={{ fontWeight: 800 }}>
+                  Prüfung aus Unterrichtsmaterial generieren
+                </Typography>
+              </Stack>
+            </DialogTitle>
+            <DialogContent>
+              <Stack spacing={2.5} sx={{ mt: 1 }}>
+                <Alert severity="info" sx={{ borderRadius: '8px' }}>
+                  <strong>Determinismus & Grounding:</strong> GradeAI generiert die
+                  Aufgabenstellung, Musterlösung und Punkteverteilung ausschliesslich aus deinem
+                  hochgeladenen Unterrichtsmaterial. Das Hochladen von Material ist verpflichtend.
+                </Alert>
+
+                {genError && (
+                  <Alert severity="error" sx={{ borderRadius: '8px' }}>
+                    {genError}
+                  </Alert>
+                )}
+
+                {/* 1. Mandatory Material Upload */}
+                <Box
+                  sx={{
+                    p: 2.5,
+                    border: '2px dashed',
+                    borderColor: genMaterialFileName || genMaterialText ? '#16a34a' : '#cbd5e1',
+                    borderRadius: '8px',
+                    backgroundColor: genMaterialFileName || genMaterialText ? '#f0fdf4' : '#f8fafc',
+                  }}
+                >
+                  <Typography
+                    variant="subtitle2"
+                    sx={{ fontWeight: 800, color: '#0f172a', mb: 0.5 }}
+                  >
+                    Unterrichtsmaterial (Pflichtfeld) *
+                  </Typography>
+                  <Typography
+                    variant="caption"
+                    sx={{ color: 'text.secondary', display: 'block', mb: 2 }}
+                  >
+                    Lade das im Unterricht behandelte Material hoch (PDF, Skript, Arbeitsblätter
+                    oder Fotos).
+                  </Typography>
+
+                  {genMaterialFileName ? (
+                    <Box
+                      sx={{
+                        p: 1.5,
+                        backgroundColor: '#ffffff',
+                        border: '1px solid #bbf7d0',
+                        borderRadius: '6px',
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        alignItems: 'center',
+                      }}
+                    >
+                      <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
+                        <StarsIcon sx={{ color: '#16a34a' }} />
+                        <Typography variant="body2" sx={{ fontWeight: 700, color: '#166534' }}>
+                          {genMaterialFileName}
+                        </Typography>
+                      </Stack>
+                      <Button
+                        size="small"
+                        color="error"
+                        onClick={() => {
+                          setGenMaterialFileName('');
+                          setGenMaterialPayload(null);
+                          setGenMaterialText('');
+                        }}
+                      >
+                        Entfernen
+                      </Button>
+                    </Box>
+                  ) : (
+                    <Stack spacing={1.5}>
+                      <Stack direction="row" spacing={1.5} sx={{ alignItems: 'center' }}>
+                        <input
+                          type="file"
+                          accept="application/pdf,image/*,text/plain"
+                          id="genMaterialFileInput"
+                          onChange={handleGenMaterialFileChange}
+                          style={{ display: 'none' }}
+                        />
+                        <Button
+                          component="label"
+                          htmlFor="genMaterialFileInput"
+                          variant="contained"
+                          sx={{
+                            backgroundColor: '#0f172a',
+                            textTransform: 'none',
+                            fontWeight: 700,
+                            borderRadius: '6px',
+                            '&:hover': { backgroundColor: '#1e293b' },
+                          }}
+                        >
+                          Datei auswählen (PDF / Bilder)
+                        </Button>
+                        <Typography variant="caption" sx={{ color: 'text.secondary' }}>
+                          PDF, PNG, JPG oder Text
+                        </Typography>
+                      </Stack>
+                      <Typography
+                        variant="caption"
+                        sx={{ color: 'text.secondary', fontStyle: 'italic' }}
+                      >
+                        Oder füge den Materialtext direkt ein:
+                      </Typography>
+                      <TextField
+                        placeholder="Alternativ: Text des Unterrichtsmaterials hier einfügen..."
+                        multiline
+                        rows={3}
+                        fullWidth
+                        size="small"
+                        value={genMaterialText}
+                        onChange={(e) => {
+                          setGenMaterialText(e.target.value);
+                          if (e.target.value.trim()) setGenError('');
+                        }}
+                        sx={{
+                          '& .MuiOutlinedInput-root': {
+                            borderRadius: '6px',
+                            backgroundColor: '#ffffff',
+                          },
+                        }}
+                      />
+                    </Stack>
+                  )}
+                </Box>
+
+                {/* 2. Metadata Inputs */}
+                <Grid container spacing={2}>
+                  <Grid size={{ xs: 12, sm: 7 }}>
+                    <TextField
+                      label="Prüfungstitel (optional)"
+                      placeholder="z.B. Geometrie Klassenarbeit: Satz des Pythagoras"
+                      fullWidth
+                      value={genTitle}
+                      onChange={(e) => setGenTitle(e.target.value)}
+                      sx={{ '& .MuiOutlinedInput-root': { borderRadius: '8px' } }}
+                      helperText="Wird automatisch anhand des Themas benannt, falls leer."
+                    />
+                  </Grid>
+                  <Grid size={{ xs: 12, sm: 5 }}>
+                    <FormControl fullWidth>
+                      <InputLabel id="gen-class-label">Zielklasse *</InputLabel>
+                      <Select
+                        labelId="gen-class-label"
+                        value={genClassId || selectedClassId}
+                        label="Zielklasse *"
+                        onChange={(e) => setGenClassId(e.target.value)}
+                        required
+                        sx={{ borderRadius: '8px' }}
+                      >
+                        {classes.map((c) => (
+                          <MenuItem key={c.id} value={c.id}>
+                            {c.name}
+                          </MenuItem>
+                        ))}
+                      </Select>
+                    </FormControl>
+                  </Grid>
+                </Grid>
+
+                <Grid container spacing={2}>
+                  <Grid size={{ xs: 12, sm: 6 }}>
+                    <FormControl fullWidth>
+                      <InputLabel id="gen-subject-label">Fach</InputLabel>
+                      <Select
+                        labelId="gen-subject-label"
+                        value={genSubject}
+                        label="Fach"
+                        onChange={(e) => setGenSubject(e.target.value)}
+                        sx={{ borderRadius: '8px' }}
+                      >
+                        {SUBJECT_PROFILES.map((s) => (
+                          <MenuItem key={s.value} value={s.value}>
+                            {s.label}
+                          </MenuItem>
+                        ))}
+                      </Select>
+                    </FormControl>
+                  </Grid>
+                  <Grid size={{ xs: 12, sm: 6 }}>
+                    <TextField
+                      label="Thema / Stoffeingrenzung"
+                      placeholder="z.B. Lineare Gleichungen mit zwei Variablen"
+                      fullWidth
+                      value={genTopic}
+                      onChange={(e) => setGenTopic(e.target.value)}
+                      helperText="Grenzt die Auswahl innerhalb des Materials ein."
+                      sx={{ '& .MuiOutlinedInput-root': { borderRadius: '8px' } }}
+                    />
+                  </Grid>
+                </Grid>
+
+                <Grid container spacing={2}>
+                  <Grid size={{ xs: 12, sm: 6 }}>
+                    <FormControl fullWidth size="small">
+                      <InputLabel id="gen-stufe-label">Schulstufe</InputLabel>
+                      <Select
+                        labelId="gen-stufe-label"
+                        value={genStufe}
+                        label="Schulstufe"
+                        onChange={(e) => setGenStufe(e.target.value)}
+                        sx={{ borderRadius: '8px' }}
+                      >
+                        <MenuItem value="Primarstufe (5./6. Klasse)">
+                          Primarstufe (5./6. Klasse)
+                        </MenuItem>
+                        <MenuItem value="Sekundarstufe I (7.–9. Klasse)">
+                          Sekundarstufe I (7.–9. Klasse)
+                        </MenuItem>
+                        <MenuItem value="Sekundarstufe II / Gymnasium">
+                          Sekundarstufe II / Gymnasium
+                        </MenuItem>
+                        <MenuItem value="Berufsfachschule / Weiterbildung">
+                          Berufsfachschule / Weiterbildung
+                        </MenuItem>
+                      </Select>
+                    </FormControl>
+                  </Grid>
+                  <Grid size={{ xs: 12, sm: 6 }}>
+                    <FormControl fullWidth size="small">
+                      <InputLabel id="gen-diff-label">Schwierigkeitsgrad</InputLabel>
+                      <Select
+                        labelId="gen-diff-label"
+                        value={genDifficulty}
+                        label="Schwierigkeitsgrad"
+                        onChange={(e) => setGenDifficulty(e.target.value)}
+                        sx={{ borderRadius: '8px' }}
+                      >
+                        <MenuItem value="Basis">Basis</MenuItem>
+                        <MenuItem value="Standard (Mittelschwer)">Standard (Mittelschwer)</MenuItem>
+                        <MenuItem value="Erweitert / Anspruchsvoll">
+                          Erweitert / Anspruchsvoll
+                        </MenuItem>
+                        <MenuItem value="Differenziert (gemischt)">
+                          Differenziert (gemischt)
+                        </MenuItem>
+                      </Select>
+                    </FormControl>
+                  </Grid>
+                </Grid>
+
+                <Grid container spacing={2}>
+                  <Grid size={{ xs: 12, sm: 6 }}>
+                    <TextField
+                      label="Ziel-Gesamtpunkte"
+                      type="number"
+                      fullWidth
+                      size="small"
+                      value={genTotalPoints}
+                      onChange={(e) => setGenTotalPoints(Math.max(1, Number(e.target.value)))}
+                      sx={{ '& .MuiOutlinedInput-root': { borderRadius: '8px' } }}
+                    />
+                  </Grid>
+                  <Grid size={{ xs: 12, sm: 6 }}>
+                    <TextField
+                      label="Anzahl Aufgaben"
+                      type="number"
+                      fullWidth
+                      size="small"
+                      value={genTaskCount}
+                      onChange={(e) =>
+                        setGenTaskCount(Math.max(1, Math.min(10, Number(e.target.value))))
+                      }
+                      sx={{ '& .MuiOutlinedInput-root': { borderRadius: '8px' } }}
+                    />
+                  </Grid>
+                </Grid>
+              </Stack>
+            </DialogContent>
+            <DialogActions sx={{ p: 2.5, pt: 1, justifyContent: 'space-between' }}>
+              <Button
+                onClick={() => setOpenGenerate(false)}
+                disabled={genLoading}
+                sx={{ textTransform: 'none', fontWeight: 650 }}
+              >
+                Abbrechen
+              </Button>
+              <Button
+                type="submit"
+                variant="contained"
+                disabled={genLoading}
+                startIcon={
+                  genLoading ? <CircularProgress size={18} color="inherit" /> : <AutoAwesomeIcon />
+                }
+                sx={{
+                  textTransform: 'none',
+                  fontWeight: 700,
+                  backgroundColor: '#0f172a',
+                  borderRadius: '8px',
+                  px: 3,
+                  py: 1,
+                  '&:hover': { backgroundColor: '#1e293b' },
+                }}
+              >
+                {genLoading ? 'Prüfung wird generiert...' : 'Prüfung jetzt generieren'}
+              </Button>
             </DialogActions>
           </form>
         </Dialog>

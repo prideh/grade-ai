@@ -1,0 +1,109 @@
+export interface ExamGeneratorParams {
+  topic?: string | null;
+  stufe?: string | null;
+  difficulty?: string | null;
+  taskCount?: number | null;
+  totalPoints?: number | null;
+}
+
+export interface ExamMetadata {
+  isGenerated: boolean;
+  isApproved: boolean;
+  approvedAt: string | null;
+  materialStorageKey?: string | null;
+  generatorParams?: ExamGeneratorParams | null;
+  taskSources?: Record<string, string>; // Map taskId -> source reference (e.g. "Seite 2, Abschnitt 2.1")
+}
+
+const META_PREFIX = '<!-- GRADEAI_EXAM_META:';
+const META_SUFFIX = ' -->';
+
+/**
+ * Parses embedded JSON metadata from exam.gradingNotes.
+ * If no metadata is found:
+ * - If gradingNotes has no metadata marker, standard non-generated exams are treated as approved by default.
+ */
+export function parseExamMetadata(gradingNotes?: string | null): {
+  metadata: ExamMetadata;
+  cleanNotes: string;
+} {
+  const defaultMeta: ExamMetadata = {
+    isGenerated: false,
+    isApproved: true,
+    approvedAt: null,
+    taskSources: {},
+    generatorParams: null,
+  };
+
+  if (!gradingNotes || typeof gradingNotes !== 'string') {
+    return { metadata: defaultMeta, cleanNotes: '' };
+  }
+
+  const trimmed = gradingNotes.trim();
+  const startIdx = trimmed.indexOf(META_PREFIX);
+  if (startIdx === -1) {
+    return { metadata: defaultMeta, cleanNotes: trimmed };
+  }
+
+  const endIdx = trimmed.indexOf(META_SUFFIX, startIdx + META_PREFIX.length);
+  if (endIdx === -1) {
+    return { metadata: defaultMeta, cleanNotes: trimmed };
+  }
+
+  const jsonStr = trimmed.slice(startIdx + META_PREFIX.length, endIdx);
+  const remainingNotes = (
+    trimmed.slice(0, startIdx) + trimmed.slice(endIdx + META_SUFFIX.length)
+  ).trim();
+
+  try {
+    const parsed = JSON.parse(jsonStr) as Partial<ExamMetadata>;
+    const metadata: ExamMetadata = {
+      isGenerated: Boolean(parsed.isGenerated),
+      isApproved: Boolean(parsed.isApproved),
+      approvedAt: parsed.approvedAt || null,
+      materialStorageKey: parsed.materialStorageKey || null,
+      generatorParams: parsed.generatorParams || null,
+      taskSources: parsed.taskSources || {},
+    };
+    return { metadata, cleanNotes: remainingNotes };
+  } catch {
+    return { metadata: defaultMeta, cleanNotes: trimmed };
+  }
+}
+
+/**
+ * Embeds JSON metadata into gradingNotes. Preserves any existing clean teacher notes.
+ */
+export function embedExamMetadata(
+  cleanNotes: string | null | undefined,
+  metadata: ExamMetadata
+): string {
+  const jsonStr = JSON.stringify(metadata);
+  const metaComment = `${META_PREFIX}${jsonStr}${META_SUFFIX}`;
+  const notes = (cleanNotes || '').trim();
+  if (!notes) {
+    return metaComment;
+  }
+  return `${metaComment}\n\n${notes}`;
+}
+
+/**
+ * Checks whether an exam is approved and frozen.
+ * Standard (manually created) exams are considered approved by default.
+ * Generated exams require explicit approval.
+ */
+export function isExamApproved(exam: { gradingNotes?: string | null }): boolean {
+  const { metadata } = parseExamMetadata(exam.gradingNotes);
+  if (!metadata.isGenerated) {
+    return true; // Non-generated standard exams do not block grading/printing
+  }
+  return metadata.isApproved === true;
+}
+
+/**
+ * Checks whether an exam was created via the "Prüfung generieren" flow.
+ */
+export function isExamGenerated(exam: { gradingNotes?: string | null }): boolean {
+  const { metadata } = parseExamMetadata(exam.gradingNotes);
+  return metadata.isGenerated === true;
+}

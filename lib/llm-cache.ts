@@ -1,7 +1,12 @@
 import crypto from 'node:crypto';
 import { getStorageAdapter } from '@/lib/storage';
 
-export type LlmCallType = 'grading' | 'rubric_parse' | 'scan_identification';
+export type LlmCallType =
+  | 'grading'
+  | 'rubric_parse'
+  | 'scan_identification'
+  | 'exam_generation'
+  | 'task_regeneration';
 
 export interface LlmCacheEntry<T> {
   result: T;
@@ -18,6 +23,8 @@ export const LLM_PROMPT_VERSIONS = {
   grading: '2026-10-30-grading-v1',
   rubricParse: '2026-10-30-rubric-v1',
   scanIdentification: '2026-10-30-scan-v1',
+  examGeneration: '2026-10-30-generation-v1',
+  taskRegeneration: '2026-10-30-task-regen-v1',
 } as const;
 
 /**
@@ -126,6 +133,70 @@ export function computeScanIdentificationHash(params: {
       dataHash: computeSha256(p.data),
     })),
     candidates: params.candidates,
+  });
+  return computeSha256(canonical);
+}
+
+/**
+ * Berechnet den Content-Hash fuer die vollstaendige Generierung einer Pruefung aus Unterrichtsmaterial.
+ */
+export function computeExamGenerationHash(params: {
+  teacherId: string;
+  modelName: string;
+  promptVersion?: string;
+  material: unknown;
+  subject?: string | null;
+  topic?: string | null;
+  stufe?: string | null;
+  difficulty?: string | null;
+  totalPoints?: number | null;
+  taskCount?: number | null;
+}): string {
+  const canonical = canonicalizeJson({
+    teacherId: params.teacherId,
+    modelName: params.modelName,
+    promptVersion: params.promptVersion || LLM_PROMPT_VERSIONS.examGeneration,
+    material: params.material,
+    subject: params.subject?.trim().toLowerCase() || null,
+    topic: params.topic?.trim() || null,
+    stufe: params.stufe?.trim() || null,
+    difficulty: params.difficulty?.trim() || null,
+    totalPoints: params.totalPoints || null,
+    taskCount: params.taskCount || null,
+  });
+  return computeSha256(canonical);
+}
+
+/**
+ * Berechnet den Content-Hash fuer die isolierte Neu-Generierung einer einzelnen Aufgabe.
+ */
+export function computeTaskRegenerationHash(params: {
+  teacherId: string;
+  modelName: string;
+  promptVersion?: string;
+  material: unknown;
+  taskId: string;
+  existingTitle?: string | null;
+  maxPoints?: number | null;
+  instructions?: string | null;
+  subject?: string | null;
+  topic?: string | null;
+  stufe?: string | null;
+  difficulty?: string | null;
+}): string {
+  const canonical = canonicalizeJson({
+    teacherId: params.teacherId,
+    modelName: params.modelName,
+    promptVersion: params.promptVersion || LLM_PROMPT_VERSIONS.taskRegeneration,
+    material: params.material,
+    taskId: params.taskId,
+    existingTitle: params.existingTitle || null,
+    maxPoints: params.maxPoints || null,
+    instructions: params.instructions?.trim() || null,
+    subject: params.subject?.trim().toLowerCase() || null,
+    topic: params.topic?.trim() || null,
+    stufe: params.stufe?.trim() || null,
+    difficulty: params.difficulty?.trim() || null,
   });
   return computeSha256(canonical);
 }

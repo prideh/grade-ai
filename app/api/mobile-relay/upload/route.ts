@@ -24,6 +24,7 @@ import {
   LLM_PROMPT_VERSIONS,
 } from '@/lib/llm-cache';
 import crypto from 'crypto';
+import { isExamApproved } from '@/lib/exam-meta';
 
 function parseStoredMaterial(
   rawText?: string | null
@@ -523,6 +524,36 @@ export async function POST(request: Request) {
       );
     }
 
+    const targetExamIdFromRequest =
+      (explicitExamId && explicitExamId !== 'AUTO' ? explicitExamId : null) ||
+      payload.examId ||
+      null;
+
+    if (targetExamIdFromRequest) {
+      const explicitExam = teacherExams.find((e) => e.id === targetExamIdFromRequest);
+      if (explicitExam && !isExamApproved(explicitExam)) {
+        return NextResponse.json(
+          {
+            error:
+              'Die Prüfung ist ein noch ungeprüfter Entwurf und muss vor der Korrektur freigegeben werden.',
+          },
+          { status: 400 }
+        );
+      }
+    }
+
+    const approvedTeacherExams = teacherExams.filter((e) => isExamApproved(e));
+
+    if (approvedTeacherExams.length === 0) {
+      return NextResponse.json(
+        {
+          error:
+            'Es existiert noch keine freigegebene Prüfung im System. Bitte prüfe und gib deine Entwürfe zuerst frei.',
+        },
+        { status: 400 }
+      );
+    }
+
     const submissionId = crypto.randomUUID();
     const savedUrls: string[] = [];
 
@@ -538,11 +569,6 @@ export async function POST(request: Request) {
 
     const storedStudentExamUrl = savedUrls.length === 1 ? savedUrls[0] : JSON.stringify(savedUrls);
 
-    const targetExamIdFromRequest =
-      (explicitExamId && explicitExamId !== 'AUTO' ? explicitExamId : null) ||
-      payload.examId ||
-      null;
-
     const targetStudentIdFromRequest =
       (explicitStudentId && explicitStudentId !== 'AUTO' ? explicitStudentId : null) ||
       payload.studentId ||
@@ -550,8 +576,8 @@ export async function POST(request: Request) {
 
     const initialExam =
       (targetExamIdFromRequest
-        ? teacherExams.find((e) => e.id === targetExamIdFromRequest)
-        : null) || teacherExams[0];
+        ? approvedTeacherExams.find((e) => e.id === targetExamIdFromRequest)
+        : null) || approvedTeacherExams[0];
 
     const isAutoDetectExamMode = !targetExamIdFromRequest;
 
@@ -561,7 +587,7 @@ export async function POST(request: Request) {
         examId: initialExam.id,
         studentId: null,
         targetStudentId: targetStudentIdFromRequest,
-        isExamMatchUncertain: isAutoDetectExamMode && teacherExams.length > 1,
+        isExamMatchUncertain: isAutoDetectExamMode && approvedTeacherExams.length > 1,
         isStudentMatchUncertain: false,
         status: 'PENDING',
         earnedPoints: 0.0,
@@ -618,11 +644,11 @@ export async function POST(request: Request) {
         let isExamMatchUncertain = false;
 
         if (isAutoDetectExamMode) {
-          if (teacherExams.length === 1) {
-            activeExam = teacherExams[0];
+          if (approvedTeacherExams.length === 1) {
+            activeExam = approvedTeacherExams[0];
             isExamMatchUncertain = false;
           } else {
-            const candidates = teacherExams.map((e) => ({
+            const candidates = approvedTeacherExams.map((e) => ({
               examId: e.id,
               examTitle: e.title,
               subject: e.subject,
@@ -637,7 +663,9 @@ export async function POST(request: Request) {
               candidates,
               { teacherId: payload.teacherId }
             );
-            const foundExam = teacherExams.find((e) => e.id === identification.matchedExamId);
+            const foundExam = approvedTeacherExams.find(
+              (e) => e.id === identification.matchedExamId
+            );
             if (foundExam) {
               activeExam = foundExam;
             }

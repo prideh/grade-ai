@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { getSession } from '@/lib/session';
 import { serverCache, CacheTags, invalidateExamCache } from '@/lib/cache';
+import { parseExamMetadata } from '@/lib/exam-meta';
 
 // GET: Fetch all exams created by the teacher across all their classes
 export async function GET() {
@@ -51,6 +52,7 @@ export async function GET() {
         completedGrades.length > 0
           ? (completedGrades.reduce((a, b) => a + b, 0) / completedGrades.length).toFixed(2)
           : 'N/A';
+      const { metadata, cleanNotes } = parseExamMetadata(ex.gradingNotes);
 
       return {
         id: ex.id,
@@ -59,7 +61,10 @@ export async function GET() {
         maxPoints: ex.maxPoints,
         rubricText: ex.rubricText,
         examTemplateText: ex.examTemplateText,
-        gradingNotes: ex.gradingNotes,
+        gradingNotes: cleanNotes,
+        isGenerated: metadata.isGenerated,
+        isApproved: metadata.isApproved,
+        approvedAt: metadata.approvedAt,
         gradingFormula: ex.gradingFormula,
         gradeRounding: ex.gradeRounding,
         classId: ex.classId,

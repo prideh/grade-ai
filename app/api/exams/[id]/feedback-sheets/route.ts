@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { getSession } from '@/lib/session';
 import { serverCache, CacheTags } from '@/lib/cache';
+import { isExamApproved } from '@/lib/exam-meta';
 
 export async function GET(request: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
@@ -47,6 +48,16 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
 
     if (exam.class.teacherId !== session.userId) {
       return NextResponse.json({ error: 'Nicht autorisiert.' }, { status: 403 });
+    }
+
+    if (!isExamApproved(exam)) {
+      return NextResponse.json(
+        {
+          error:
+            'Die Prüfung ist ein noch ungeprüfter Entwurf und muss vor dem Drucken freigegeben werden.',
+        },
+        { status: 400 }
+      );
     }
 
     const totalSubmissions = exam.submissions.length;

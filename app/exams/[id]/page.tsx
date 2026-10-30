@@ -52,6 +52,9 @@ import QrCodeScannerIcon from '@mui/icons-material/QrCodeScanner';
 import QueryStatsIcon from '@mui/icons-material/QueryStats';
 import KeyboardArrowDownIcon from '@mui/icons-material/KeyboardArrowDown';
 import KeyboardArrowUpIcon from '@mui/icons-material/KeyboardArrowUp';
+import LockIcon from '@mui/icons-material/Lock';
+import CheckCircleIcon from '@mui/icons-material/CheckCircle';
+import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome';
 import type { ExamTaskAnalysis } from '@/lib/task-analysis';
 import { BarChart } from '@mui/x-charts/BarChart';
 import DashboardLayout from '@/components/DashboardLayout';
@@ -75,8 +78,22 @@ interface ExamData {
   rubricText?: string;
   examTemplateText?: string | null;
   gradingNotes?: string | null;
+  rawGradingNotes?: string | null;
+  isGenerated?: boolean;
+  isApproved?: boolean;
+  approvedAt?: string | null;
+  generatorParams?: unknown;
+  taskSources?: Record<string, string>;
   gradingFormula?: string;
   gradeRounding?: string;
+  tasks?: {
+    id: string;
+    taskId: string;
+    title: string;
+    maxPoints: number;
+    orderIndex?: number;
+    sourceReference?: string | null;
+  }[];
 }
 
 interface ExamStats {
@@ -113,15 +130,29 @@ export default function ExamDetailsPage() {
   const params = useParams();
   const examId = params.id as string;
 
-  // Rubric Editing
+  // Rubric & Template Editing
   const [rubricText, setRubricText] = useState('');
+  const [templateText, setTemplateText] = useState('');
   const [gradingNotes, setGradingNotes] = useState('');
   const [gradingFormula, setGradingFormula] = useState<GradingFormula>('LINEAR_60');
   const [gradeRounding, setGradeRounding] = useState<GradeRounding>('0.1');
   const [editingRubric, setEditingRubric] = useState(false);
+  const [activeArtifactTab, setActiveArtifactTab] = useState<'TEMPLATE' | 'RUBRIC'>('TEMPLATE');
   const [saveLoading, setSaveLoading] = useState(false);
   const [saveError, setSaveError] = useState('');
   const [uploadedFileName, setUploadedFileName] = useState('');
+
+  // Approval Gate State
+  const [approving, setApproving] = useState(false);
+  const [approveError, setApproveError] = useState('');
+
+  // Single-Task Regenerate State
+  const [regenDialogOpen, setRegenDialogOpen] = useState(false);
+  const [regenTaskId, setRegenTaskId] = useState<string | null>(null);
+  const [regenTaskTitle, setRegenTaskTitle] = useState('');
+  const [regenInstructions, setRegenInstructions] = useState('');
+  const [regenLoading, setRegenLoading] = useState(false);
+  const [regenError, setRegenError] = useState('');
 
   const fetchExamDetailsApi = React.useCallback(async () => {
     const res = await fetch(`/api/exams/${examId}`);
@@ -147,6 +178,7 @@ export default function ExamDetailsPage() {
     {
       onSuccess: (data) => {
         setRubricText((prev) => (editingRubric ? prev : data.exam.rubricText || ''));
+        setTemplateText((prev) => (editingRubric ? prev : data.exam.examTemplateText || ''));
         setGradingNotes((prev) => (editingRubric ? prev : data.exam.gradingNotes || ''));
         setGradingFormula((prev) =>
           editingRubric ? prev : (data.exam.gradingFormula as GradingFormula) || 'LINEAR_60'
@@ -317,7 +349,7 @@ export default function ExamDetailsPage() {
   const [openDelete, setOpenDelete] = useState(false);
   const [deleteError, setDeleteError] = useState('');
 
-  // SAVE updated rubric text
+  // SAVE updated rubric and template text
   const handleSaveRubric = async () => {
     setSaveLoading(true);
     setSaveError('');
@@ -327,13 +359,14 @@ export default function ExamDetailsPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           rubricText,
+          examTemplateText: templateText || undefined,
           gradingNotes: gradingNotes || null,
           gradingFormula,
           gradeRounding,
         }),
       });
       if (!res.ok) {
-        const msg = await getErrorMessage(res, 'Musterlösung konnte nicht aktualisiert werden.');
+        const msg = await getErrorMessage(res, 'Prüfung konnte nicht aktualisiert werden.');
         setSaveError(msg);
         return;
       }
@@ -345,6 +378,59 @@ export default function ExamDetailsPage() {
       setSaveError(err instanceof Error ? err.message : 'Fehler beim Speichern.');
     } finally {
       setSaveLoading(false);
+    }
+  };
+
+  // EXPLICIT APPROVAL GATE: Teacher approves and freezes the exam
+  const handleApproveExam = async () => {
+    setApproving(true);
+    setApproveError('');
+    try {
+      const res = await fetch(`/api/exams/${examId}/approve`, {
+        method: 'POST',
+      });
+      if (!res.ok) {
+        const msg = await getErrorMessage(res, 'Freigabe fehlgeschlagen.');
+        setApproveError(msg);
+        return;
+      }
+      invalidateExams(examId, exam?.classId);
+      await fetchData();
+    } catch (err) {
+      setApproveError(err instanceof Error ? err.message : 'Fehler bei der Freigabe.');
+    } finally {
+      setApproving(false);
+    }
+  };
+
+  // SINGLE-TASK REGENERATE: Regenerate one task without losing other tasks or teacher edits
+  const handleRegenerateTask = async () => {
+    if (!regenTaskId) return;
+    setRegenLoading(true);
+    setRegenError('');
+    try {
+      const res = await fetch(`/api/exams/${examId}/regenerate-task`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          taskId: regenTaskId,
+          instructions: regenInstructions.trim() || undefined,
+        }),
+      });
+      if (!res.ok) {
+        const msg = await getErrorMessage(res, 'Aufgabe konnte nicht neu generiert werden.');
+        setRegenError(msg);
+        return;
+      }
+      setRegenDialogOpen(false);
+      setRegenTaskId(null);
+      setRegenInstructions('');
+      invalidateExams(examId, exam?.classId);
+      await fetchData();
+    } catch (err) {
+      setRegenError(err instanceof Error ? err.message : 'Fehler bei der Neu-Generierung.');
+    } finally {
+      setRegenLoading(false);
     }
   };
 
@@ -467,6 +553,40 @@ export default function ExamDetailsPage() {
             <Stack direction="row" spacing={1.5} sx={{ flexWrap: 'wrap', alignItems: 'center' }}>
               <Tooltip
                 title={
+                  exam?.isApproved === false
+                    ? 'Erst nach der ausdrücklichen Freigabe der Prüfung verfügbar.'
+                    : 'Aufgabenblatt für Schülerinnen und Schüler drucken oder als PDF exportieren'
+                }
+              >
+                <span>
+                  <Link
+                    href={`/exams/${examId}/print-task-sheet`}
+                    passHref
+                    style={{
+                      textDecoration: 'none',
+                      pointerEvents: exam?.isApproved === false ? 'none' : 'auto',
+                    }}
+                  >
+                    <Button
+                      variant="contained"
+                      startIcon={<PrintIcon />}
+                      disabled={exam?.isApproved === false}
+                      sx={{
+                        borderRadius: '8px',
+                        textTransform: 'none',
+                        fontWeight: 700,
+                        backgroundColor: '#0f172a',
+                        '&:hover': { backgroundColor: '#1e293b' },
+                      }}
+                    >
+                      Aufgabenblatt drucken (PDF)
+                    </Button>
+                  </Link>
+                </span>
+              </Tooltip>
+
+              <Tooltip
+                title={
                   completedCount === 0
                     ? 'Noch keine bewerteten Arbeiten vorhanden (mindestens eine abgeschlossene Korrektur erforderlich)'
                     : ungradedCount > 0
@@ -484,15 +604,16 @@ export default function ExamDetailsPage() {
                     }}
                   >
                     <Button
-                      variant="contained"
+                      variant="outlined"
                       startIcon={<PrintIcon />}
                       disabled={completedCount === 0}
                       sx={{
                         borderRadius: '8px',
                         textTransform: 'none',
                         fontWeight: 700,
-                        backgroundColor: '#0f172a',
-                        '&:hover': { backgroundColor: '#1e293b' },
+                        borderColor: '#cbd5e1',
+                        color: '#0f172a',
+                        '&:hover': { backgroundColor: '#f8fafc', borderColor: '#94a3b8' },
                       }}
                     >
                       Feedback für alle drucken
@@ -521,6 +642,7 @@ export default function ExamDetailsPage() {
               <Button
                 variant="contained"
                 startIcon={<QrCodeScannerIcon />}
+                disabled={exam?.isApproved === false}
                 onClick={() => {
                   setQrTargetMode('SUBMISSION');
                   setQrStudent(null);
@@ -565,6 +687,119 @@ export default function ExamDetailsPage() {
             )}
           </Box>
         </Stack>
+
+        {/* REVIEW & APPROVAL GATE BANNER */}
+        {exam?.isGenerated && exam?.isApproved === false && (
+          <Alert
+            severity="warning"
+            icon={<LockIcon sx={{ fontSize: '1.5rem', color: '#d97706' }} />}
+            sx={{
+              borderRadius: '12px',
+              border: '1px solid #fcd34d',
+              backgroundColor: '#fffbeb',
+              p: 2.5,
+              '& .MuiAlert-message': { width: '100%' },
+            }}
+          >
+            <Stack
+              direction={{ xs: 'column', md: 'row' }}
+              spacing={2}
+              sx={{
+                justifyContent: 'space-between',
+                alignItems: { xs: 'flex-start', md: 'center' },
+              }}
+            >
+              <Box>
+                <Typography variant="subtitle1" sx={{ fontWeight: 800, color: '#92400e', mb: 0.5 }}>
+                  KI-Entwurf: Freigabe erforderlich
+                </Typography>
+                <Typography
+                  variant="body2"
+                  sx={{ color: '#78350f', maxWidth: '850px', lineHeight: 1.6 }}
+                >
+                  Diese Prüfung wurde aus Unterrichtsmaterial generiert. Als Lehrperson trägst du
+                  die pädagogische Verantwortung: Überprüfe die Aufgabenstellungen, Punkte und die
+                  Musterlösung. Du kannst einzelne Aufgaben isoliert neu generieren oder anpassen.
+                  Erst nach deiner ausdrücklichen Freigabe wird die Prüfung eingefroren und für den
+                  Druck sowie für Schülerkorrekturen freigeschaltet.
+                </Typography>
+                {approveError && (
+                  <Typography
+                    variant="caption"
+                    sx={{ color: '#b91c1c', fontWeight: 700, mt: 1, display: 'block' }}
+                  >
+                    {approveError}
+                  </Typography>
+                )}
+              </Box>
+
+              <Button
+                variant="contained"
+                startIcon={
+                  approving ? <CircularProgress size={16} color="inherit" /> : <CheckCircleIcon />
+                }
+                disabled={approving}
+                onClick={handleApproveExam}
+                sx={{
+                  whiteSpace: 'nowrap',
+                  fontWeight: 800,
+                  textTransform: 'none',
+                  borderRadius: '8px',
+                  backgroundColor: '#d97706',
+                  color: '#ffffff',
+                  px: 3,
+                  py: 1.25,
+                  boxShadow: '0 4px 12px rgba(217, 119, 6, 0.3)',
+                  '&:hover': { backgroundColor: '#b45309' },
+                }}
+              >
+                {approving ? 'Freigabe läuft...' : 'Prüfung freigeben & einfrieren'}
+              </Button>
+            </Stack>
+          </Alert>
+        )}
+
+        {exam?.isApproved && exam?.isGenerated && (
+          <Alert
+            severity="success"
+            icon={<CheckCircleIcon sx={{ color: '#16a34a' }} />}
+            sx={{
+              borderRadius: '12px',
+              border: '1px solid #bbf7d0',
+              backgroundColor: '#f0fdf4',
+              py: 1.5,
+              px: 2,
+            }}
+          >
+            <Stack
+              direction="row"
+              sx={{
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                flexWrap: 'wrap',
+                gap: 1,
+              }}
+            >
+              <Box>
+                <Typography variant="subtitle2" sx={{ fontWeight: 800, color: '#166534' }}>
+                  Freigegeben & Eingefroren
+                </Typography>
+                <Typography variant="caption" sx={{ color: '#15803d' }}>
+                  Aufgabenblatt, Musterlösung und Punkteschema sind finalisiert und unveränderlich.
+                  Korrekturen laufen verbindlich gegen diese Version.{' '}
+                  {exam.approvedAt &&
+                    `(Freigegeben am ${new Date(exam.approvedAt).toLocaleDateString('de-CH')})`}
+                </Typography>
+              </Box>
+              <Chip
+                icon={<LockIcon sx={{ fontSize: '0.85rem !important' }} />}
+                label="Unveränderlich"
+                size="small"
+                sx={{ backgroundColor: '#dcfce7', color: '#15803d', fontWeight: 700, height: 24 }}
+              />
+            </Stack>
+          </Alert>
+        )}
 
         {/* 1. Statistical Aggregates Grid */}
         <Grid container spacing={3}>
@@ -758,26 +993,70 @@ export default function ExamDetailsPage() {
                     display: 'flex',
                     justifyContent: 'space-between',
                     alignItems: 'center',
+                    flexWrap: 'wrap',
+                    gap: 1.5,
                     mb: 2,
                   }}
                 >
-                  <Typography variant="h6" sx={{ fontWeight: 800, color: '#0f172a' }}>
-                    Musterlösung & Erwartungshorizont
-                  </Typography>
-                  {!editingRubric ? (
+                  <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
                     <Button
                       size="small"
-                      startIcon={<EditIcon />}
-                      onClick={() => {
-                        setRubricText(exam?.rubricText || '');
-                        setGradingNotes(exam?.gradingNotes || '');
-                        setGradingFormula((exam?.gradingFormula as GradingFormula) || 'LINEAR_60');
-                        setGradeRounding((exam?.gradeRounding as GradeRounding) || '0.1');
-                        setEditingRubric(true);
+                      variant={activeArtifactTab === 'TEMPLATE' ? 'contained' : 'outlined'}
+                      onClick={() => setActiveArtifactTab('TEMPLATE')}
+                      sx={{
+                        textTransform: 'none',
+                        fontWeight: 700,
+                        borderRadius: '6px',
+                        backgroundColor: activeArtifactTab === 'TEMPLATE' ? '#0f172a' : undefined,
+                        color: activeArtifactTab === 'TEMPLATE' ? '#ffffff' : 'text.primary',
+                        borderColor: '#cbd5e1',
                       }}
                     >
-                      Bearbeiten
+                      Aufgabenblatt (Schüler)
                     </Button>
+                    <Button
+                      size="small"
+                      variant={activeArtifactTab === 'RUBRIC' ? 'contained' : 'outlined'}
+                      onClick={() => setActiveArtifactTab('RUBRIC')}
+                      sx={{
+                        textTransform: 'none',
+                        fontWeight: 700,
+                        borderRadius: '6px',
+                        backgroundColor: activeArtifactTab === 'RUBRIC' ? '#0f172a' : undefined,
+                        color: activeArtifactTab === 'RUBRIC' ? '#ffffff' : 'text.primary',
+                        borderColor: '#cbd5e1',
+                      }}
+                    >
+                      Musterlösung & Kriterien
+                    </Button>
+                  </Stack>
+
+                  {!editingRubric ? (
+                    exam?.isGenerated && exam?.isApproved ? (
+                      <Chip
+                        icon={<LockIcon sx={{ fontSize: '0.85rem !important' }} />}
+                        label="Eingefroren"
+                        size="small"
+                        sx={{ fontWeight: 700, backgroundColor: '#f1f5f9' }}
+                      />
+                    ) : (
+                      <Button
+                        size="small"
+                        startIcon={<EditIcon />}
+                        onClick={() => {
+                          setRubricText(exam?.rubricText || '');
+                          setTemplateText(exam?.examTemplateText || '');
+                          setGradingNotes(exam?.gradingNotes || '');
+                          setGradingFormula(
+                            (exam?.gradingFormula as GradingFormula) || 'LINEAR_60'
+                          );
+                          setGradeRounding((exam?.gradeRounding as GradeRounding) || '0.1');
+                          setEditingRubric(true);
+                        }}
+                      >
+                        Bearbeiten
+                      </Button>
+                    )
                   ) : (
                     <Stack direction="row" spacing={1}>
                       <Button
@@ -787,6 +1066,7 @@ export default function ExamDetailsPage() {
                           setEditingRubric(false);
                           setUploadedFileName('');
                           setRubricText(exam?.rubricText || '');
+                          setTemplateText(exam?.examTemplateText || '');
                           setGradingNotes(exam?.gradingNotes || '');
                           setGradingFormula(
                             (exam?.gradingFormula as GradingFormula) || 'LINEAR_60'
@@ -853,97 +1133,116 @@ export default function ExamDetailsPage() {
                       </Grid>
                     </Grid>
 
-                    {uploadedFileName ||
-                    rubricText.startsWith('{"mimeType":') ||
-                    rubricText.startsWith('[{"mimeType":') ? (
-                      <Box
-                        sx={{
-                          border: '1px solid #cbd5e1',
-                          padding: '12px 16px',
-                          borderRadius: '8px',
-                          display: 'flex',
-                          justifyContent: 'space-between',
-                          alignItems: 'center',
-                          backgroundColor: '#f8fafc',
-                        }}
-                      >
-                        <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
-                          <StarsIcon sx={{ color: 'primary.main' }} />
-                          <Typography
-                            variant="body2"
-                            sx={{ fontWeight: 600, color: 'text.primary' }}
-                          >
-                            {uploadedFileName || 'Bild-Musterlösung geladen'}
-                          </Typography>
-                        </Stack>
-                        <Button size="small" color="error" onClick={handleResetRubric}>
-                          Zurücksetzen
-                        </Button>
-                      </Box>
+                    {activeArtifactTab === 'TEMPLATE' ? (
+                      <TextField
+                        label="Aufgabenblatt für Schülerinnen und Schüler (Markdown)"
+                        placeholder="Aufgabenblatt mit Aufgabenstellungen hier bearbeiten..."
+                        multiline
+                        rows={8}
+                        fullWidth
+                        variant="outlined"
+                        value={templateText}
+                        onChange={(e) => setTemplateText(e.target.value)}
+                        sx={{ '& .MuiOutlinedInput-root': { borderRadius: '8px' }, flexGrow: 1 }}
+                      />
                     ) : (
-                      <Stack spacing={1.5} sx={{ flexGrow: 1 }}>
-                        <TextField
-                          label="Musterlösung (Stufe 2)"
-                          multiline
-                          rows={5}
-                          fullWidth
-                          variant="outlined"
-                          value={rubricText}
-                          onChange={(e) => setRubricText(e.target.value)}
-                          sx={{ '& .MuiOutlinedInput-root': { borderRadius: '8px' }, flexGrow: 1 }}
-                        />
-                        <Stack
-                          direction="row"
-                          spacing={1.5}
-                          sx={{ alignItems: 'center', flexWrap: 'wrap' }}
-                        >
-                          <Typography
-                            variant="caption"
-                            sx={{ color: 'text.secondary', fontWeight: 600 }}
-                          >
-                            Oder lade eine Datei hoch / fotografiere sie:
-                          </Typography>
-                          <input
-                            type="file"
-                            accept="application/pdf,text/plain,image/*"
-                            id="editRubricFile"
-                            onChange={handleRubricFileChange}
-                            style={{ display: 'none' }}
-                          />
-                          <Button
-                            component="label"
-                            htmlFor="editRubricFile"
-                            variant="outlined"
-                            size="small"
+                      <>
+                        {uploadedFileName ||
+                        rubricText.startsWith('{"mimeType":') ||
+                        rubricText.startsWith('[{"mimeType":') ? (
+                          <Box
                             sx={{
-                              color: 'text.primary',
-                              borderColor: '#cbd5e1',
-                              fontWeight: 650,
-                              textTransform: 'none',
+                              border: '1px solid #cbd5e1',
+                              padding: '12px 16px',
+                              borderRadius: '8px',
+                              display: 'flex',
+                              justifyContent: 'space-between',
+                              alignItems: 'center',
+                              backgroundColor: '#f8fafc',
                             }}
                           >
-                            Datei auswählen
-                          </Button>
-                          <Button
-                            variant="outlined"
-                            size="small"
-                            startIcon={<QrCodeScannerIcon />}
-                            onClick={() => {
-                              setQrTargetMode('RUBRIC');
-                              setQrStudent(null);
-                              setQrOpen(true);
-                            }}
-                            sx={{
-                              color: '#1b77d1',
-                              borderColor: '#1b77d1',
-                              fontWeight: 700,
-                              textTransform: 'none',
-                            }}
-                          >
-                            Per Smartphone scannen (QR)
-                          </Button>
-                        </Stack>
-                      </Stack>
+                            <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
+                              <StarsIcon sx={{ color: 'primary.main' }} />
+                              <Typography
+                                variant="body2"
+                                sx={{ fontWeight: 600, color: 'text.primary' }}
+                              >
+                                {uploadedFileName || 'Bild-Musterlösung geladen'}
+                              </Typography>
+                            </Stack>
+                            <Button size="small" color="error" onClick={handleResetRubric}>
+                              Zurücksetzen
+                            </Button>
+                          </Box>
+                        ) : (
+                          <Stack spacing={1.5} sx={{ flexGrow: 1 }}>
+                            <TextField
+                              label="Musterlösung (Stufe 2)"
+                              multiline
+                              rows={5}
+                              fullWidth
+                              variant="outlined"
+                              value={rubricText}
+                              onChange={(e) => setRubricText(e.target.value)}
+                              sx={{
+                                '& .MuiOutlinedInput-root': { borderRadius: '8px' },
+                                flexGrow: 1,
+                              }}
+                            />
+                            <Stack
+                              direction="row"
+                              spacing={1.5}
+                              sx={{ alignItems: 'center', flexWrap: 'wrap' }}
+                            >
+                              <Typography
+                                variant="caption"
+                                sx={{ color: 'text.secondary', fontWeight: 600 }}
+                              >
+                                Oder lade eine Datei hoch / fotografiere sie:
+                              </Typography>
+                              <input
+                                type="file"
+                                accept="application/pdf,text/plain,image/*"
+                                id="editRubricFile"
+                                onChange={handleRubricFileChange}
+                                style={{ display: 'none' }}
+                              />
+                              <Button
+                                component="label"
+                                htmlFor="editRubricFile"
+                                variant="outlined"
+                                size="small"
+                                sx={{
+                                  color: 'text.primary',
+                                  borderColor: '#cbd5e1',
+                                  fontWeight: 650,
+                                  textTransform: 'none',
+                                }}
+                              >
+                                Datei auswählen
+                              </Button>
+                              <Button
+                                variant="outlined"
+                                size="small"
+                                startIcon={<QrCodeScannerIcon />}
+                                onClick={() => {
+                                  setQrTargetMode('RUBRIC');
+                                  setQrStudent(null);
+                                  setQrOpen(true);
+                                }}
+                                sx={{
+                                  color: '#1b77d1',
+                                  borderColor: '#1b77d1',
+                                  fontWeight: 700,
+                                  textTransform: 'none',
+                                }}
+                              >
+                                Per Smartphone scannen (QR)
+                              </Button>
+                            </Stack>
+                          </Stack>
+                        )}
+                      </>
                     )}
 
                     <TextField
@@ -960,6 +1259,66 @@ export default function ExamDetailsPage() {
                       sx={{ '& .MuiOutlinedInput-root': { borderRadius: '8px' } }}
                     />
                   </Stack>
+                ) : activeArtifactTab === 'TEMPLATE' ? (
+                  <Box
+                    sx={{
+                      p: 2.5,
+                      borderRadius: '8px',
+                      backgroundColor: '#f8fafc',
+                      border: '1px solid #e2e8f0',
+                      flexGrow: 1,
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: 1.5,
+                    }}
+                  >
+                    <Box
+                      sx={{
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        alignItems: 'center',
+                      }}
+                    >
+                      <Typography
+                        variant="caption"
+                        sx={{ fontWeight: 700, color: 'text.secondary' }}
+                      >
+                        Druckreifes Aufgabenblatt für Schülerinnen und Schüler
+                      </Typography>
+                      {exam?.isApproved !== false && (
+                        <Link
+                          href={`/exams/${examId}/print-task-sheet`}
+                          passHref
+                          style={{ textDecoration: 'none' }}
+                        >
+                          <Button
+                            size="small"
+                            variant="outlined"
+                            startIcon={<PrintIcon />}
+                            sx={{ textTransform: 'none', borderRadius: '6px', fontWeight: 700 }}
+                          >
+                            Druckansicht öffnen
+                          </Button>
+                        </Link>
+                      )}
+                    </Box>
+                    <Box
+                      sx={{
+                        p: 2,
+                        borderRadius: '6px',
+                        backgroundColor: '#ffffff',
+                        border: '1px solid #e2e8f0',
+                        fontFamily: 'inherit',
+                        fontSize: '0.88rem',
+                        whiteSpace: 'pre-wrap',
+                        color: '#1e293b',
+                        maxHeight: '360px',
+                        overflowY: 'auto',
+                      }}
+                    >
+                      {exam?.examTemplateText || 'Kein Aufgabenblatt hinterlegt.'}
+                    </Box>
+                  </Box>
                 ) : (
                   <Box
                     sx={{
@@ -1060,6 +1419,7 @@ export default function ExamDetailsPage() {
                                 maxWidth: '100%',
                                 maxHeight: '180px',
                                 display: 'flex',
+                                justifySelf: 'center',
                                 justifyContent: 'center',
                               }}
                             >
@@ -1148,6 +1508,142 @@ export default function ExamDetailsPage() {
             </Card>
           </Grid>
         </Grid>
+
+        {/* 2a. Prüfungsaufgaben & Bepunktung (mit Quellenbezug und Einzelaufgabe-Regenerierung) */}
+        {exam?.tasks && exam.tasks.length > 0 && (
+          <Card sx={{ borderRadius: '12px', border: '1px solid #e2e8f0', boxShadow: 'none' }}>
+            <CardContent sx={{ p: 3 }}>
+              <Stack
+                direction="row"
+                sx={{
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  flexWrap: 'wrap',
+                  gap: 1.5,
+                  mb: 2,
+                }}
+              >
+                <Box>
+                  <Typography variant="h6" sx={{ fontWeight: 850, color: '#0f172a' }}>
+                    Prüfungsaufgaben &amp; Bepunktung
+                  </Typography>
+                  <Typography variant="body2" sx={{ color: 'text.secondary' }}>
+                    {exam?.isGenerated
+                      ? 'Aus Unterrichtsmaterial generierte Aufgaben mit nachvollziehbarem Quellenbezug.'
+                      : 'Hinterlegte Aufgabenstellungen und Punkteverteilung.'}
+                  </Typography>
+                </Box>
+                <Chip
+                  label={`${exam.tasks.length} Aufgaben • ${exam.maxPoints} Punkte`}
+                  sx={{ fontWeight: 700, backgroundColor: '#f1f5f9' }}
+                />
+              </Stack>
+
+              <TableContainer
+                component={Box}
+                sx={{ border: '1px solid #f1f5f9', borderRadius: '8px', overflow: 'hidden' }}
+              >
+                <Table size="small">
+                  <TableHead sx={{ backgroundColor: '#f8fafc' }}>
+                    <TableRow>
+                      <TableCell sx={{ fontWeight: 'bold', width: '60px' }}>Nr.</TableCell>
+                      <TableCell sx={{ fontWeight: 'bold' }}>Aufgabenstellung / Titel</TableCell>
+                      <TableCell sx={{ fontWeight: 'bold', width: '130px' }}>Max. Punkte</TableCell>
+                      <TableCell sx={{ fontWeight: 'bold', minWidth: '180px' }}>
+                        Quellenbezug
+                      </TableCell>
+                      <TableCell sx={{ fontWeight: 'bold', width: '180px', textAlign: 'right' }}>
+                        Aktion
+                      </TableCell>
+                    </TableRow>
+                  </TableHead>
+                  <TableBody>
+                    {exam.tasks.map((task, idx) => (
+                      <TableRow key={task.id || task.taskId || idx} hover>
+                        <TableCell sx={{ fontWeight: 700, color: 'text.secondary' }}>
+                          {task.orderIndex !== undefined ? task.orderIndex + 1 : idx + 1}
+                        </TableCell>
+                        <TableCell sx={{ fontWeight: 600, color: '#0f172a' }}>
+                          {task.title}
+                        </TableCell>
+                        <TableCell sx={{ fontWeight: 700 }}>{task.maxPoints} Pkt.</TableCell>
+                        <TableCell>
+                          {task.sourceReference ? (
+                            <Chip
+                              label={task.sourceReference}
+                              size="small"
+                              variant="outlined"
+                              sx={{
+                                fontWeight: 650,
+                                fontSize: '0.75rem',
+                                borderColor: '#cbd5e1',
+                                backgroundColor: '#f8fafc',
+                                color: '#334155',
+                              }}
+                            />
+                          ) : (
+                            <Typography variant="caption" sx={{ color: 'text.secondary' }}>
+                              —
+                            </Typography>
+                          )}
+                        </TableCell>
+                        <TableCell sx={{ textAlign: 'right' }}>
+                          {exam.isGenerated && !exam.isApproved ? (
+                            <Button
+                              size="small"
+                              variant="outlined"
+                              startIcon={
+                                <AutoAwesomeIcon sx={{ fontSize: '0.95rem !important' }} />
+                              }
+                              onClick={() => {
+                                setRegenTaskId(task.taskId || task.id);
+                                setRegenTaskTitle(task.title);
+                                setRegenInstructions('');
+                                setRegenError('');
+                                setRegenDialogOpen(true);
+                              }}
+                              sx={{
+                                textTransform: 'none',
+                                fontWeight: 700,
+                                borderRadius: '6px',
+                                fontSize: '0.78rem',
+                                borderColor: '#cbd5e1',
+                                color: '#0f172a',
+                                '&:hover': {
+                                  borderColor: '#0f172a',
+                                  backgroundColor: '#f8fafc',
+                                },
+                              }}
+                            >
+                              Neu generieren
+                            </Button>
+                          ) : exam.isGenerated && exam.isApproved ? (
+                            <Chip
+                              icon={<LockIcon sx={{ fontSize: '0.75rem !important' }} />}
+                              label="Eingefroren"
+                              size="small"
+                              sx={{
+                                fontWeight: 700,
+                                fontSize: '0.72rem',
+                                height: 22,
+                                backgroundColor: '#f1f5f9',
+                                color: '#64748b',
+                              }}
+                            />
+                          ) : (
+                            <Typography variant="caption" sx={{ color: 'text.secondary' }}>
+                              —
+                            </Typography>
+                          )}
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </TableContainer>
+            </CardContent>
+          </Card>
+        )}
 
         {/* 2b. Aufgabenanalyse */}
         <Card sx={{ borderRadius: '12px', border: '1px solid #e2e8f0', boxShadow: 'none' }}>
@@ -1767,6 +2263,7 @@ export default function ExamDetailsPage() {
                                 color="success"
                                 size="small"
                                 startIcon={<PlayArrowIcon />}
+                                disabled={exam?.isApproved === false}
                                 onClick={() => {
                                   setQrTargetMode('SUBMISSION');
                                   setQrStudent({
@@ -1790,6 +2287,67 @@ export default function ExamDetailsPage() {
             )}
           </CardContent>
         </Card>
+
+        {/* Single-Task Regenerate Dialog */}
+        <Dialog
+          open={regenDialogOpen}
+          onClose={(_e, reason) => {
+            if (regenLoading || reason === 'backdropClick') return;
+            setRegenDialogOpen(false);
+          }}
+          maxWidth="sm"
+          fullWidth
+        >
+          <DialogTitle sx={{ fontWeight: 800, color: '#0f172a' }}>
+            Aufgabe neu generieren
+          </DialogTitle>
+          <DialogContent>
+            <Stack spacing={2} sx={{ mt: 1 }}>
+              {regenError && <Alert severity="error">{regenError}</Alert>}
+              <Typography variant="body2" sx={{ color: 'text.secondary' }}>
+                Die Aufgabe <strong>{regenTaskTitle}</strong> wird basierend auf dem hinterlegten
+                Unterrichtsmaterial neu generiert. Alle anderen Aufgaben sowie deine bisherigen
+                Anpassungen bleiben unverändert erhalten.
+              </Typography>
+              <TextField
+                label="Spezifische Anweisungen (optional)"
+                placeholder="z.B. Mehr Fokus auf Textverständnis legen, Schwierigkeitsgrad erhöhen, etc."
+                multiline
+                rows={3}
+                fullWidth
+                value={regenInstructions}
+                onChange={(e) => setRegenInstructions(e.target.value)}
+                sx={{ '& .MuiOutlinedInput-root': { borderRadius: '8px' } }}
+              />
+            </Stack>
+          </DialogContent>
+          <DialogActions sx={{ p: 2, pt: 0 }}>
+            <Button
+              onClick={() => setRegenDialogOpen(false)}
+              disabled={regenLoading}
+              sx={{ textTransform: 'none', fontWeight: 650 }}
+            >
+              Abbrechen
+            </Button>
+            <Button
+              onClick={handleRegenerateTask}
+              variant="contained"
+              disabled={regenLoading}
+              startIcon={
+                regenLoading ? <CircularProgress size={18} color="inherit" /> : <AutoAwesomeIcon />
+              }
+              sx={{
+                textTransform: 'none',
+                fontWeight: 700,
+                backgroundColor: '#0f172a',
+                '&:hover': { backgroundColor: '#1e293b' },
+                borderRadius: '8px',
+              }}
+            >
+              {regenLoading ? 'Generierung läuft...' : 'Aufgabe neu generieren'}
+            </Button>
+          </DialogActions>
+        </Dialog>
 
         {/* Duplicate Exam Dialog */}
         <Dialog

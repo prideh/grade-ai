@@ -3,6 +3,7 @@ import { db } from '@/lib/db';
 import { getSession } from '@/lib/session';
 import { computeTaskAnalysis } from '@/lib/task-analysis';
 import { serverCache, CacheTags, invalidateExamCache } from '@/lib/cache';
+import { parseExamMetadata, embedExamMetadata, isExamApproved } from '@/lib/exam-meta';
 
 // GET: Fetch exam details, statistics, and submissions tracking (all class students)
 export async function GET(request: Request, { params }: { params: Promise<{ id: string }> }) {
@@ -144,7 +145,12 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
       gradeDistribution,
     };
 
-    const taskAnalysis = computeTaskAnalysis(exam.tasks, exam.submissions);
+    const { metadata, cleanNotes } = parseExamMetadata(exam.gradingNotes);
+    const enrichedTasks = exam.tasks.map((t) => ({
+      ...t,
+      sourceReference: metadata.taskSources?.[t.taskId] || null,
+    }));
+    const taskAnalysis = computeTaskAnalysis(enrichedTasks, exam.submissions);
 
     const responsePayload = {
       exam: {
@@ -154,13 +160,19 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
         maxPoints: exam.maxPoints,
         rubricText: exam.rubricText,
         examTemplateText: exam.examTemplateText,
-        gradingNotes: exam.gradingNotes,
+        gradingNotes: cleanNotes,
+        rawGradingNotes: exam.gradingNotes,
+        isGenerated: metadata.isGenerated,
+        isApproved: metadata.isApproved,
+        approvedAt: metadata.approvedAt,
+        generatorParams: metadata.generatorParams,
+        taskSources: metadata.taskSources,
         gradingFormula: exam.gradingFormula,
         gradeRounding: exam.gradeRounding,
         classId: exam.classId,
         className: exam.class.name,
         createdAt: exam.createdAt.toLocaleDateString('de-CH'),
-        tasks: exam.tasks,
+        tasks: enrichedTasks,
       },
       stats,
       roster: submissionsTracker,
@@ -220,6 +232,22 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
       return NextResponse.json({ error: 'Nicht autorisiert.' }, { status: 403 });
     }
 
+    const { metadata: existingMeta } = parseExamMetadata(exam.gradingNotes);
+
+    // Freezing gate: Approved generated exams are strictly immutable
+    if (existingMeta.isGenerated && existingMeta.isApproved) {
+      return NextResponse.json(
+        {
+          error:
+            'Eingefrorene Prüfungen können nicht nachträglich verändert werden. Der Stand ist finalisiert.',
+        },
+        { status: 400 }
+      );
+    }
+
+    const finalGradingNotes =
+      gradingNotes !== undefined ? embedExamMetadata(gradingNotes, existingMeta) : undefined;
+
     let finalMaxPoints = Number(maxPoints) !== undefined ? Number(maxPoints) : exam.maxPoints;
     if (Array.isArray(tasks)) {
       finalMaxPoints = tasks.reduce((sum, t) => sum + (Number(t.maxPoints) || 0), 0);
@@ -237,7 +265,7 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
           subject: subject !== undefined ? subject.trim() : undefined,
           rubricText: rubricText !== undefined ? rubricText : undefined,
           examTemplateText: examTemplateText !== undefined ? examTemplateText : undefined,
-          gradingNotes: gradingNotes !== undefined ? gradingNotes : undefined,
+          gradingNotes: finalGradingNotes,
           gradingFormula: gradingFormula !== undefined ? gradingFormula : undefined,
           gradeRounding: gradeRounding !== undefined ? gradeRounding : undefined,
           maxPoints: finalMaxPoints,

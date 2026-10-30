@@ -20,6 +20,7 @@ import {
   setCachedLlmResult,
   LLM_PROMPT_VERSIONS,
 } from '@/lib/llm-cache';
+import { isExamApproved } from '@/lib/exam-meta';
 import crypto from 'crypto';
 
 // Allowed student exam MIME types and safe file extensions
@@ -159,6 +160,15 @@ export async function POST(request: Request) {
         return NextResponse.json(
           { error: 'Ausgewählte Prüfung existiert nicht in dieser Klasse.' },
           { status: 404 }
+        );
+      }
+      if (!isExamApproved(existingExam)) {
+        return NextResponse.json(
+          {
+            error:
+              'Die Prüfung ist ein noch ungeprüfter Entwurf und muss vor der Korrektur freigegeben werden.',
+          },
+          { status: 400 }
         );
       }
       if (existingExam.rubricText.startsWith('{"mimeType":')) {
