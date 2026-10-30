@@ -31,10 +31,12 @@ import {
   MenuItem,
   FormControl,
   InputLabel,
+  ButtonGroup,
 } from '@mui/material';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import { getErrorMessage } from '@/lib/api-error';
 import AddIcon from '@mui/icons-material/Add';
+import GroupAddIcon from '@mui/icons-material/GroupAdd';
 import DeleteIcon from '@mui/icons-material/Delete';
 import EditIcon from '@mui/icons-material/Edit';
 import SwapHorizIcon from '@mui/icons-material/SwapHoriz';
@@ -87,6 +89,14 @@ interface SimpleClassInfo {
   name: string;
 }
 
+interface BulkStudentItem {
+  id: string;
+  name: string;
+  isExistingDuplicate: boolean;
+  isInputDuplicate: boolean;
+  decision: 'add' | 'skip';
+}
+
 export default function ClassDetailsPage() {
   const router = useRouter();
   const params = useParams();
@@ -124,6 +134,115 @@ export default function ClassDetailsPage() {
     setEditClassError('');
     setEditedClassName(classData?.name || '');
     setOpenEditClass(true);
+  };
+
+  // Bulk Add Dialog State
+  const [openBulkAdd, setOpenBulkAdd] = useState(false);
+  const [bulkInputText, setBulkInputText] = useState('');
+  const [bulkStep, setBulkStep] = useState<'input' | 'preview' | 'result'>('input');
+  const [bulkParsedItems, setBulkParsedItems] = useState<BulkStudentItem[]>([]);
+  const [bulkLoading, setBulkLoading] = useState(false);
+  const [bulkResult, setBulkResult] = useState<{
+    added: number;
+    skipped: number;
+    failed: number;
+    failedDetails: { name: string; error: string }[];
+  } | null>(null);
+  const [bulkError, setBulkError] = useState('');
+
+  const handleOpenBulkAdd = () => {
+    setBulkInputText('');
+    setBulkStep('input');
+    setBulkParsedItems([]);
+    setBulkResult(null);
+    setBulkError('');
+    setOpenBulkAdd(true);
+  };
+
+  const handleParseBulkInput = () => {
+    const lines = bulkInputText
+      .split('\n')
+      .map((l) => l.trim())
+      .filter((l) => l.length > 0);
+
+    if (lines.length === 0) {
+      setBulkError('Bitte gib mindestens einen Schülernamen ein.');
+      return;
+    }
+
+    setBulkError('');
+
+    const inputCounts = new Map<string, number>();
+    for (const name of lines) {
+      const lower = name.toLowerCase();
+      inputCounts.set(lower, (inputCounts.get(lower) || 0) + 1);
+    }
+
+    const existingSet = new Set(students.map((s) => s.name.trim().toLowerCase()));
+
+    const items: BulkStudentItem[] = lines.map((name, index) => {
+      const lower = name.toLowerCase();
+      const isExistingDuplicate = existingSet.has(lower);
+      const isInputDuplicate = (inputCounts.get(lower) || 0) > 1;
+      const isFlagged = isExistingDuplicate || isInputDuplicate;
+
+      return {
+        id: `bulk-${index}-${name}`,
+        name,
+        isExistingDuplicate,
+        isInputDuplicate,
+        decision: isFlagged ? 'skip' : 'add',
+      };
+    });
+
+    setBulkParsedItems(items);
+    setBulkStep('preview');
+  };
+
+  const handleConfirmBulkAdd = async () => {
+    setBulkLoading(true);
+    setBulkError('');
+
+    const itemsToAdd = bulkParsedItems.filter((item) => item.decision === 'add');
+    const skippedCount = bulkParsedItems.filter((item) => item.decision === 'skip').length;
+
+    let addedCount = 0;
+    const failedDetails: { name: string; error: string }[] = [];
+
+    for (const item of itemsToAdd) {
+      try {
+        const res = await fetch(`/api/classes/${classId}/students`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name: item.name }),
+        });
+
+        if (!res.ok) {
+          const errorMsg = await getErrorMessage(res, 'Fehler beim Erstellen.');
+          failedDetails.push({ name: item.name, error: errorMsg });
+        } else {
+          addedCount++;
+        }
+      } catch (err) {
+        failedDetails.push({
+          name: item.name,
+          error: err instanceof Error ? err.message : 'Netzwerkfehler',
+        });
+      }
+    }
+
+    // Refresh roster after creating students
+    await fetchData();
+
+    setBulkResult({
+      added: addedCount,
+      skipped: skippedCount,
+      failed: failedDetails.length,
+      failedDetails,
+    });
+
+    setBulkStep('result');
+    setBulkLoading(false);
   };
 
   // Fetch Class Details
@@ -682,28 +801,68 @@ export default function ClassDetailsPage() {
                   Klassenliste (Schüler/innen)
                 </Typography>
               </Stack>
-              <Button
-                variant="outlined"
-                startIcon={<AddIcon />}
-                onClick={() => setOpenAddStudent(true)}
-                sx={{
-                  borderRadius: '8px',
-                  textTransform: 'none',
-                  fontWeight: 650,
-                  fontSize: '0.85rem',
-                }}
-              >
-                Schüler/in hinzufügen
-              </Button>
+              <Stack direction="row" spacing={1} sx={{ flexWrap: 'wrap' }}>
+                <Button
+                  variant="outlined"
+                  startIcon={<GroupAddIcon />}
+                  onClick={handleOpenBulkAdd}
+                  sx={{
+                    borderRadius: '8px',
+                    textTransform: 'none',
+                    fontWeight: 650,
+                    fontSize: '0.85rem',
+                  }}
+                >
+                  Mehrere Schüler hinzufügen
+                </Button>
+                <Button
+                  variant="outlined"
+                  startIcon={<AddIcon />}
+                  onClick={() => setOpenAddStudent(true)}
+                  sx={{
+                    borderRadius: '8px',
+                    textTransform: 'none',
+                    fontWeight: 650,
+                    fontSize: '0.85rem',
+                  }}
+                >
+                  Schüler/in hinzufügen
+                </Button>
+              </Stack>
             </Box>
 
             {students.length === 0 ? (
-              <Typography
-                variant="body2"
-                sx={{ color: 'text.secondary', fontStyle: 'italic', py: 4, textAlign: 'center' }}
-              >
-                Bisher sind keine Schüler/innen eingeschrieben.
-              </Typography>
+              <Box sx={{ py: 4, textAlign: 'center' }}>
+                <Typography
+                  variant="body2"
+                  sx={{ color: 'text.secondary', fontStyle: 'italic', mb: 2 }}
+                >
+                  Bisher sind keine Schüler/innen eingeschrieben.
+                </Typography>
+                <Stack direction="row" spacing={1.5} sx={{ justifyContent: 'center' }}>
+                  <Button
+                    variant="outlined"
+                    startIcon={<GroupAddIcon />}
+                    onClick={handleOpenBulkAdd}
+                    sx={{ borderRadius: '8px', textTransform: 'none', fontWeight: 650 }}
+                  >
+                    Mehrere Schüler hinzufügen
+                  </Button>
+                  <Button
+                    variant="contained"
+                    startIcon={<AddIcon />}
+                    onClick={() => setOpenAddStudent(true)}
+                    sx={{
+                      borderRadius: '8px',
+                      textTransform: 'none',
+                      fontWeight: 650,
+                      backgroundColor: '#1b77d1',
+                    }}
+                  >
+                    Schüler/in hinzufügen
+                  </Button>
+                </Stack>
+              </Box>
             ) : (
               <TableContainer
                 component={Box}
@@ -921,6 +1080,312 @@ export default function ClassDetailsPage() {
         </Card>
 
         {/* --- Dialogs --- */}
+
+        {/* Bulk Add Students Dialog */}
+        <Dialog
+          open={openBulkAdd}
+          onClose={(_e, reason) => {
+            if (bulkLoading || reason === 'backdropClick') return;
+            setOpenBulkAdd(false);
+          }}
+          maxWidth="sm"
+          fullWidth
+        >
+          <DialogTitle sx={{ fontWeight: 800, color: '#0f172a' }}>
+            Mehrere Schüler hinzufügen
+          </DialogTitle>
+          <DialogContent>
+            {bulkStep === 'input' && (
+              <Stack spacing={2} sx={{ mt: 1 }}>
+                {bulkError && <Alert severity="error">{bulkError}</Alert>}
+                <Typography variant="body2" sx={{ color: 'text.secondary' }}>
+                  Füge hier eine Liste von Namen ein (ein Name pro Zeile). Leere Zeilen und
+                  umgebende Leerzeichen werden automatisch ignoriert.
+                </Typography>
+                <TextField
+                  label="Schülernamen (ein Name pro Zeile)"
+                  placeholder="Anna Meier&#10;Lukas Keller&#10;Sophie Müller"
+                  multiline
+                  rows={8}
+                  fullWidth
+                  variant="outlined"
+                  value={bulkInputText}
+                  onChange={(e) => setBulkInputText(e.target.value)}
+                  autoFocus
+                  sx={{ '& .MuiOutlinedInput-root': { borderRadius: '8px' } }}
+                />
+              </Stack>
+            )}
+
+            {bulkStep === 'preview' && (
+              <Stack spacing={2} sx={{ mt: 1 }}>
+                {bulkError && <Alert severity="error">{bulkError}</Alert>}
+                <Typography variant="body2" sx={{ color: 'text.secondary' }}>
+                  Überprüfe die erkannten Namen. Mögliche Duplikate sind hervorgehoben – wähle pro
+                  markiertem Schüler bewusst, ob dieser trotzdem hinzugefügt oder übersprungen
+                  werden soll.
+                </Typography>
+
+                <Box
+                  sx={{
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                    flexWrap: 'wrap',
+                    gap: 1,
+                  }}
+                >
+                  <Typography variant="subtitle2" sx={{ fontWeight: 700, color: '#334155' }}>
+                    Vorschau: {bulkParsedItems.length} Namen erkannt
+                  </Typography>
+                  <Stack direction="row" spacing={1}>
+                    <Button
+                      size="small"
+                      onClick={() => {
+                        setBulkParsedItems((prev) =>
+                          prev.map((item) => ({ ...item, decision: 'add' }))
+                        );
+                      }}
+                      sx={{ textTransform: 'none', fontSize: '0.8rem' }}
+                    >
+                      Alle hinzufügen
+                    </Button>
+                    <Button
+                      size="small"
+                      onClick={() => {
+                        setBulkParsedItems((prev) =>
+                          prev.map((item) => ({
+                            ...item,
+                            decision:
+                              item.isExistingDuplicate || item.isInputDuplicate ? 'skip' : 'add',
+                          }))
+                        );
+                      }}
+                      sx={{ textTransform: 'none', fontSize: '0.8rem' }}
+                    >
+                      Duplikate überspringen
+                    </Button>
+                  </Stack>
+                </Box>
+
+                <Box
+                  sx={{
+                    maxHeight: '360px',
+                    overflowY: 'auto',
+                    border: '1px solid #e2e8f0',
+                    borderRadius: '8px',
+                    p: 1.5,
+                  }}
+                >
+                  <Stack spacing={1.5}>
+                    {bulkParsedItems.map((item) => {
+                      const isFlagged = item.isExistingDuplicate || item.isInputDuplicate;
+                      return (
+                        <Box
+                          key={item.id}
+                          sx={{
+                            p: 1.5,
+                            borderRadius: '8px',
+                            border: isFlagged ? '1px solid #fcd34d' : '1px solid #f1f5f9',
+                            backgroundColor: isFlagged ? '#fffbeb' : '#f8fafc',
+                            display: 'flex',
+                            justifyContent: 'space-between',
+                            alignItems: 'center',
+                            flexWrap: 'wrap',
+                            gap: 1.5,
+                          }}
+                        >
+                          <Box sx={{ minWidth: '180px' }}>
+                            <Typography sx={{ fontWeight: 700, color: '#0f172a' }}>
+                              {item.name}
+                            </Typography>
+                            {item.isExistingDuplicate && (
+                              <Chip
+                                label="Bereits in dieser Klasse vorhanden"
+                                size="small"
+                                color="warning"
+                                sx={{ mt: 0.5, mr: 0.5, fontSize: '0.7rem', height: '22px' }}
+                              />
+                            )}
+                            {item.isInputDuplicate && (
+                              <Chip
+                                label="Mehrfach in dieser Eingabe enthalten"
+                                size="small"
+                                color="warning"
+                                sx={{ mt: 0.5, fontSize: '0.7rem', height: '22px' }}
+                              />
+                            )}
+                          </Box>
+
+                          <ButtonGroup size="small">
+                            <Button
+                              variant={item.decision === 'add' ? 'contained' : 'outlined'}
+                              color={item.decision === 'add' ? 'primary' : 'inherit'}
+                              onClick={() => {
+                                setBulkParsedItems((prev) =>
+                                  prev.map((i) =>
+                                    i.id === item.id ? { ...i, decision: 'add' } : i
+                                  )
+                                );
+                              }}
+                              sx={{
+                                textTransform: 'none',
+                                fontWeight: 650,
+                                fontSize: '0.8rem',
+                              }}
+                              title="Trotzdem hinzufügen (add anyway)"
+                            >
+                              {isFlagged ? 'Trotzdem hinzufügen' : 'Hinzufügen'}
+                            </Button>
+                            <Button
+                              variant={item.decision === 'skip' ? 'contained' : 'outlined'}
+                              color={item.decision === 'skip' ? 'warning' : 'inherit'}
+                              onClick={() => {
+                                setBulkParsedItems((prev) =>
+                                  prev.map((i) =>
+                                    i.id === item.id ? { ...i, decision: 'skip' } : i
+                                  )
+                                );
+                              }}
+                              sx={{
+                                textTransform: 'none',
+                                fontWeight: 650,
+                                fontSize: '0.8rem',
+                              }}
+                              title="Überspringen (skip)"
+                            >
+                              Überspringen
+                            </Button>
+                          </ButtonGroup>
+                        </Box>
+                      );
+                    })}
+                  </Stack>
+                </Box>
+
+                <Typography variant="caption" sx={{ color: 'text.secondary', fontWeight: 600 }}>
+                  Auswahl: {bulkParsedItems.filter((i) => i.decision === 'add').length} werden
+                  hinzugefügt, {bulkParsedItems.filter((i) => i.decision === 'skip').length} werden
+                  übersprungen.
+                </Typography>
+              </Stack>
+            )}
+
+            {bulkStep === 'result' && bulkResult && (
+              <Stack spacing={2} sx={{ mt: 1 }}>
+                <Alert
+                  severity={
+                    bulkResult.failed > 0 ? 'warning' : bulkResult.added > 0 ? 'success' : 'info'
+                  }
+                  sx={{ fontWeight: 600 }}
+                >
+                  <Typography variant="body1" sx={{ fontWeight: 700, mb: 0.5 }}>
+                    {bulkResult.added} hinzugefügt, {bulkResult.skipped} übersprungen,{' '}
+                    {bulkResult.failed} fehlgeschlagen
+                  </Typography>
+                  <Typography variant="caption" sx={{ color: 'text.secondary', display: 'block' }}>
+                    ({bulkResult.added} added, {bulkResult.skipped} skipped by choice,{' '}
+                    {bulkResult.failed} failed)
+                  </Typography>
+                </Alert>
+
+                {bulkResult.failedDetails.length > 0 && (
+                  <Box sx={{ mt: 1 }}>
+                    <Typography
+                      variant="subtitle2"
+                      sx={{ fontWeight: 700, color: '#b91c1c', mb: 1 }}
+                    >
+                      Fehlgeschlagene Schüler/innen:
+                    </Typography>
+                    <Stack spacing={1}>
+                      {bulkResult.failedDetails.map((f, i) => (
+                        <Alert key={i} severity="error" sx={{ py: 0.5, px: 2 }}>
+                          <strong>{f.name}</strong>: {f.error}
+                        </Alert>
+                      ))}
+                    </Stack>
+                  </Box>
+                )}
+              </Stack>
+            )}
+          </DialogContent>
+
+          <DialogActions sx={{ p: 2, pt: 0 }}>
+            {bulkStep === 'input' && (
+              <>
+                <Button
+                  onClick={() => setOpenBulkAdd(false)}
+                  sx={{ textTransform: 'none', fontWeight: 650 }}
+                >
+                  Abbrechen
+                </Button>
+                <Button
+                  variant="contained"
+                  onClick={handleParseBulkInput}
+                  disabled={!bulkInputText.trim()}
+                  sx={{
+                    textTransform: 'none',
+                    fontWeight: 700,
+                    backgroundColor: '#1b77d1',
+                    borderRadius: '8px',
+                  }}
+                >
+                  Vorschau anzeigen
+                </Button>
+              </>
+            )}
+
+            {bulkStep === 'preview' && (
+              <>
+                <Button
+                  onClick={() => setBulkStep('input')}
+                  disabled={bulkLoading}
+                  sx={{ textTransform: 'none', fontWeight: 650 }}
+                >
+                  Zurück zur Eingabe
+                </Button>
+                <Button
+                  variant="contained"
+                  onClick={handleConfirmBulkAdd}
+                  disabled={
+                    bulkLoading || bulkParsedItems.filter((i) => i.decision === 'add').length === 0
+                  }
+                  sx={{
+                    textTransform: 'none',
+                    fontWeight: 700,
+                    backgroundColor: '#1b77d1',
+                    borderRadius: '8px',
+                  }}
+                >
+                  {bulkLoading ? (
+                    <CircularProgress size={20} color="inherit" />
+                  ) : (
+                    `${bulkParsedItems.filter((i) => i.decision === 'add').length} Schüler/innen hinzufügen`
+                  )}
+                </Button>
+              </>
+            )}
+
+            {bulkStep === 'result' && (
+              <Button
+                variant="contained"
+                onClick={() => {
+                  setOpenBulkAdd(false);
+                  setBulkStep('input');
+                  setBulkResult(null);
+                }}
+                sx={{
+                  textTransform: 'none',
+                  fontWeight: 700,
+                  backgroundColor: '#1b77d1',
+                  borderRadius: '8px',
+                }}
+              >
+                Fertig
+              </Button>
+            )}
+          </DialogActions>
+        </Dialog>
 
         {/* Add Student Dialog */}
         <Dialog
