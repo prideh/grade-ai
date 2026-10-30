@@ -45,4 +45,23 @@ test.describe('Smoke Tests — Critical Availability, Security Boundaries & Orth
       page.getByText(/QR-Code ist abgelaufen oder ungültig|nicht verifiziert/i).first()
     ).toBeVisible();
   });
+
+  test('5. Baseline HTTP security headers are set on page and API responses', async ({
+    page,
+    request,
+  }) => {
+    const pageRes = await page.goto('/login');
+    const pageHeaders = pageRes?.headers() || {};
+    expect(pageHeaders['strict-transport-security']).toContain('max-age=63072000');
+    expect(pageHeaders['x-content-type-options']).toBe('nosniff');
+    expect(pageHeaders['x-frame-options']).toBe('DENY');
+    expect(pageHeaders['referrer-policy']).toBe('strict-origin-when-cross-origin');
+
+    const apiRes = await request.get('/api/auth/me');
+    const apiHeaders = apiRes.headers();
+    expect(apiHeaders['strict-transport-security']).toContain('max-age=63072000');
+    expect(apiHeaders['x-content-type-options']).toBe('nosniff');
+    expect(apiHeaders['x-frame-options']).toBe('DENY');
+    expect(apiHeaders['referrer-policy']).toBe('strict-origin-when-cross-origin');
+  });
 });

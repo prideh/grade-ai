@@ -4,6 +4,22 @@ import { verifyJWT, signJWT } from '@/lib/jwt';
 
 const SESSION_COOKIE_NAME = 'grade_ai_session';
 
+export const SECURITY_HEADERS = {
+  'Strict-Transport-Security': 'max-age=63072000; includeSubDomains; preload',
+  'X-Content-Type-Options': 'nosniff',
+  'X-Frame-Options': 'DENY',
+  'Referrer-Policy': 'strict-origin-when-cross-origin',
+  // Content-Security-Policy (CSP): Deliberately deferred to prevent breaking MUI inline styles,
+  // camera video feeds, and client-side blob/data URLs until a verified nonce-based CSP is tested.
+} as const;
+
+export function applySecurityHeaders(response: NextResponse): NextResponse {
+  for (const [key, value] of Object.entries(SECURITY_HEADERS)) {
+    response.headers.set(key, value);
+  }
+  return response;
+}
+
 /**
  * Helper to dynamically refresh the stateless session token (sliding session)
  * if the remaining lifetime of the JWT is less than 3 days.
@@ -96,31 +112,38 @@ export async function proxy(request: NextRequest) {
     const response = NextResponse.redirect(new URL('/login', request.url));
     // Purge the old/invalid session cookie from the browser
     response.cookies.delete(SESSION_COOKIE_NAME);
-    return response;
+    return applySecurityHeaders(response);
   }
 
   // Redirect authenticated users away from login/register back to the dashboard
   if (user && (pathname === '/login' || pathname === '/register')) {
     const response = NextResponse.redirect(new URL('/dashboard', request.url));
-    return handleSlidingSession(response, payload, user.userId);
+    const slidingRes = await handleSlidingSession(response, payload, user.userId);
+    return applySecurityHeaders(slidingRes);
   }
 
   // Purge the cookie if it is present but invalid/expired to prevent redirect loops or invalid token fetches
   if (!user && session) {
     const response = NextResponse.next();
     response.cookies.delete(SESSION_COOKIE_NAME);
-    return response;
+    return applySecurityHeaders(response);
   }
 
   // Slide session for authenticated active users
   if (user) {
-    return handleSlidingSession(NextResponse.next(), payload, user.userId, request);
+    const slidingRes = await handleSlidingSession(
+      NextResponse.next(),
+      payload,
+      user.userId,
+      request
+    );
+    return applySecurityHeaders(slidingRes);
   }
 
-  return NextResponse.next();
+  return applySecurityHeaders(NextResponse.next());
 }
 
-// Intercept all page routes while bypassing static files, next assets, and api endpoints
+// Intercept all page and API routes while bypassing static files and next assets
 export const config = {
-  matcher: ['/((?!api|_next/static|_next/image|favicon.ico|sitemap.xml|robots.txt).*)'],
+  matcher: ['/((?!_next/static|_next/image|favicon.ico|sitemap.xml|robots.txt).*)'],
 };
