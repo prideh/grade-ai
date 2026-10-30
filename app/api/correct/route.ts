@@ -78,10 +78,9 @@ export async function POST(request: Request) {
     if (!apiKey) {
       return NextResponse.json(
         {
-          error:
-            'Gemini API-Schlüssel fehlt. Bitte trage deinen API-Schlüssel in der .env.local Datei ein.',
+          error: 'Gemini API-Schlüssel ist auf dem Server nicht konfiguriert.',
         },
-        { status: 401 }
+        { status: 500 }
       );
     }
 

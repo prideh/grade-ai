@@ -44,7 +44,7 @@ export async function POST(request: Request) {
     const apiKey = process.env.GEMINI_API_KEY;
     if (!apiKey) {
       return NextResponse.json(
-        { error: 'Gemini API-Schlüssel ist nicht konfiguriert.' },
+        { error: 'Gemini API-Schlüssel ist auf dem Server nicht konfiguriert.' },
         { status: 500 }
       );
     }
