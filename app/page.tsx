@@ -66,7 +66,45 @@ export default function Home() {
           </Typography>
         </Stack>
 
-        <Stack direction="row" spacing={2} sx={{ alignItems: 'center' }}></Stack>
+        <Stack direction="row" spacing={1.5} sx={{ alignItems: 'center' }}>
+          <Link href="/login" passHref style={{ textDecoration: 'none' }}>
+            <Button
+              variant="text"
+              sx={{
+                fontWeight: 650,
+                color: '#334155',
+                textTransform: 'none',
+                fontSize: { xs: '0.875rem', sm: '0.95rem' },
+                '&:hover': {
+                  color: '#1b77d1',
+                  backgroundColor: 'rgba(27, 119, 209, 0.04)',
+                },
+              }}
+            >
+              Login
+            </Button>
+          </Link>
+          <Link href="/register" passHref style={{ textDecoration: 'none' }}>
+            <Button
+              variant="contained"
+              sx={{
+                fontWeight: 650,
+                backgroundColor: '#1b77d1',
+                color: '#ffffff',
+                textTransform: 'none',
+                fontSize: { xs: '0.875rem', sm: '0.95rem' },
+                borderRadius: '8px',
+                boxShadow: 'none',
+                '&:hover': {
+                  backgroundColor: '#1565c0',
+                  boxShadow: '0 2px 8px rgba(27, 119, 209, 0.25)',
+                },
+              }}
+            >
+              Registrieren
+            </Button>
+          </Link>
+        </Stack>
       </Box>
 
       {/* Hero section */}
@@ -125,30 +163,63 @@ export default function Home() {
         </Typography>
 
         <Stack spacing={2} sx={{ alignItems: 'center' }}>
-          <Link href="/dashboard" passHref style={{ textDecoration: 'none' }}>
-            <Button
-              variant="contained"
-              size="large"
-              endIcon={<ArrowForwardIcon />}
-              sx={{
-                fontSize: '1.1rem',
-                padding: '14px 36px',
-                borderRadius: '8px',
-                minWidth: '260px',
-                backgroundColor: '#1b77d1',
-                color: '#ffffff',
-                textTransform: 'none',
-                fontWeight: 600,
-                boxShadow: '0 2px 8px rgba(27, 119, 209, 0.2)',
-                '&:hover': {
-                  backgroundColor: '#1565c0',
-                  boxShadow: '0 4px 12px rgba(27, 119, 209, 0.3)',
-                },
-              }}
-            >
-              Zum Korrektur-Workspace
-            </Button>
-          </Link>
+          <Stack
+            direction={{ xs: 'column', sm: 'row' }}
+            spacing={2}
+            sx={{
+              alignItems: 'center',
+              justifyContent: 'center',
+              width: { xs: '100%', sm: 'auto' },
+            }}
+          >
+            <Link href="/dashboard" passHref style={{ textDecoration: 'none', width: '100%' }}>
+              <Button
+                variant="contained"
+                size="large"
+                endIcon={<ArrowForwardIcon />}
+                sx={{
+                  fontSize: '1.1rem',
+                  padding: '14px 36px',
+                  borderRadius: '8px',
+                  minWidth: { xs: '100%', sm: '260px' },
+                  backgroundColor: '#1b77d1',
+                  color: '#ffffff',
+                  textTransform: 'none',
+                  fontWeight: 600,
+                  boxShadow: '0 2px 8px rgba(27, 119, 209, 0.2)',
+                  '&:hover': {
+                    backgroundColor: '#1565c0',
+                    boxShadow: '0 4px 12px rgba(27, 119, 209, 0.3)',
+                  },
+                }}
+              >
+                Zum Korrektur-Workspace
+              </Button>
+            </Link>
+            <Link href="/login" passHref style={{ textDecoration: 'none', width: '100%' }}>
+              <Button
+                variant="outlined"
+                size="large"
+                sx={{
+                  fontSize: '1.1rem',
+                  padding: '14px 28px',
+                  borderRadius: '8px',
+                  borderColor: '#cbd5e1',
+                  color: '#334155',
+                  textTransform: 'none',
+                  fontWeight: 600,
+                  minWidth: { xs: '100%', sm: 'auto' },
+                  '&:hover': {
+                    borderColor: '#1b77d1',
+                    color: '#1b77d1',
+                    backgroundColor: 'rgba(27, 119, 209, 0.04)',
+                  },
+                }}
+              >
+                Login / Registrieren
+              </Button>
+            </Link>
+          </Stack>
           <Typography
             variant="caption"
             sx={{ color: '#9e9e9e', fontSize: '0.85rem', fontWeight: 500 }}

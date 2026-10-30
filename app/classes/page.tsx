@@ -307,9 +307,27 @@ export default function ClassesPage() {
                     >
                       <Box>
                         <Stack direction="row" spacing={1} sx={{ alignItems: 'center', mb: 0.5 }}>
-                          <Typography variant="h6" sx={{ fontWeight: 800, color: '#0f172a' }}>
-                            {cls.name}
-                          </Typography>
+                          <Link
+                            href={`/classes/${cls.id}`}
+                            passHref
+                            style={{ textDecoration: 'none', color: 'inherit' }}
+                          >
+                            <Typography
+                              variant="h6"
+                              sx={{
+                                fontWeight: 800,
+                                color: '#0f172a',
+                                transition: 'color 0.15s ease',
+                                cursor: 'pointer',
+                                '&:hover': {
+                                  color: '#1b77d1',
+                                  textDecoration: 'underline',
+                                },
+                              }}
+                            >
+                              {cls.name}
+                            </Typography>
+                          </Link>
                           {cls.id === defaultClassId && (
                             <Chip
                               label="Standard"
