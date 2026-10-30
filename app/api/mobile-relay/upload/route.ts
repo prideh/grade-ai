@@ -26,6 +26,7 @@ import {
 import crypto from 'crypto';
 import { isExamApproved } from '@/lib/exam-meta';
 import { checkAiRateLimit, createRateLimitResponse } from '@/lib/rate-limit';
+import { validateRelayPages, createPayloadErrorResponse } from '@/lib/payload-limits';
 
 function parseStoredMaterial(
   rawText?: string | null
@@ -95,6 +96,12 @@ export async function POST(request: Request) {
         { error: 'Bitte mindestens eine Seite fotografieren.' },
         { status: 400 }
       );
+    }
+
+    // Size and page count limit check: reject before memory-heavy base64 encoding and LLM calls
+    const pagesValidation = validateRelayPages(rawPages);
+    if (!pagesValidation.valid) {
+      return createPayloadErrorResponse(pagesValidation);
     }
 
     const effectiveTargetMode = explicitTargetMode || payload.targetMode || 'SUBMISSION';

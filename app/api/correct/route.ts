@@ -22,6 +22,11 @@ import {
 } from '@/lib/llm-cache';
 import { isExamApproved } from '@/lib/exam-meta';
 import { checkAiRateLimit, createRateLimitResponse } from '@/lib/rate-limit';
+import {
+  validateScanFile,
+  validateRubricOrTemplatePayload,
+  createPayloadErrorResponse,
+} from '@/lib/payload-limits';
 import crypto from 'crypto';
 
 // Allowed student exam MIME types and safe file extensions
@@ -116,6 +121,29 @@ export async function POST(request: Request) {
         { error: 'Es wurde keine Schülerarbeit hochgeladen.' },
         { status: 400 }
       );
+    }
+
+    // Payload size validations: prevent excessive Gemini costs and storage bloat
+    const scanValidation = validateScanFile(studentExam, 'Die Schülerarbeit');
+    if (!scanValidation.valid) {
+      return createPayloadErrorResponse(scanValidation);
+    }
+
+    if (rubric) {
+      const rubricValidation = validateRubricOrTemplatePayload(rubric, 'Die Musterlösung');
+      if (!rubricValidation.valid) {
+        return createPayloadErrorResponse(rubricValidation);
+      }
+    }
+
+    if (examTemplate) {
+      const templateValidation = validateRubricOrTemplatePayload(
+        examTemplate,
+        'Die Prüfungsvorlage'
+      );
+      if (!templateValidation.valid) {
+        return createPayloadErrorResponse(templateValidation);
+      }
     }
 
     const safeFormat = resolveSafeFileFormat(studentExam);

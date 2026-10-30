@@ -6,6 +6,7 @@ import { embedExamMetadata } from '@/lib/exam-meta';
 import { invalidateExamCache } from '@/lib/cache';
 import { getStorageAdapter } from '@/lib/storage';
 import { checkAiRateLimit, createRateLimitResponse } from '@/lib/rate-limit';
+import { validateMaterialPayload, createPayloadErrorResponse } from '@/lib/payload-limits';
 
 export async function POST(request: Request) {
   try {
@@ -69,6 +70,12 @@ export async function POST(request: Request) {
         },
         { status: 400 }
       );
+    }
+
+    // Size limit check: prevent abusive or accidental oversized payloads from reaching Gemini or storage
+    const materialValidation = validateMaterialPayload(material);
+    if (!materialValidation.valid) {
+      return createPayloadErrorResponse(materialValidation);
     }
 
     if (!classId || typeof classId !== 'string') {

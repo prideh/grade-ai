@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { getSession } from '@/lib/session';
 import { checkAiRateLimit, createRateLimitResponse } from '@/lib/rate-limit';
+import { validateRubricOrTemplatePayload, createPayloadErrorResponse } from '@/lib/payload-limits';
 import { GoogleGenAI, Type, ThinkingLevel, type Schema } from '@google/genai';
 import { DEFAULT_GEMINI_MODEL, appendReferenceMaterialToContents } from '@/lib/gemini';
 import {
@@ -57,6 +58,12 @@ export async function POST(request: Request) {
 
     if (!rubricText) {
       return NextResponse.json({ error: 'Musterlösung fehlt.' }, { status: 400 });
+    }
+
+    // Size limit check for rubric payload
+    const validation = validateRubricOrTemplatePayload(rubricText, 'Die Musterlösung');
+    if (!validation.valid) {
+      return createPayloadErrorResponse(validation);
     }
 
     const rubricHash = computeRubricParseHash({
