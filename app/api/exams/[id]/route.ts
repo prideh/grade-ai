@@ -2,8 +2,9 @@ import { NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { getSession } from '@/lib/session';
 import { computeTaskAnalysis } from '@/lib/task-analysis';
-import { serverCache, CacheTags, invalidateExamCache } from '@/lib/cache';
+import { serverCache, CacheTags, invalidateExamCache, invalidateLogsCache } from '@/lib/cache';
 import { parseExamMetadata, embedExamMetadata, isExamApproved } from '@/lib/exam-meta';
+import { deleteExamScanFiles, StorageCleanupError } from '@/lib/storage-cleanup';
 
 // GET: Fetch exam details, statistics, and submissions tracking (all class students)
 export async function GET(request: Request, { params }: { params: Promise<{ id: string }> }) {
@@ -304,7 +305,7 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
   }
 }
 
-// DELETE: Delete exam (cascade deletes submissions)
+// DELETE: Delete exam (cleans up scan files in storage, then cascade deletes submissions)
 export async function DELETE(request: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
     const session = await getSession();
@@ -329,14 +330,34 @@ export async function DELETE(request: Request, { params }: { params: Promise<{ i
       return NextResponse.json({ error: 'Nicht autorisiert.' }, { status: 403 });
     }
 
+    // Storage-Bereinigung VOR der DB-Kaskadenloeschung ausfuehren.
+    // Schlaegt das Loeschen im Storage fehl, bricht der Vorgang ab und die DB-Referenzen bleiben erhalten.
+    await deleteExamScanFiles(examId);
+
     await db.exam.delete({
       where: { id: examId },
     });
 
     await invalidateExamCache(session.userId, examId, exam.classId);
+    await invalidateLogsCache(session.userId);
 
     return NextResponse.json({ success: true, message: 'Prüfung erfolgreich gelöscht.' });
   } catch (error) {
+    if (error instanceof StorageCleanupError) {
+      console.error(
+        'Storage-Bereinigung beim Löschen der Prüfung fehlgeschlagen:',
+        error.failedFiles
+      );
+      return NextResponse.json(
+        {
+          error:
+            'Löschen der zugehörigen Scan-Dateien fehlgeschlagen. Die Prüfung wurde in der Datenbank nicht gelöscht, um verwaiste Daten zu verhindern.',
+          failedFiles: error.failedFiles,
+        },
+        { status: 500 }
+      );
+    }
+
     console.error('Error deleting exam:', error);
     return NextResponse.json({ error: 'Fehler beim Löschen der Prüfung.' }, { status: 500 });
   }

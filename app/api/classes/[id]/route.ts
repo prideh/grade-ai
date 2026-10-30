@@ -1,7 +1,8 @@
 import { NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { getSession } from '@/lib/session';
-import { serverCache, CacheTags, invalidateClassCache } from '@/lib/cache';
+import { serverCache, CacheTags, invalidateClassCache, invalidateLogsCache } from '@/lib/cache';
+import { deleteClassScanFiles, StorageCleanupError } from '@/lib/storage-cleanup';
 
 // GET: Fetch class details, students roster, and class statistics
 export async function GET(request: Request, { params }: { params: Promise<{ id: string }> }) {
@@ -210,7 +211,7 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
   }
 }
 
-// DELETE: Delete class (cascade deletes all students, exams, and submissions via Prisma)
+// DELETE: Delete class (cleans up scan files in storage, then cascade deletes all students, exams, and submissions via Prisma)
 export async function DELETE(request: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
     const session = await getSession();
@@ -229,14 +230,34 @@ export async function DELETE(request: Request, { params }: { params: Promise<{ i
       return NextResponse.json({ error: 'Klasse nicht gefunden.' }, { status: 404 });
     }
 
+    // Storage-Bereinigung VOR der DB-Kaskadenloeschung ausfuehren.
+    // Schlaegt das Loeschen im Storage fehl, bricht der Vorgang ab und die DB-Referenzen bleiben erhalten.
+    await deleteClassScanFiles(classId);
+
     await db.class.delete({
       where: { id: classId },
     });
 
     await invalidateClassCache(session.userId, classId);
+    await invalidateLogsCache(session.userId);
 
     return NextResponse.json({ success: true, message: 'Klasse erfolgreich gelöscht.' });
   } catch (error) {
+    if (error instanceof StorageCleanupError) {
+      console.error(
+        'Storage-Bereinigung beim Löschen der Klasse fehlgeschlagen:',
+        error.failedFiles
+      );
+      return NextResponse.json(
+        {
+          error:
+            'Löschen der zugehörigen Scan-Dateien fehlgeschlagen. Die Klasse wurde in der Datenbank nicht gelöscht, um verwaiste Daten zu verhindern.',
+          failedFiles: error.failedFiles,
+        },
+        { status: 500 }
+      );
+    }
+
     console.error('Error deleting class:', error);
     return NextResponse.json({ error: 'Fehler beim Löschen der Klasse.' }, { status: 500 });
   }

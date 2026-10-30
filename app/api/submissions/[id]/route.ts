@@ -1,8 +1,8 @@
 import { NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { getSession } from '@/lib/session';
-import { calculateRawSwissGrade, calculateSwissGrade, parseStudentExamUrls } from '@/lib/grading';
-import { getStorageAdapter } from '@/lib/storage';
+import { calculateRawSwissGrade, calculateSwissGrade } from '@/lib/grading';
+import { deleteSubmissionScanFiles, StorageCleanupError } from '@/lib/storage-cleanup';
 import {
   serverCache,
   CacheTags,
@@ -491,6 +491,12 @@ export async function DELETE(request: Request, { params }: { params: Promise<{ i
       return NextResponse.json({ error: 'Nicht autorisiert.' }, { status: 403 });
     }
 
+    // Storage-Bereinigung VOR der DB-Loeschung ausfuehren.
+    // Schlaegt das Loeschen im Storage fehl, bricht der Vorgang ab und die DB-Referenz bleibt erhalten.
+    await deleteSubmissionScanFiles([
+      { id: submissionId, studentExamUrl: submission.studentExamUrl },
+    ]);
+
     // If the submission is active, mark the corresponding decoupled logs as CANCELLED
     if (submission.status === 'PENDING' || submission.status === 'PROCESSING') {
       const durationMs = Date.now() - new Date(submission.createdAt).getTime();
@@ -522,21 +528,23 @@ export async function DELETE(request: Request, { params }: { params: Promise<{ i
     });
     await invalidateLogsCache(session.userId);
 
-    // Clean up stored scans
-    if (submission.studentExamUrl) {
-      try {
-        const storage = getStorageAdapter();
-        const urls = parseStudentExamUrls(submission.studentExamUrl);
-        for (const u of urls) {
-          await storage.delete(u);
-        }
-      } catch (storageErr) {
-        console.warn('Storage cleanup warning on submission delete:', storageErr);
-      }
+    return NextResponse.json({ success: true, message: 'Korrektur erfolgreich gelöscht.' });
+  } catch (error) {
+    if (error instanceof StorageCleanupError) {
+      console.error(
+        'Storage-Bereinigung beim Löschen der Korrektur fehlgeschlagen:',
+        error.failedFiles
+      );
+      return NextResponse.json(
+        {
+          error:
+            'Löschen der zugehörigen Scan-Dateien fehlgeschlagen. Die Korrektur wurde in der Datenbank nicht gelöscht, um verwaiste Daten zu verhindern.',
+          failedFiles: error.failedFiles,
+        },
+        { status: 500 }
+      );
     }
 
-    return NextResponse.json({ success: true });
-  } catch (error) {
     console.error('Error deleting submission:', error);
     return NextResponse.json({ error: 'Löschen fehlgeschlagen.' }, { status: 500 });
   }

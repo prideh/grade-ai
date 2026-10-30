@@ -1,7 +1,8 @@
 import { NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { getSession } from '@/lib/session';
-import { serverCache, CacheTags, invalidateStudentCache } from '@/lib/cache';
+import { serverCache, CacheTags, invalidateStudentCache, invalidateLogsCache } from '@/lib/cache';
+import { deleteStudentScanFiles, StorageCleanupError } from '@/lib/storage-cleanup';
 
 // GET: Fetch student details, analytics, grade trajectory, and AI feedback aggregation
 export async function GET(request: Request, { params }: { params: Promise<{ id: string }> }) {
@@ -201,7 +202,7 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
   }
 }
 
-// DELETE: Delete student (cascade deletes submissions)
+// DELETE: Delete student (cleans up scan files in storage, then cascade deletes submissions)
 export async function DELETE(request: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
     const session = await getSession();
@@ -226,14 +227,34 @@ export async function DELETE(request: Request, { params }: { params: Promise<{ i
       return NextResponse.json({ error: 'Nicht autorisiert.' }, { status: 403 });
     }
 
+    // Storage-Bereinigung VOR der DB-Kaskadenloeschung ausfuehren.
+    // Schlaegt das Loeschen im Storage fehl, bricht der Vorgang ab und die DB-Referenzen bleiben erhalten.
+    await deleteStudentScanFiles(studentId);
+
     await db.student.delete({
       where: { id: studentId },
     });
 
     await invalidateStudentCache(session.userId, studentId, student.classId);
+    await invalidateLogsCache(session.userId);
 
     return NextResponse.json({ success: true, message: 'Schüler erfolgreich gelöscht.' });
   } catch (error) {
+    if (error instanceof StorageCleanupError) {
+      console.error(
+        'Storage-Bereinigung beim Löschen des Schülers fehlgeschlagen:',
+        error.failedFiles
+      );
+      return NextResponse.json(
+        {
+          error:
+            'Löschen der zugehörigen Scan-Dateien fehlgeschlagen. Der Schüler wurde in der Datenbank nicht gelöscht, um verwaiste Daten zu verhindern.',
+          failedFiles: error.failedFiles,
+        },
+        { status: 500 }
+      );
+    }
+
     console.error('Error deleting student:', error);
     return NextResponse.json({ error: 'Fehler beim Löschen des Schülers.' }, { status: 500 });
   }
