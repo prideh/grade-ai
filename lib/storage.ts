@@ -316,10 +316,68 @@ export class S3StorageAdapter implements StorageAdapter {
   }
 }
 
+let hasLoggedStorageDriver = false;
+
+/**
+ * Ermittelt den aktiven Treiber-Typ anhand der Umgebungsvariablen ('s3' | 'filesystem').
+ */
+export function getActiveStorageDriverName(): 's3' | 'filesystem' {
+  const driver = process.env.STORAGE_DRIVER?.toLowerCase();
+  const bucket = process.env.S3_BUCKET || '';
+  const accessKeyId = (process.env.S3_ACCESS_KEY_ID || process.env.AWS_ACCESS_KEY_ID || '').trim();
+  const secretAccessKey = (
+    process.env.S3_SECRET_ACCESS_KEY ||
+    process.env.AWS_SECRET_ACCESS_KEY ||
+    ''
+  ).trim();
+
+  const hasS3Config = Boolean(bucket && accessKeyId && secretAccessKey);
+  return driver === 's3' || (!driver && hasS3Config) ? 's3' : 'filesystem';
+}
+
+/**
+ * Gibt eine einmalige Start-Logzeile mit dem konfigurierten Storage-Treiber aus.
+ */
+export function logActiveStorageDriver(): void {
+  const driverName = getActiveStorageDriverName();
+  if (driverName === 's3') {
+    const bucket = process.env.S3_BUCKET || '';
+    const endpoint = process.env.S3_ENDPOINT || 'default-aws';
+    const region = process.env.S3_REGION || 'auto';
+    console.log(
+      `[Storage] Aktiver Storage-Treiber: S3 (Bucket: "${bucket}", Endpoint: "${endpoint}", Region: "${region}")`
+    );
+  } else {
+    const localDir =
+      process.env.STORAGE_LOCAL_DIR ||
+      path.join(/*turbopackIgnore: true*/ process.cwd(), 'storage', 'uploads');
+    const isEphemeral = process.env.NODE_ENV === 'production' && !process.env.STORAGE_LOCAL_DIR;
+    if (isEphemeral) {
+      console.warn(
+        `[Storage] WARNUNG: FilesystemStorageAdapter laeuft auf ephemerem Dateisystem in Produktion! Uploads gehen bei Render-Neustarts/Deploys verloren. Setzen Sie S3_BUCKET oder STORAGE_LOCAL_DIR.`
+      );
+    } else {
+      console.log(`[Storage] Aktiver Storage-Treiber: Filesystem (Verzeichnis: "${localDir}")`);
+    }
+  }
+}
+
+/**
+ * Setzt den Logging-Status zurueck (nur fuer Unit-Tests).
+ */
+export function resetStorageDriverLogForTests(): void {
+  hasLoggedStorageDriver = false;
+}
+
 /**
  * Liefert den gemaess Umgebungsvariablen konfigurierten Storage-Adapter zurueck.
  */
 export function getStorageAdapter(): StorageAdapter {
+  if (!hasLoggedStorageDriver) {
+    logActiveStorageDriver();
+    hasLoggedStorageDriver = true;
+  }
+
   const driver = process.env.STORAGE_DRIVER?.toLowerCase();
   const bucket = process.env.S3_BUCKET || '';
   const accessKeyId = (process.env.S3_ACCESS_KEY_ID || process.env.AWS_ACCESS_KEY_ID || '').trim();

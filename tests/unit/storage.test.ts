@@ -8,6 +8,9 @@ import {
   FilesystemStorageAdapter,
   S3StorageAdapter,
   getStorageAdapter,
+  getActiveStorageDriverName,
+  logActiveStorageDriver,
+  resetStorageDriverLogForTests,
   type StorageAdapter,
 } from '@/lib/storage';
 import { GET, HEAD } from '@/app/uploads/[...file]/route';
@@ -36,6 +39,11 @@ describe('Storage System (lib/storage.ts)', () => {
     delete process.env.S3_ACCESS_KEY_ID;
     delete process.env.S3_SECRET_ACCESS_KEY;
     delete process.env.STORAGE_DRIVER;
+    delete process.env.STORAGE_LOCAL_DIR;
+    delete process.env.S3_ENDPOINT;
+    delete process.env.S3_REGION;
+    delete process.env.S3_FORCE_PATH_STYLE;
+    resetStorageDriverLogForTests();
     await fs.mkdir(testStorageDir, { recursive: true });
   });
 
@@ -185,12 +193,48 @@ describe('Storage System (lib/storage.ts)', () => {
       const deleted = await adapter.delete('datei.png');
       expect(deleted).toBe(true);
     });
+
+    it('unterstuetzt benutzerdefinierte S3-Endpoints wie Cloudflare R2 und Backblaze B2', async () => {
+      const r2Config = {
+        bucket: 'grade-ai-r2-scans',
+        endpoint: 'https://test-account-id.r2.cloudflarestorage.com',
+        region: 'auto',
+        accessKeyId: 'R2_KEY_ID',
+        secretAccessKey: 'R2_SECRET_KEY',
+        forcePathStyle: true,
+      };
+
+      const adapter = new S3StorageAdapter(r2Config);
+      const fetchSpy = vi.spyOn(global, 'fetch').mockResolvedValue(
+        new Response(Buffer.from('R2_TEST_DATA'), {
+          status: 200,
+          headers: { 'content-type': 'image/png' },
+        })
+      );
+
+      const result = await adapter.read('student-scan.png');
+      expect(result).not.toBeNull();
+      expect(result?.buffer.toString()).toBe('R2_TEST_DATA');
+
+      // Pruefe, dass der R2-Endpoint korrekt mit Pfad-Style aufgerufen wurde
+      expect(fetchSpy).toHaveBeenCalledWith(
+        'https://test-account-id.r2.cloudflarestorage.com/grade-ai-r2-scans/student-scan.png',
+        expect.objectContaining({
+          method: 'GET',
+          headers: expect.objectContaining({
+            host: 'test-account-id.r2.cloudflarestorage.com',
+            Authorization: expect.stringContaining('AWS4-HMAC-SHA256'),
+          }),
+        })
+      );
+    });
   });
 
-  describe('getStorageAdapter Factory', () => {
+  describe('getStorageAdapter Factory & Treiber-Erkennung', () => {
     it('liefert FilesystemStorageAdapter wenn keine S3-Variablen gesetzt sind', () => {
       const adapter = getStorageAdapter();
       expect(adapter).toBeInstanceOf(FilesystemStorageAdapter);
+      expect(getActiveStorageDriverName()).toBe('filesystem');
     });
 
     it('liefert S3StorageAdapter wenn S3-Umgebungsvariablen vorhanden sind', () => {
@@ -200,6 +244,52 @@ describe('Storage System (lib/storage.ts)', () => {
 
       const adapter = getStorageAdapter();
       expect(adapter).toBeInstanceOf(S3StorageAdapter);
+      expect(getActiveStorageDriverName()).toBe('s3');
+    });
+
+    it('priorisiert STORAGE_DRIVER=s3', () => {
+      process.env.STORAGE_DRIVER = 's3';
+      process.env.S3_BUCKET = 'schul-scans';
+      process.env.S3_ACCESS_KEY_ID = 'KEY123';
+      process.env.S3_SECRET_ACCESS_KEY = 'SECRET123';
+
+      expect(getActiveStorageDriverName()).toBe('s3');
+    });
+
+    it('nutzt STORAGE_LOCAL_DIR fuer FilesystemStorageAdapter wenn gesetzt', () => {
+      process.env.STORAGE_LOCAL_DIR = '/var/data/custom-uploads';
+      const adapter = getStorageAdapter();
+      expect(adapter).toBeInstanceOf(FilesystemStorageAdapter);
+      expect(getActiveStorageDriverName()).toBe('filesystem');
+    });
+
+    it('gibt informatives Start-Log fuer S3 aus', () => {
+      process.env.S3_BUCKET = 'grade-ai-bucket';
+      process.env.S3_ACCESS_KEY_ID = 'KEY123';
+      process.env.S3_SECRET_ACCESS_KEY = 'SECRET123';
+      process.env.S3_ENDPOINT = 'https://r2.example.com';
+
+      const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+      logActiveStorageDriver();
+
+      expect(logSpy).toHaveBeenCalledWith(
+        expect.stringContaining('[Storage] Aktiver Storage-Treiber: S3')
+      );
+      expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('grade-ai-bucket'));
+    });
+
+    it('gibt eine deutliche Warnung aus wenn Filesystem in Produktion ohne Persistent Disk laeuft', () => {
+      process.env.NODE_ENV = 'production';
+      delete process.env.STORAGE_LOCAL_DIR;
+
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      logActiveStorageDriver();
+
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining(
+          '[Storage] WARNUNG: FilesystemStorageAdapter laeuft auf ephemerem Dateisystem in Produktion!'
+        )
+      );
     });
   });
 });
@@ -341,6 +431,7 @@ describe('Schweizer Rechtschreibung (kein Eszett)', () => {
       path.resolve(__dirname, '../../lib/storage.ts'),
       path.resolve(__dirname, '../../app/uploads/[...file]/route.ts'),
       path.resolve(__dirname, './storage.test.ts'),
+      path.resolve(__dirname, '../../docs/RENDER_DEPLOY_STORAGE.md'),
     ];
 
     for (const f of filesToCheck) {
