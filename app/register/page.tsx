@@ -220,6 +220,7 @@ export default function RegisterPage() {
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   placeholder="••••••••"
+                  helperText="Mindestens 6 Zeichen erforderlich (mindestens 8 Zeichen empfohlen)"
                   slotProps={{
                     input: {
                       startAdornment: (

@@ -48,6 +48,7 @@ import AssignmentIcon from '@mui/icons-material/Assignment';
 import TrendingUpIcon from '@mui/icons-material/TrendingUp';
 import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome';
 import ErrorIcon from '@mui/icons-material/Error';
+import InfoOutlinedIcon from '@mui/icons-material/InfoOutlined';
 import { getErrorMessage } from '@/lib/api-error';
 import StarIcon from '@mui/icons-material/Star';
 import StarBorderIcon from '@mui/icons-material/StarBorder';
@@ -1852,26 +1853,97 @@ export default function Dashboard() {
                       )}
                     </Box>
 
-                    {/* Start Button */}
-                    <Button
-                      onClick={() => startAnalysis(false)}
-                      className="glow-button"
-                      variant="contained"
-                      fullWidth
-                      size="large"
-                      endIcon={<FlashOnIcon />}
-                      disabled={!selectedStudentId || studentFiles.length === 0 || loading}
-                      sx={{
-                        padding: '14px',
-                        borderRadius: '8px',
-                        fontSize: '1rem',
-                        fontWeight: 700,
-                        marginTop: '20px',
-                        backgroundColor: '#1b77d1',
-                      }}
-                    >
-                      Korrektur starten!
-                    </Button>
+                    {(() => {
+                      const missingRequirements: string[] = [];
+                      if (!selectedClassId) {
+                        missingRequirements.push('Klasse auswählen (Schritt ①)');
+                      }
+                      if (!selectedStudentId) {
+                        missingRequirements.push('Schülerzuordnung auswählen (Schritt ①)');
+                      }
+                      if (selectedExamId === 'NEW') {
+                        if (!examTitle.trim()) {
+                          missingRequirements.push('Prüfungstitel angeben (Schritt ②)');
+                        }
+                        if (!rubricText.trim() && !rubricFile) {
+                          missingRequirements.push('Musterlösung hinterlegen (Schritt ②)');
+                        }
+                      }
+                      if (studentFiles.length === 0) {
+                        missingRequirements.push(
+                          'Mindestens eine Schülerarbeit hochladen (Schritt ③)'
+                        );
+                      }
+                      const isStartDisabled = missingRequirements.length > 0 || loading;
+
+                      return (
+                        <>
+                          {/* Start Button */}
+                          <Button
+                            onClick={() => startAnalysis(false)}
+                            className="glow-button"
+                            variant="contained"
+                            fullWidth
+                            size="large"
+                            endIcon={<FlashOnIcon />}
+                            disabled={isStartDisabled}
+                            sx={{
+                              padding: '14px',
+                              borderRadius: '8px',
+                              fontSize: '1rem',
+                              fontWeight: 700,
+                              marginTop: '20px',
+                              backgroundColor: '#1b77d1',
+                            }}
+                          >
+                            Korrektur starten!
+                          </Button>
+
+                          {missingRequirements.length > 0 && !loading && (
+                            <Box
+                              sx={{
+                                marginTop: '12px',
+                                padding: '10px 14px',
+                                borderRadius: '8px',
+                                backgroundColor: '#f8fafc',
+                                border: '1px solid #e2e8f0',
+                                display: 'flex',
+                                alignItems: 'flex-start',
+                                gap: 1,
+                              }}
+                            >
+                              <InfoOutlinedIcon
+                                sx={{
+                                  color: '#0284c7',
+                                  fontSize: '1.2rem',
+                                  mt: '2px',
+                                  flexShrink: 0,
+                                }}
+                              />
+                              <Box sx={{ minWidth: 0 }}>
+                                <Typography
+                                  variant="caption"
+                                  sx={{
+                                    fontWeight: 700,
+                                    color: '#334155',
+                                    display: 'block',
+                                    mb: 0.25,
+                                  }}
+                                >
+                                  Noch erforderlich, um die Korrektur zu starten:
+                                </Typography>
+                                <Typography
+                                  variant="caption"
+                                  sx={{ color: '#64748b', lineHeight: 1.4, display: 'block' }}
+                                >
+                                  {missingRequirements.join(' • ')}
+                                </Typography>
+                              </Box>
+                            </Box>
+                          )}
+                        </>
+                      );
+                    })()}
                   </CardContent>
                 </Card>
               )}

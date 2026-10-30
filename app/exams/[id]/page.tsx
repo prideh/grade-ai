@@ -778,8 +778,9 @@ export default function ExamDetailsPage() {
                     )}
 
                     <TextField
-                      label="Unterrichtsmaterial & Bewertungshinweise (Stufe 3, optional)"
+                      label="Zusätzliche Bewertungshinweise & Kontext (Stufe 3, optional)"
                       placeholder="z.B. Teilpunkte für richtige Formel ohne Einheiten vergeben..."
+                      helperText="Stufe 3 der KI-Korrektur: Individuelle Bewertungsregeln der Lehrperson (nach Stufe 1: Handschrifterkennung und Stufe 2: Folgefehlerprüfung), z.B. für Teilpunkte oder alternative Lösungswege."
                       multiline
                       rows={2}
                       fullWidth
@@ -967,7 +968,7 @@ export default function ExamDetailsPage() {
                           variant="caption"
                           sx={{ fontWeight: 700, color: '#0f172a', display: 'block', mb: 0.5 }}
                         >
-                          Bewertungshinweise (Stufe 3):
+                          Zusätzliche Bewertungshinweise (Stufe 3: Individueller Korrekturkontext):
                         </Typography>
                         {exam.gradingNotes}
                       </Box>

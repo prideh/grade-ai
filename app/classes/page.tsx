@@ -25,6 +25,7 @@ import {
   Tooltip,
 } from '@mui/material';
 import AddIcon from '@mui/icons-material/Add';
+import EditIcon from '@mui/icons-material/Edit';
 import GroupIcon from '@mui/icons-material/Group';
 import SchoolIcon from '@mui/icons-material/School';
 import ArrowForwardIcon from '@mui/icons-material/ArrowForward';
@@ -74,6 +75,52 @@ export default function ClassesPage() {
   const [newClassName, setNewClassName] = useState('');
   const [createLoading, setCreateLoading] = useState(false);
   const [createError, setCreateError] = useState('');
+
+  // Rename Dialog State
+  const [openRename, setOpenRename] = useState(false);
+  const [renameTargetClass, setRenameTargetClass] = useState<ClassListItem | null>(null);
+  const [renamedClassName, setRenamedClassName] = useState('');
+  const [renameLoading, setRenameLoading] = useState(false);
+  const [renameError, setRenameError] = useState('');
+
+  const handleOpenRename = (cls: ClassListItem) => {
+    setRenameTargetClass(cls);
+    setRenamedClassName(cls.name); // Prefill current class name
+    setRenameError('');
+    setOpenRename(true);
+  };
+
+  const handleRenameSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!renameTargetClass || !renamedClassName.trim()) {
+      setRenameError('Bitte gib einen Klassennamen an.');
+      return;
+    }
+    setRenameLoading(true);
+    setRenameError('');
+    try {
+      const res = await fetch(`/api/classes/${renameTargetClass.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: renamedClassName.trim() }),
+      });
+      if (!res.ok) {
+        const errorMsg = await getErrorMessage(res, 'Klassenname konnte nicht geändert werden.');
+        setRenameError(errorMsg);
+        return;
+      }
+      setOpenRename(false);
+      setRenameTargetClass(null);
+      setRenamedClassName('');
+      fetchClasses();
+    } catch (err) {
+      setRenameError(
+        err instanceof Error ? err.message : 'Klassenname konnte nicht geändert werden.'
+      );
+    } finally {
+      setRenameLoading(false);
+    }
+  };
 
   // Fetch all classes
   const fetchClasses = React.useCallback(async () => {
@@ -312,6 +359,22 @@ export default function ClassesPage() {
                             )}
                           </IconButton>
                         </Tooltip>
+                        <Tooltip title="Klassenname ändern">
+                          <IconButton
+                            size="small"
+                            onClick={() => handleOpenRename(cls)}
+                            sx={{
+                              color: '#94a3b8',
+                              padding: '4px',
+                              '&:hover': {
+                                color: '#1b77d1',
+                                backgroundColor: '#f1f5f9',
+                              },
+                            }}
+                          >
+                            <EditIcon sx={{ fontSize: '1.25rem' }} />
+                          </IconButton>
+                        </Tooltip>
                         <Box
                           sx={{
                             width: '40px',
@@ -483,6 +546,82 @@ export default function ClassesPage() {
                   }}
                 >
                   {createLoading ? <CircularProgress size={20} /> : 'Erstellen'}
+                </Button>
+              </Stack>
+            </DialogActions>
+          </form>
+        </Dialog>
+
+        {/* Dialog for Rename Class */}
+        <Dialog
+          open={openRename}
+          onClose={(_e, reason) => {
+            if (renameLoading || reason === 'backdropClick') return;
+            setOpenRename(false);
+            setRenameTargetClass(null);
+          }}
+          maxWidth="xs"
+          fullWidth
+        >
+          <form onSubmit={handleRenameSubmit}>
+            <DialogTitle sx={{ fontWeight: 800, color: '#0f172a', letterSpacing: '-0.01em' }}>
+              Klassenname ändern
+            </DialogTitle>
+            <DialogContent>
+              <Stack spacing={2} sx={{ mt: 1 }}>
+                <TextField
+                  label="Klassenname"
+                  fullWidth
+                  variant="outlined"
+                  value={renamedClassName}
+                  onChange={(e) => setRenamedClassName(e.target.value)}
+                  autoFocus
+                  sx={{
+                    '& .MuiOutlinedInput-root': {
+                      borderRadius: '8px',
+                    },
+                  }}
+                />
+              </Stack>
+            </DialogContent>
+            <DialogActions
+              sx={{
+                p: 2,
+                pt: 1,
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'stretch',
+                gap: 1.5,
+              }}
+            >
+              {renameError && (
+                <Alert severity="error" sx={{ borderRadius: '8px' }}>
+                  {renameError}
+                </Alert>
+              )}
+              <Stack direction="row" spacing={1} sx={{ justifyContent: 'flex-end', width: '100%' }}>
+                <Button
+                  onClick={() => {
+                    setOpenRename(false);
+                    setRenameTargetClass(null);
+                  }}
+                  disabled={renameLoading}
+                  sx={{ textTransform: 'none', fontWeight: 650 }}
+                >
+                  Abbrechen
+                </Button>
+                <Button
+                  type="submit"
+                  variant="contained"
+                  disabled={renameLoading || !renamedClassName.trim()}
+                  sx={{
+                    textTransform: 'none',
+                    fontWeight: 700,
+                    backgroundColor: '#1b77d1',
+                    borderRadius: '8px',
+                  }}
+                >
+                  {renameLoading ? <CircularProgress size={20} /> : 'Speichern'}
                 </Button>
               </Stack>
             </DialogActions>

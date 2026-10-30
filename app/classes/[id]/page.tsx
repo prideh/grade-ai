@@ -120,6 +120,12 @@ export default function ClassDetailsPage() {
   const [editedClassName, setEditedClassName] = useState('');
   const [editClassError, setEditClassError] = useState('');
 
+  const handleOpenEditClass = () => {
+    setEditClassError('');
+    setEditedClassName(classData?.name || '');
+    setOpenEditClass(true);
+  };
+
   // Fetch Class Details
   const fetchData = React.useCallback(async () => {
     try {
@@ -391,11 +397,7 @@ export default function ClassDetailsPage() {
               <Button
                 variant="outlined"
                 startIcon={<EditIcon />}
-                onClick={() => {
-                  setEditClassError('');
-                  setEditedClassName(classData?.name || '');
-                  setOpenEditClass(true);
-                }}
+                onClick={handleOpenEditClass}
                 sx={{ borderRadius: '8px', textTransform: 'none', fontWeight: 650 }}
               >
                 Name ändern
@@ -1132,6 +1134,7 @@ export default function ClassDetailsPage() {
           onClose={(_e, reason) => {
             if (studentActionLoading || reason === 'backdropClick') return;
             setOpenEditClass(false);
+            setEditedClassName(classData?.name || '');
           }}
           maxWidth="xs"
           fullWidth
@@ -1158,7 +1161,10 @@ export default function ClassDetailsPage() {
             </DialogContent>
             <DialogActions sx={{ p: 2, pt: 0 }}>
               <Button
-                onClick={() => setOpenEditClass(false)}
+                onClick={() => {
+                  setOpenEditClass(false);
+                  setEditedClassName(classData?.name || '');
+                }}
                 disabled={studentActionLoading}
                 sx={{ textTransform: 'none', fontWeight: 650 }}
               >
