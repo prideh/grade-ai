@@ -29,6 +29,14 @@ export interface GeminiHealthResult {
   errorCategory?: GeminiErrorCategory;
 }
 
+export interface GeminiProbeResult {
+  ok: boolean;
+  latencyMs: number;
+  probe: 'generateContent';
+  errorCategory?: GeminiErrorCategory;
+  technicalDetails?: string;
+}
+
 export interface CategorizedGeminiError {
   category: GeminiErrorCategory;
   userMessage: string;
@@ -49,6 +57,28 @@ export function categorizeGeminiError(error: unknown): CategorizedGeminiError {
       if ('code' in curr && typeof (curr as { code?: unknown }).code === 'string') {
         parts.push(`code=${(curr as { code: string }).code}`);
       }
+      if ('status' in curr && typeof (curr as { status?: unknown }).status !== 'undefined') {
+        parts.push(`status=${(curr as { status: unknown }).status}`);
+      }
+      if (
+        'statusCode' in curr &&
+        typeof (curr as { statusCode?: unknown }).statusCode !== 'undefined'
+      ) {
+        parts.push(`statusCode=${(curr as { statusCode: unknown }).statusCode}`);
+      }
+      if (
+        'statusText' in curr &&
+        typeof (curr as { statusText?: unknown }).statusText === 'string'
+      ) {
+        parts.push(`statusText=${(curr as { statusText: string }).statusText}`);
+      }
+      if ('errorDetails' in curr && (curr as { errorDetails?: unknown }).errorDetails) {
+        try {
+          parts.push(`details=${JSON.stringify((curr as { errorDetails: unknown }).errorDetails)}`);
+        } catch {
+          // ignore stringify errors
+        }
+      }
       if ('cause' in curr && curr.cause) {
         curr = curr.cause;
       } else {
@@ -63,6 +93,28 @@ export function categorizeGeminiError(error: unknown): CategorizedGeminiError {
       }
       if ('code' in curr && typeof (curr as { code?: unknown }).code === 'string') {
         parts.push(`code=${(curr as { code: string }).code}`);
+      }
+      if ('status' in curr && typeof (curr as { status?: unknown }).status !== 'undefined') {
+        parts.push(`status=${(curr as { status: unknown }).status}`);
+      }
+      if (
+        'statusCode' in curr &&
+        typeof (curr as { statusCode?: unknown }).statusCode !== 'undefined'
+      ) {
+        parts.push(`statusCode=${(curr as { statusCode: unknown }).statusCode}`);
+      }
+      if (
+        'statusText' in curr &&
+        typeof (curr as { statusText?: unknown }).statusText === 'string'
+      ) {
+        parts.push(`statusText=${(curr as { statusText: string }).statusText}`);
+      }
+      if ('errorDetails' in curr && (curr as { errorDetails?: unknown }).errorDetails) {
+        try {
+          parts.push(`details=${JSON.stringify((curr as { errorDetails: unknown }).errorDetails)}`);
+        } catch {
+          // ignore stringify errors
+        }
       }
       if ('cause' in curr && curr.cause) {
         curr = curr.cause;
@@ -197,6 +249,70 @@ export async function checkGeminiHealth(
       ok: false,
       latencyMs,
       errorCategory: categorized.category,
+    };
+  }
+}
+
+/**
+ * Hypothesenkontrollierte Diagnose-Probe fuer den generateContent-Pfad.
+ * Fuehrt einen minimalen generateContent-Call (kurzer Text-Prompt, wenige Tokens, low thinking)
+ * serverseitig aus.
+ *
+ * Unterscheidet:
+ * - "generateContent-Pfad blockiert / Modell ueberlastet / Quota erschoepft" (Probe schlaegt fehl)
+ * - von "payload-spezifisch / Timeout bei grossen Inline-Bildern / Thinking ohne Streaming" (Probe erfolgreich)
+ */
+export async function probeGeminiGenerateContent(
+  customApiKey?: string,
+  modelName: string = DEFAULT_GEMINI_MODEL,
+  timeoutMs: number = GEMINI_HEALTH_TIMEOUT_MS
+): Promise<GeminiProbeResult> {
+  const apiKey = customApiKey || process.env.GEMINI_API_KEY;
+  if (!apiKey) {
+    return {
+      ok: false,
+      latencyMs: 0,
+      probe: 'generateContent',
+      errorCategory: 'UNKNOWN',
+      technicalDetails: 'GEMINI_API_KEY is not defined',
+    };
+  }
+
+  const ai = new GoogleGenAI({
+    apiKey,
+    httpOptions: { timeout: timeoutMs },
+  });
+
+  const startTime = Date.now();
+  try {
+    const probeRes = await ai.models.generateContent({
+      model: modelName,
+      contents: 'ping',
+      config: {
+        maxOutputTokens: 5,
+        thinkingConfig: {
+          thinkingLevel: ThinkingLevel.LOW,
+        },
+        abortSignal: AbortSignal.timeout(timeoutMs),
+        httpOptions: { timeout: timeoutMs },
+      },
+    });
+
+    const latencyMs = Math.max(0, Date.now() - startTime);
+    return {
+      ok: Boolean(probeRes.text !== undefined),
+      latencyMs,
+      probe: 'generateContent',
+    };
+  } catch (error) {
+    const latencyMs = Math.max(0, Date.now() - startTime);
+    const categorized = categorizeGeminiError(error);
+    return {
+      ok: false,
+      latencyMs,
+      probe: 'generateContent',
+      errorCategory: categorized.category,
+      technicalDetails: categorized.technicalDetails,
     };
   }
 }
@@ -690,29 +806,90 @@ Verbindliche Template-Regeln:
 `;
     }
 
-    const response = await ai.models.generateContent({
-      model: modelName,
-      contents: contents,
-      config: {
-        systemInstruction: finalPrompt,
-        responseMimeType: 'application/json',
-        responseSchema: CORRECTION_RESPONSE_SCHEMA,
-        thinkingConfig: {
-          thinkingLevel: ThinkingLevel.HIGH,
-        },
-        temperature: 0.0,
-        seed: 42,
-        abortSignal: AbortSignal.timeout(GEMINI_CLIENT_TIMEOUT_MS),
-        httpOptions: { timeout: GEMINI_CLIENT_TIMEOUT_MS },
-      },
-    });
+    const executeCall = async (attempt: number): Promise<ExamCorrectionResult> => {
+      const callStart = Date.now();
+      try {
+        const config = {
+          systemInstruction: finalPrompt,
+          responseMimeType: 'application/json',
+          responseSchema: CORRECTION_RESPONSE_SCHEMA,
+          thinkingConfig: {
+            thinkingLevel: ThinkingLevel.HIGH,
+          },
+          temperature: 0.0,
+          seed: 42,
+          abortSignal: AbortSignal.timeout(GEMINI_CLIENT_TIMEOUT_MS),
+          httpOptions: { timeout: GEMINI_CLIENT_TIMEOUT_MS },
+        };
 
-    const responseText = (response.text || '').trim();
-    if (!responseText) {
-      throw new Error('Leere Antwort vom KI-Modell erhalten.');
+        let responseText = '';
+        if (typeof ai.models.generateContentStream === 'function') {
+          const responseStream = await ai.models.generateContentStream({
+            model: modelName,
+            contents: contents,
+            config,
+          });
+
+          for await (const chunk of responseStream) {
+            if (chunk.text) {
+              responseText += chunk.text;
+            }
+          }
+        } else {
+          const response = await ai.models.generateContent({
+            model: modelName,
+            contents: contents,
+            config,
+          });
+          responseText = response.text || '';
+        }
+
+        responseText = responseText.trim();
+        if (!responseText) {
+          throw new Error('Leere Antwort vom KI-Modell erhalten.');
+        }
+
+        return JSON.parse(responseText) as ExamCorrectionResult;
+      } catch (err) {
+        const duration = Date.now() - callStart;
+        const categorized = categorizeGeminiError(err);
+        console.warn(
+          `Live Gemini correction stream attempt ${attempt} failed after ${duration}ms [Category: ${categorized.category} | Details: ${categorized.technicalDetails}]:`,
+          err
+        );
+        throw err;
+      }
+    };
+
+    const MAX_ATTEMPTS = 2; // Initial attempt + 1 retry on transient upstream/network errors
+    let lastError: unknown;
+
+    for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+      try {
+        return await executeCall(attempt);
+      } catch (err) {
+        lastError = err;
+        const categorized = categorizeGeminiError(err);
+
+        const isTransient =
+          categorized.category === 'UPSTREAM_SERVICE' ||
+          categorized.category === 'RATE_LIMIT' ||
+          categorized.category === 'NETWORK';
+
+        if (attempt < MAX_ATTEMPTS && isTransient) {
+          const delayMs = attempt * 2000;
+          console.info(
+            `Retrying live Gemini correction in ${delayMs}ms (attempt ${attempt + 1}/${MAX_ATTEMPTS}) due to transient ${categorized.category}...`
+          );
+          await new Promise((resolve) => setTimeout(resolve, delayMs));
+          continue;
+        }
+
+        throw err;
+      }
     }
 
-    return JSON.parse(responseText) as ExamCorrectionResult;
+    throw lastError;
   } catch (error) {
     console.error('Error during live Gemini correction call:', error);
     throw error;

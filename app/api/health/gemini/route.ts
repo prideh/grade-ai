@@ -1,14 +1,22 @@
 import { NextResponse } from 'next/server';
 import { getSession } from '@/lib/session';
-import { checkGeminiHealth } from '@/lib/gemini';
+import { checkGeminiHealth, probeGeminiGenerateContent } from '@/lib/gemini';
 
 export const dynamic = 'force-dynamic';
 
-export async function GET() {
+export async function GET(request?: Request) {
   try {
     const session = await getSession();
     if (!session) {
       return NextResponse.json({ error: 'Nicht autorisiert.' }, { status: 401 });
+    }
+
+    const url = request?.url ? new URL(request.url) : null;
+    const probe = url?.searchParams.get('probe');
+
+    if (probe === 'generateContent') {
+      const probeResult = await probeGeminiGenerateContent();
+      return NextResponse.json(probeResult);
     }
 
     const health = await checkGeminiHealth();

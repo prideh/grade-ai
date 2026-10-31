@@ -1,5 +1,10 @@
 import { describe, it, expect } from 'vitest';
-import { GEMINI_CLIENT_TIMEOUT_MS, categorizeGeminiError } from '@/lib/gemini';
+import {
+  GEMINI_CLIENT_TIMEOUT_MS,
+  categorizeGeminiError,
+  checkGeminiHealth,
+  probeGeminiGenerateContent,
+} from '@/lib/gemini';
 
 describe('Gemini Timeout & Error Categorization (lib/gemini.ts)', () => {
   it('defines a client timeout of 90 seconds (90000ms) to prevent 300s undici hangs', () => {
@@ -96,5 +101,34 @@ describe('Gemini Timeout & Error Categorization (lib/gemini.ts)', () => {
     expect(result.category).toBe('UNKNOWN');
     expect(result.userMessage).toContain('unerwarteter Fehler');
     expect(result.userMessage).not.toMatch(/\u00df/);
+  });
+
+  it('extracts HTTP status, statusText, and errorDetails into technicalDetails', () => {
+    const err = Object.assign(new Error('Google upstream failure'), {
+      status: 503,
+      statusText: 'Service Unavailable',
+      errorDetails: [{ reason: 'BACKEND_OVERLOADED' }],
+    });
+
+    const result = categorizeGeminiError(err);
+    expect(result.category).toBe('UPSTREAM_SERVICE');
+    expect(result.technicalDetails).toContain('status=503');
+    expect(result.technicalDetails).toContain('statusText=Service Unavailable');
+    expect(result.technicalDetails).toContain('BACKEND_OVERLOADED');
+  });
+
+  it('returns ok: false from probeGeminiGenerateContent when GEMINI_API_KEY is not configured', async () => {
+    const originalKey = process.env.GEMINI_API_KEY;
+    try {
+      delete process.env.GEMINI_API_KEY;
+      const probe = await probeGeminiGenerateContent();
+      expect(probe.ok).toBe(false);
+      expect(probe.probe).toBe('generateContent');
+      expect(probe.technicalDetails).toContain('GEMINI_API_KEY');
+    } finally {
+      if (originalKey) {
+        process.env.GEMINI_API_KEY = originalKey;
+      }
+    }
   });
 });

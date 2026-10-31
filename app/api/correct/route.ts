@@ -739,11 +739,14 @@ export async function POST(request: Request) {
 
         const categorized = categorizeGeminiError(error);
         console.error(
-          `Background grading error for submission ${submissionId} [Category: ${categorized.category}]:`,
+          `Background grading error for submission ${submissionId} [Category: ${categorized.category} | Details: ${categorized.technicalDetails}]:`,
           error
         );
 
-        // Update decoupled CorrectionLog to FAILED with monitoring category
+        // Update decoupled CorrectionLog to FAILED with monitoring category and upstream error details
+        const logDetail = categorized.technicalDetails
+          ? ` (Details: ${categorized.technicalDetails.slice(0, 300)})`
+          : '';
         try {
           await db.correctionLog.update({
             where: { id: logRecord.id },
@@ -751,7 +754,7 @@ export async function POST(request: Request) {
               status: 'FAILED',
               studentName: finalStudentName,
               durationMs,
-              errorMessage: `[${categorized.category}] ${categorized.userMessage}`,
+              errorMessage: `[${categorized.category}] ${categorized.userMessage}${logDetail}`,
             },
           });
         } catch (logErr) {

@@ -481,11 +481,14 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
 
         const categorized = categorizeGeminiError(error);
         console.error(
-          `Background replace error for submission ${submissionId} [Category: ${categorized.category}]:`,
+          `Background replace error for submission ${submissionId} [Category: ${categorized.category} | Details: ${categorized.technicalDetails}]:`,
           error
         );
 
-        // Update decouple CorrectionLog to FAILED with monitoring category
+        // Update decouple CorrectionLog to FAILED with monitoring category and upstream error details
+        const logDetail = categorized.technicalDetails
+          ? ` (Details: ${categorized.technicalDetails.slice(0, 300)})`
+          : '';
         try {
           await db.correctionLog.update({
             where: { id: logRecord.id },
@@ -493,7 +496,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
               status: 'FAILED',
               studentName: finalStudentName,
               durationMs,
-              errorMessage: `[${categorized.category}] ${categorized.userMessage}`,
+              errorMessage: `[${categorized.category}] ${categorized.userMessage}${logDetail}`,
             },
           });
         } catch (logErr) {
