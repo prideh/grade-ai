@@ -972,48 +972,79 @@ export default function Dashboard() {
                             }
                             sx={{ fontWeight: 'bold' }}
                           />
-                          {isFailed && (
-                            <Button
-                              size="small"
-                              variant="contained"
-                              color={
-                                job.errorMessage?.includes('bereits eine Korrektur')
-                                  ? 'error'
-                                  : 'primary'
-                              }
-                              disabled={replacingSubmissionId === job.id}
-                              onClick={() => handleReplaceSubmission(job.id)}
-                              startIcon={
-                                replacingSubmissionId === job.id ? (
-                                  <CircularProgress size={16} color="inherit" />
-                                ) : (
-                                  <AutoAwesomeIcon />
-                                )
-                              }
-                              sx={{
-                                textTransform: 'none',
-                                fontWeight: 700,
-                                borderRadius: '8px',
-                                ...(job.errorMessage?.includes('bereits eine Korrektur')
-                                  ? {
-                                      backgroundColor: '#dc2626',
-                                      '&:hover': {
-                                        backgroundColor: '#b91c1c',
-                                      },
-                                    }
-                                  : {
-                                      backgroundColor: '#0284c7',
-                                      '&:hover': {
-                                        backgroundColor: '#0369a1',
-                                      },
-                                    }),
-                              }}
-                            >
-                              {job.errorMessage?.includes('bereits eine Korrektur')
-                                ? 'Korrektur ersetzen'
-                                : 'Erneut versuchen'}
-                            </Button>
-                          )}
+                          {isFailed &&
+                            (job.errorMessage?.includes('nicht mehr verfügbar') ||
+                            job.errorMessage?.includes('vor der Speicher-Migration') ||
+                            job.errorMessage?.includes('Dokumenten-Scan') ? (
+                              <Button
+                                size="small"
+                                variant="contained"
+                                color="primary"
+                                onClick={() => {
+                                  const uploadCard =
+                                    document.getElementById('student-upload-card') ||
+                                    document.getElementById('step3-upload-card');
+                                  if (uploadCard) {
+                                    uploadCard.scrollIntoView({ behavior: 'smooth' });
+                                  } else {
+                                    window.scrollTo({ top: 350, behavior: 'smooth' });
+                                  }
+                                }}
+                                startIcon={<CloudUploadIcon />}
+                                sx={{
+                                  textTransform: 'none',
+                                  fontWeight: 700,
+                                  borderRadius: '8px',
+                                  backgroundColor: '#0284c7',
+                                  '&:hover': {
+                                    backgroundColor: '#0369a1',
+                                  },
+                                }}
+                              >
+                                Prüfung neu hochladen
+                              </Button>
+                            ) : (
+                              <Button
+                                size="small"
+                                variant="contained"
+                                color={
+                                  job.errorMessage?.includes('bereits eine Korrektur')
+                                    ? 'error'
+                                    : 'primary'
+                                }
+                                disabled={replacingSubmissionId === job.id}
+                                onClick={() => handleReplaceSubmission(job.id)}
+                                startIcon={
+                                  replacingSubmissionId === job.id ? (
+                                    <CircularProgress size={16} color="inherit" />
+                                  ) : (
+                                    <AutoAwesomeIcon />
+                                  )
+                                }
+                                sx={{
+                                  textTransform: 'none',
+                                  fontWeight: 700,
+                                  borderRadius: '8px',
+                                  ...(job.errorMessage?.includes('bereits eine Korrektur')
+                                    ? {
+                                        backgroundColor: '#dc2626',
+                                        '&:hover': {
+                                          backgroundColor: '#b91c1c',
+                                        },
+                                      }
+                                    : {
+                                        backgroundColor: '#0284c7',
+                                        '&:hover': {
+                                          backgroundColor: '#0369a1',
+                                        },
+                                      }),
+                                }}
+                              >
+                                {job.errorMessage?.includes('bereits eine Korrektur')
+                                  ? 'Korrektur ersetzen'
+                                  : 'Erneut versuchen'}
+                              </Button>
+                            ))}
                           <Link
                             href={`/correct/${job.id}`}
                             passHref
@@ -1625,7 +1656,10 @@ export default function Dashboard() {
 
               {/* Step 3: Student Upload Scan */}
               {selectedStudentId && (
-                <Card sx={{ borderRadius: '12px', border: '1px solid #e2e8f0', boxShadow: 'none' }}>
+                <Card
+                  id="student-upload-card"
+                  sx={{ borderRadius: '12px', border: '1px solid #e2e8f0', boxShadow: 'none' }}
+                >
                   <CardContent sx={{ padding: '24px' }}>
                     <Stack
                       direction={{ xs: 'column', sm: 'row' }}

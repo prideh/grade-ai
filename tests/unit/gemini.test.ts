@@ -94,6 +94,16 @@ describe('Gemini Timeout & Error Categorization (lib/gemini.ts)', () => {
     expect(result.userMessage).not.toMatch(/\u00df/);
   });
 
+  it('categorizes missing scan file errors as MISSING_FILE with clear Swiss German message', () => {
+    const err = new Error('Prüfungsdatei nicht gefunden: /uploads/9a5cc311-exam.pdf');
+
+    const result = categorizeGeminiError(err);
+    expect(result.category).toBe('MISSING_FILE');
+    expect(result.userMessage).toContain('nicht mehr verfügbar');
+    expect(result.userMessage).toContain('erneut hoch');
+    expect(result.userMessage).not.toMatch(/\u00df/);
+  });
+
   it('categorizes generic unknown errors as UNKNOWN with Swiss German message', () => {
     const err = new Error('Something completely unexpected occurred');
 

@@ -80,11 +80,15 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       return NextResponse.json({ error: 'Nicht autorisiert.' }, { status: 403 });
     }
 
-    if (!submission.studentExamUrl) {
-      return NextResponse.json(
-        { error: 'Dokumenten-Scan der Arbeit wurde nicht gefunden.' },
-        { status: 400 }
-      );
+    const pageUrls = parseStudentExamUrls(submission.studentExamUrl);
+    if (!submission.studentExamUrl || pageUrls.length === 0) {
+      const missingMsg =
+        'Der Dokumenten-Scan dieser Arbeit ist nicht mehr verfügbar (vor der Speicher-Migration verloren gegangen). Bitte lade die Prüfung erneut hoch.';
+      await db.submission.update({
+        where: { id: submissionId },
+        data: { status: 'FAILED', errorMessage: missingMsg },
+      });
+      return NextResponse.json({ error: missingMsg, missingFile: true }, { status: 400 });
     }
 
     let resolvedStudentName = 'Automatische Zuordnung';
@@ -99,6 +103,54 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
 
     const modelToUse = DEFAULT_GEMINI_MODEL;
     const actionType = submission.status === 'FAILED' ? 'NEUSTART' : 'ERSETZT';
+
+    // Verify scan files actually exist in durable storage before scheduling background AI task
+    const storage = getStorageAdapter();
+    let hasMissingFile = false;
+    for (const relUrl of pageUrls) {
+      const fileExists = await storage.exists(relUrl);
+      if (!fileExists) {
+        hasMissingFile = true;
+        break;
+      }
+    }
+
+    if (hasMissingFile) {
+      const missingMsg =
+        'Der Dokumenten-Scan dieser Arbeit ist nicht mehr verfügbar (vor der Speicher-Migration verloren gegangen). Bitte lade die Prüfung erneut hoch.';
+
+      await db.submission.update({
+        where: { id: submissionId },
+        data: {
+          status: 'FAILED',
+          errorMessage: missingMsg,
+        },
+      });
+
+      await db.correctionLog.create({
+        data: {
+          submissionId,
+          teacherId: session.userId,
+          className: submission.exam.class.name,
+          examTitle: submission.exam.title,
+          studentName: resolvedStudentName,
+          modelUsed: modelToUse,
+          status: 'FAILED',
+          actionType,
+          errorMessage: `[MISSING_FILE] ${missingMsg}`,
+        },
+      });
+
+      await invalidateSubmissionCache(session.userId, {
+        submissionId,
+        examId: submission.examId,
+        classId: submission.exam.classId,
+        studentId: submission.studentId || undefined,
+      });
+      await invalidateLogsCache(session.userId);
+
+      return NextResponse.json({ error: missingMsg, missingFile: true }, { status: 400 });
+    }
 
     // Reset status to PROCESSING to display active loading spinner
     await db.submission.update({

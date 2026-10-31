@@ -21,6 +21,7 @@ export type GeminiErrorCategory =
   | 'RATE_LIMIT'
   | 'UPSTREAM_SERVICE'
   | 'INVALID_RESPONSE'
+  | 'MISSING_FILE'
   | 'UNKNOWN';
 
 export interface GeminiHealthResult {
@@ -193,7 +194,21 @@ export function categorizeGeminiError(error: unknown): CategorizedGeminiError {
     };
   }
 
-  // 6. Unknown fallback
+  // 6. Missing scan file / Storage error (e.g. pre-migration ephemeral scans lost)
+  const isMissingFile =
+    /Prüfungsdatei|Dokumenten-Scan|nicht mehr verfügbar|Prüfungsdatei nicht gefunden|Keine Prüfungsdateien/i.test(
+      combined
+    );
+  if (isMissingFile) {
+    return {
+      category: 'MISSING_FILE',
+      userMessage:
+        'Der Dokumenten-Scan dieser Arbeit ist nicht mehr verfügbar (vor der Speicher-Migration verloren gegangen). Bitte lade die Prüfung erneut hoch.',
+      technicalDetails: combined,
+    };
+  }
+
+  // 7. Unknown fallback
   return {
     category: 'UNKNOWN',
     userMessage:

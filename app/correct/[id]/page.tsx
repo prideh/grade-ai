@@ -32,6 +32,7 @@ import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import PrintIcon from '@mui/icons-material/Print';
 import SaveIcon from '@mui/icons-material/Save';
 import ErrorIcon from '@mui/icons-material/Error';
+import CloudUploadIcon from '@mui/icons-material/CloudUpload';
 import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome';
 import { getErrorMessage } from '@/lib/api-error';
 import AddIcon from '@mui/icons-material/Add';
@@ -445,24 +446,45 @@ export default function CorrectWorkspace() {
         </Box>
 
         <Stack direction="row" spacing={2} sx={{ alignItems: 'center' }}>
-          <Button
-            variant="contained"
-            disabled={isRetrying}
-            onClick={handleRetry}
-            startIcon={
-              isRetrying ? <CircularProgress size={16} color="inherit" /> : <AutoAwesomeIcon />
-            }
-            sx={{
-              backgroundColor: '#0284c7',
-              borderRadius: '8px',
-              textTransform: 'none',
-              fontWeight: 700,
-              px: 3,
-              '&:hover': { backgroundColor: '#0369a1' },
-            }}
-          >
-            {isRetrying ? 'Starte neu...' : 'Erneut versuchen'}
-          </Button>
+          {data.errorMessage?.includes('nicht mehr verfügbar') ||
+          data.errorMessage?.includes('vor der Speicher-Migration') ||
+          data.errorMessage?.includes('Dokumenten-Scan') ? (
+            <Link href="/dashboard" passHref style={{ textDecoration: 'none' }}>
+              <Button
+                variant="contained"
+                startIcon={<CloudUploadIcon />}
+                sx={{
+                  backgroundColor: '#0284c7',
+                  borderRadius: '8px',
+                  textTransform: 'none',
+                  fontWeight: 700,
+                  px: 3,
+                  '&:hover': { backgroundColor: '#0369a1' },
+                }}
+              >
+                Prüfung neu hochladen
+              </Button>
+            </Link>
+          ) : (
+            <Button
+              variant="contained"
+              disabled={isRetrying}
+              onClick={handleRetry}
+              startIcon={
+                isRetrying ? <CircularProgress size={16} color="inherit" /> : <AutoAwesomeIcon />
+              }
+              sx={{
+                backgroundColor: '#0284c7',
+                borderRadius: '8px',
+                textTransform: 'none',
+                fontWeight: 700,
+                px: 3,
+                '&:hover': { backgroundColor: '#0369a1' },
+              }}
+            >
+              {isRetrying ? 'Starte neu...' : 'Erneut versuchen'}
+            </Button>
+          )}
 
           <Link href="/dashboard" passHref style={{ textDecoration: 'none' }}>
             <Button
