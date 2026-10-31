@@ -37,10 +37,29 @@ export function categorizeGeminiError(error: unknown): CategorizedGeminiError {
   while (curr && depth < 5) {
     if (curr instanceof Error) {
       parts.push(`${curr.name}: ${curr.message}`);
-      if ('code' in curr && typeof (curr as Record<string, unknown>).code === 'string') {
-        parts.push(`code=${(curr as Record<string, unknown>).code}`);
+      if ('code' in curr && typeof (curr as { code?: unknown }).code === 'string') {
+        parts.push(`code=${(curr as { code: string }).code}`);
       }
-      curr = (curr as { cause?: unknown }).cause;
+      if ('cause' in curr && curr.cause) {
+        curr = curr.cause;
+      } else {
+        break;
+      }
+    } else if (typeof curr === 'object' && curr !== null) {
+      if ('name' in curr && typeof (curr as { name?: unknown }).name === 'string') {
+        parts.push(String((curr as { name: string }).name));
+      }
+      if ('message' in curr && typeof (curr as { message?: unknown }).message === 'string') {
+        parts.push(String((curr as { message: string }).message));
+      }
+      if ('code' in curr && typeof (curr as { code?: unknown }).code === 'string') {
+        parts.push(`code=${(curr as { code: string }).code}`);
+      }
+      if ('cause' in curr && curr.cause) {
+        curr = curr.cause;
+      } else {
+        break;
+      }
     } else {
       parts.push(String(curr));
       break;

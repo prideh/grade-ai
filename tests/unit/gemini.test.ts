@@ -7,12 +7,14 @@ describe('Gemini Timeout & Error Categorization (lib/gemini.ts)', () => {
   });
 
   it('categorizes HeadersTimeoutError (UND_ERR_HEADERS_TIMEOUT) as TIMEOUT', () => {
-    const cause = new Error('Headers Timeout Error');
-    cause.name = 'HeadersTimeoutError';
-    (cause as Record<string, unknown>).code = 'UND_ERR_HEADERS_TIMEOUT';
+    const cause = Object.assign(new Error('Headers Timeout Error'), {
+      name: 'HeadersTimeoutError',
+      code: 'UND_ERR_HEADERS_TIMEOUT',
+    });
 
-    const err = new TypeError('fetch failed');
-    (err as Record<string, unknown>).cause = cause;
+    const err = Object.assign(new TypeError('fetch failed'), {
+      cause,
+    });
 
     const result = categorizeGeminiError(err);
     expect(result.category).toBe('TIMEOUT');
@@ -64,11 +66,13 @@ describe('Gemini Timeout & Error Categorization (lib/gemini.ts)', () => {
   });
 
   it('categorizes network disconnect (ECONNRESET / ENOTFOUND) as NETWORK', () => {
-    const cause = new Error('read ECONNRESET');
-    (cause as Record<string, unknown>).code = 'ECONNRESET';
+    const cause = Object.assign(new Error('read ECONNRESET'), {
+      code: 'ECONNRESET',
+    });
 
-    const err = new TypeError('fetch failed');
-    (err as Record<string, unknown>).cause = cause;
+    const err = Object.assign(new TypeError('fetch failed'), {
+      cause,
+    });
 
     const result = categorizeGeminiError(err);
     expect(result.category).toBe('NETWORK');

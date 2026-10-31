@@ -288,8 +288,31 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
           });
 
           // Prepare Task and Step corrections first to calculate deterministic server-side totals
-          const taskCorrectionsData = [];
-          const stepCorrectionsData = [];
+          const taskCorrectionsData: {
+            id: string;
+            submissionId: string;
+            taskId: string;
+            title: string;
+            studentAnswer: string;
+            erzieltePunkte: number;
+            maximalPunkte: number;
+            status: 'Korrekt' | 'Folgefehler' | 'Fehler';
+            lehrerKommentar: string;
+            orderIndex: number;
+          }[] = [];
+          const stepCorrectionsData: {
+            id: string;
+            taskCorrectionId: string;
+            schrittIndex: number;
+            schrittText: string;
+            istKorrekt: boolean;
+            fehlerTyp: 'KeinFehler' | 'Rechenfehler' | 'Folgefehler' | 'SonstigerFehler';
+            erreichtePunkte: number;
+            maximalPunkte: number;
+            begruendung: string;
+            istUnsicher: boolean;
+            unsicherheitsGrund: string | null;
+          }[] = [];
           let serverTotalEarnedPoints = 0;
           let serverTotalMaxPoints = 0;
 
