@@ -959,11 +959,15 @@ export default function Dashboard() {
                             }
                             sx={{ fontWeight: 'bold' }}
                           />
-                          {isFailed && job.errorMessage?.includes('bereits eine Korrektur') && (
+                          {isFailed && (
                             <Button
                               size="small"
                               variant="contained"
-                              color="error"
+                              color={
+                                job.errorMessage?.includes('bereits eine Korrektur')
+                                  ? 'error'
+                                  : 'primary'
+                              }
                               disabled={replacingSubmissionId === job.id}
                               onClick={() => handleReplaceSubmission(job.id)}
                               startIcon={
@@ -977,13 +981,24 @@ export default function Dashboard() {
                                 textTransform: 'none',
                                 fontWeight: 700,
                                 borderRadius: '8px',
-                                backgroundColor: '#dc2626',
-                                '&:hover': {
-                                  backgroundColor: '#b91c1c',
-                                },
+                                ...(job.errorMessage?.includes('bereits eine Korrektur')
+                                  ? {
+                                      backgroundColor: '#dc2626',
+                                      '&:hover': {
+                                        backgroundColor: '#b91c1c',
+                                      },
+                                    }
+                                  : {
+                                      backgroundColor: '#0284c7',
+                                      '&:hover': {
+                                        backgroundColor: '#0369a1',
+                                      },
+                                    }),
                               }}
                             >
-                              Korrektur ersetzen
+                              {job.errorMessage?.includes('bereits eine Korrektur')
+                                ? 'Korrektur ersetzen'
+                                : 'Erneut versuchen'}
                             </Button>
                           )}
                           <Link

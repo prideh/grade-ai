@@ -5,6 +5,7 @@ import {
   DEFAULT_GEMINI_MODEL,
   identifyExamAndStudentFromScan,
   runLiveGeminiCorrection,
+  categorizeGeminiError,
   type ExamCorrectionResult,
 } from '@/lib/gemini';
 import {
@@ -1010,8 +1011,11 @@ export async function POST(request: Request) {
         invalidateLogsCache(payload.teacherId);
       } catch (error) {
         const durationMs = Date.now() - startTime;
-        const errMsg = error instanceof Error ? error.message : String(error);
-        console.error(`Mobile relay background grading error for ${submissionId}:`, error);
+        const categorized = categorizeGeminiError(error);
+        console.error(
+          `Mobile relay background grading error for ${submissionId} [Category: ${categorized.category}]:`,
+          error
+        );
 
         try {
           await db.correctionLog.update({
@@ -1020,7 +1024,7 @@ export async function POST(request: Request) {
               status: 'FAILED',
               studentName: finalStudentName,
               durationMs,
-              errorMessage: errMsg,
+              errorMessage: `[${categorized.category}] ${categorized.userMessage}`,
             },
           });
         } catch {
@@ -1032,7 +1036,7 @@ export async function POST(request: Request) {
             where: { id: submissionId },
             data: {
               status: 'FAILED',
-              errorMessage: errMsg,
+              errorMessage: categorized.userMessage,
             },
           });
         } catch {

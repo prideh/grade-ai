@@ -83,6 +83,30 @@ export default function CorrectWorkspace() {
   const [addTaskMaxPoints, setAddTaskMaxPoints] = useState<number>(5);
   const [addTaskLoading, setAddTaskLoading] = useState<boolean>(false);
   const [addTaskError, setAddTaskError] = useState<string>('');
+  const [isRetrying, setIsRetrying] = useState<boolean>(false);
+  const [retryError, setRetryError] = useState<string>('');
+
+  const handleRetry = async () => {
+    if (!id) return;
+    setIsRetrying(true);
+    setRetryError('');
+    try {
+      const res = await fetch(`/api/submissions/${id}/replace`, {
+        method: 'POST',
+      });
+      if (res.ok) {
+        setData((prev) => (prev ? { ...prev, status: 'PROCESSING', errorMessage: null } : prev));
+      } else {
+        const errJson = await res.json().catch(() => ({}));
+        setRetryError(errJson.error || 'Fehler beim Neustart der Korrektur.');
+      }
+    } catch (e) {
+      console.error('Failed to retry submission:', e);
+      setRetryError('Netzwerkverbindung unterbrochen. Bitte versuche es erneut.');
+    } finally {
+      setIsRetrying(false);
+    }
+  };
 
   // Load submission data from PostgreSQL database
   const loadSubmission = React.useCallback(async () => {
@@ -406,26 +430,51 @@ export default function CorrectWorkspace() {
             Während der automatisierten Korrektur ist ein Fehler aufgetreten.
           </Typography>
 
-          <Alert severity="error" sx={{ textAlign: 'left', borderRadius: '8px', mb: 4 }}>
+          <Alert severity="error" sx={{ textAlign: 'left', borderRadius: '8px', mb: 3 }}>
             {data.errorMessage || 'Ein unbekannter Fehler ist aufgetreten.'}
           </Alert>
+
+          {retryError && (
+            <Alert severity="warning" sx={{ textAlign: 'left', borderRadius: '8px', mb: 3 }}>
+              {retryError}
+            </Alert>
+          )}
         </Box>
 
-        <Link href="/dashboard" passHref style={{ textDecoration: 'none' }}>
+        <Stack direction="row" spacing={2} sx={{ alignItems: 'center' }}>
           <Button
             variant="contained"
+            disabled={isRetrying}
+            onClick={handleRetry}
+            startIcon={
+              isRetrying ? <CircularProgress size={16} color="inherit" /> : <AutoAwesomeIcon />
+            }
             sx={{
-              backgroundColor: '#1b77d1',
+              backgroundColor: '#0284c7',
               borderRadius: '8px',
               textTransform: 'none',
-              fontWeight: 600,
-              px: 4,
-              '&:hover': { backgroundColor: '#1565c0' },
+              fontWeight: 700,
+              px: 3,
+              '&:hover': { backgroundColor: '#0369a1' },
             }}
           >
-            Zurück zum Dashboard
+            {isRetrying ? 'Starte neu...' : 'Erneut versuchen'}
           </Button>
-        </Link>
+
+          <Link href="/dashboard" passHref style={{ textDecoration: 'none' }}>
+            <Button
+              variant="outlined"
+              sx={{
+                borderRadius: '8px',
+                textTransform: 'none',
+                fontWeight: 600,
+                px: 3,
+              }}
+            >
+              Zurück zum Dashboard
+            </Button>
+          </Link>
+        </Stack>
       </Box>
     );
   }

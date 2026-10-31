@@ -4,6 +4,7 @@ import { getSession } from '@/lib/session';
 import {
   DEFAULT_GEMINI_MODEL,
   runLiveGeminiCorrection,
+  categorizeGeminiError,
   type ExamCorrectionResult,
 } from '@/lib/gemini';
 import {
@@ -736,10 +737,13 @@ export async function POST(request: Request) {
           return;
         }
 
-        console.error(`Background grading error for submission ${submissionId}:`, error);
-        const errMsg = error instanceof Error ? error.message : String(error);
+        const categorized = categorizeGeminiError(error);
+        console.error(
+          `Background grading error for submission ${submissionId} [Category: ${categorized.category}]:`,
+          error
+        );
 
-        // Update decoupled CorrectionLog to FAILED
+        // Update decoupled CorrectionLog to FAILED with monitoring category
         try {
           await db.correctionLog.update({
             where: { id: logRecord.id },
@@ -747,20 +751,20 @@ export async function POST(request: Request) {
               status: 'FAILED',
               studentName: finalStudentName,
               durationMs,
-              errorMessage: errMsg,
+              errorMessage: `[${categorized.category}] ${categorized.userMessage}`,
             },
           });
         } catch (logErr) {
           console.error('Failed to set FAILED state on CorrectionLog:', logErr);
         }
 
-        // Mark as FAILED in DB and store error details
+        // Mark as FAILED in DB and store teacher-facing error details
         try {
           await db.submission.update({
             where: { id: submissionId },
             data: {
               status: 'FAILED',
-              errorMessage: errMsg,
+              errorMessage: categorized.userMessage,
             },
           });
         } catch (dbErr) {

@@ -2,7 +2,12 @@ import { NextResponse, after } from 'next/server';
 import { db } from '@/lib/db';
 import { getSession } from '@/lib/session';
 import { checkAiRateLimit, createRateLimitResponse } from '@/lib/rate-limit';
-import { DEFAULT_GEMINI_MODEL, runLiveGeminiCorrection } from '@/lib/gemini';
+import {
+  DEFAULT_GEMINI_MODEL,
+  runLiveGeminiCorrection,
+  categorizeGeminiError,
+  type ExamCorrectionResult,
+} from '@/lib/gemini';
 import {
   calculateRawSwissGrade,
   calculateSwissGrade,
@@ -14,6 +19,7 @@ import { invalidateSubmissionCache, invalidateLogsCache } from '@/lib/cache';
 import {
   computeGradingHash,
   buildLlmCacheKey,
+  getCachedLlmResult,
   setCachedLlmResult,
   LLM_PROMPT_VERSIONS,
 } from '@/lib/llm-cache';
@@ -169,23 +175,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
               }))
             : undefined;
 
-        // Run live Gemini OCR and correction analysis
-        const result = await runLiveGeminiCorrection(
-          firstPage.data,
-          rubricParam,
-          modelToUse,
-          process.env.GEMINI_API_KEY,
-          firstPage.mimeType,
-          predefinedTasks,
-          submission.exam.subject,
-          {
-            examTemplate: examTemplateParam,
-            gradingNotes: submission.exam.gradingNotes,
-            additionalStudentPages: extraPages,
-          }
-        );
-
-        // Expliziter Re-Grade aktualisiert den LLM-Cache fuer zukuenftige identische Abfragen
+        // Content-Hash LLM Cache check: If identical scan was already cached, reuse it to avoid duplicate billing
         const promptVersion = LLM_PROMPT_VERSIONS.grading;
         const studentPages = [firstPage, ...extraPages];
         const gradingHash = computeGradingHash({
@@ -200,16 +190,49 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
           subject: submission.exam.subject,
         });
         const cacheKey = buildLlmCacheKey(session.userId, 'grading', gradingHash);
-        await setCachedLlmResult(cacheKey, {
-          result,
-          cachedAt: Date.now(),
-          cachedAtIso: new Date().toISOString(),
-          model: modelToUse,
-          hash: gradingHash,
-          callType: 'grading',
-          promptVersion,
-          teacherId: session.userId,
-        });
+
+        let result: ExamCorrectionResult;
+        let isReused = false;
+        let modelUsedForLog = modelToUse;
+
+        // On retry of a failed submission, check if cached result exists
+        const cached =
+          actionType === 'NEUSTART'
+            ? await getCachedLlmResult<ExamCorrectionResult>(cacheKey)
+            : null;
+        if (cached) {
+          result = cached.result;
+          isReused = true;
+          modelUsedForLog = cached.model;
+        } else {
+          // Run live Gemini OCR and correction analysis
+          result = await runLiveGeminiCorrection(
+            firstPage.data,
+            rubricParam,
+            modelToUse,
+            process.env.GEMINI_API_KEY,
+            firstPage.mimeType,
+            predefinedTasks,
+            submission.exam.subject,
+            {
+              examTemplate: examTemplateParam,
+              gradingNotes: submission.exam.gradingNotes,
+              additionalStudentPages: extraPages,
+            }
+          );
+
+          // Update LLM cache for future identical queries
+          await setCachedLlmResult(cacheKey, {
+            result,
+            cachedAt: Date.now(),
+            cachedAtIso: new Date().toISOString(),
+            model: modelToUse,
+            hash: gradingHash,
+            callType: 'grading',
+            promptVersion,
+            teacherId: session.userId,
+          });
+        }
 
         // Resolve student ID via calibrated auto-matching if student was not manually set previously
         let matchedStudentId = submission.studentId;
@@ -388,6 +411,8 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
             status: 'COMPLETED',
             studentName: finalStudentName,
             durationMs,
+            modelUsed: modelUsedForLog,
+            actionType: isReused ? 'WIEDERVERWENDET' : actionType,
           },
         });
 
@@ -431,10 +456,13 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
           return;
         }
 
-        console.error(`Background replace error for submission ${submissionId}:`, error);
-        const errMsg = error instanceof Error ? error.message : String(error);
+        const categorized = categorizeGeminiError(error);
+        console.error(
+          `Background replace error for submission ${submissionId} [Category: ${categorized.category}]:`,
+          error
+        );
 
-        // Update decouple CorrectionLog to FAILED
+        // Update decouple CorrectionLog to FAILED with monitoring category
         try {
           await db.correctionLog.update({
             where: { id: logRecord.id },
@@ -442,7 +470,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
               status: 'FAILED',
               studentName: finalStudentName,
               durationMs,
-              errorMessage: errMsg,
+              errorMessage: `[${categorized.category}] ${categorized.userMessage}`,
             },
           });
         } catch (logErr) {
@@ -454,7 +482,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
             where: { id: submissionId },
             data: {
               status: 'FAILED',
-              errorMessage: errMsg,
+              errorMessage: categorized.userMessage,
             },
           });
         } catch (dbErr) {

@@ -9,6 +9,119 @@ import {
 
 export const DEFAULT_GEMINI_MODEL = 'gemini-3.8-flash';
 
+// Shorter client-side timeout in milliseconds to prevent 300s undici HeadersTimeoutError hangs
+export const GEMINI_CLIENT_TIMEOUT_MS = 90_000; // 90 seconds
+
+export type GeminiErrorCategory =
+  | 'TIMEOUT'
+  | 'NETWORK'
+  | 'RATE_LIMIT'
+  | 'UPSTREAM_SERVICE'
+  | 'INVALID_RESPONSE'
+  | 'UNKNOWN';
+
+export interface CategorizedGeminiError {
+  category: GeminiErrorCategory;
+  userMessage: string;
+  technicalDetails: string;
+}
+
+/**
+ * Categorizes errors occurring during Gemini API calls into structured failure categories
+ * and produces teacher-facing messages following Swiss German conventions (strict "ss", no "ß").
+ */
+export function categorizeGeminiError(error: unknown): CategorizedGeminiError {
+  const parts: string[] = [];
+  let curr: unknown = error;
+  let depth = 0;
+  while (curr && depth < 5) {
+    if (curr instanceof Error) {
+      parts.push(`${curr.name}: ${curr.message}`);
+      if ('code' in curr && typeof (curr as Record<string, unknown>).code === 'string') {
+        parts.push(`code=${(curr as Record<string, unknown>).code}`);
+      }
+      curr = (curr as { cause?: unknown }).cause;
+    } else {
+      parts.push(String(curr));
+      break;
+    }
+    depth++;
+  }
+  const combined = parts.join(' | ');
+
+  // 1. Timeout (Client timeout, HeadersTimeoutError, UND_ERR_HEADERS_TIMEOUT, AbortError from timeout)
+  const isTimeout =
+    /timeout|headers\s*timeout|UND_ERR_HEADERS_TIMEOUT|UND_ERR_CONNECT_TIMEOUT|ETIMEDOUT|ESOCKETTIMEDOUT|AbortError|APIConnectionTimeoutError/i.test(
+      combined
+    );
+  if (isTimeout) {
+    return {
+      category: 'TIMEOUT',
+      userMessage:
+        'Zeitüberschreitung bei der Kommunikation mit dem KI-Dienst. Die Anfrage dauerte länger als 90 Sekunden. Bitte versuche die Korrektur erneut.',
+      technicalDetails: combined,
+    };
+  }
+
+  // 2. Rate Limit (429, Quota exceeded)
+  const isRateLimit = /rate\s*limit|quota|429|resource_exhausted/i.test(combined);
+  if (isRateLimit) {
+    return {
+      category: 'RATE_LIMIT',
+      userMessage:
+        'Das Anfragelimit des KI-Dienstes wurde erreicht. Bitte warte einen Moment und versuche es erneut.',
+      technicalDetails: combined,
+    };
+  }
+
+  // 3. Upstream service error (500, 502, 503, 504, overloaded)
+  const isUpstream =
+    /500|502|503|504|internal\s*server\s*error|service\s*unavailable|bad\s*gateway|overloaded/i.test(
+      combined
+    );
+  if (isUpstream) {
+    return {
+      category: 'UPSTREAM_SERVICE',
+      userMessage:
+        'Der KI-Dienst ist vorübergehend überlastet oder meldet einen Serverfehler. Bitte versuche es in Kürze erneut.',
+      technicalDetails: combined,
+    };
+  }
+
+  // 4. Network error (connection reset, refused, DNS lookup failure, socket closed)
+  const isNetwork =
+    /ECONNRESET|ECONNREFUSED|ENOTFOUND|EAI_AGAIN|UND_ERR_SOCKET|network|fetch failed|socket/i.test(
+      combined
+    );
+  if (isNetwork) {
+    return {
+      category: 'NETWORK',
+      userMessage:
+        'Netzwerkverbindung zum KI-Dienst unterbrochen. Bitte prüfe deine Internetverbindung und versuche es erneut.',
+      technicalDetails: combined,
+    };
+  }
+
+  // 5. Invalid / unparseable response
+  const isInvalidResponse = /JSON|SyntaxError|Leere Antwort/i.test(combined);
+  if (isInvalidResponse) {
+    return {
+      category: 'INVALID_RESPONSE',
+      userMessage:
+        'Die Antwort des KI-Dienstes war ungültig oder unvollständig. Bitte versuche die Korrektur erneut.',
+      technicalDetails: combined,
+    };
+  }
+
+  // 6. Unknown fallback
+  return {
+    category: 'UNKNOWN',
+    userMessage:
+      'Ein unerwarteter Fehler ist bei der KI-Korrektur aufgetreten. Bitte starte die Korrektur erneut.',
+    technicalDetails: combined,
+  };
+}
+
 // Interface for structured grading response
 export interface CorrectedStep {
   id?: string;
@@ -418,7 +531,10 @@ export async function runLiveGeminiCorrection(
     throw new Error('GEMINI_API_KEY is not defined in environment variables.');
   }
 
-  const ai = new GoogleGenAI({ apiKey });
+  const ai = new GoogleGenAI({
+    apiKey,
+    httpOptions: { timeout: GEMINI_CLIENT_TIMEOUT_MS },
+  });
 
   try {
     const contents: (string | { inlineData: { mimeType: string; data: string } })[] = [];
@@ -507,6 +623,8 @@ Verbindliche Template-Regeln:
         },
         temperature: 0.0,
         seed: 42,
+        abortSignal: AbortSignal.timeout(GEMINI_CLIENT_TIMEOUT_MS),
+        httpOptions: { timeout: GEMINI_CLIENT_TIMEOUT_MS },
       },
     });
 
@@ -611,7 +729,10 @@ export async function identifyExamAndStudentFromScan(
     }
   }
 
-  const ai = new GoogleGenAI({ apiKey });
+  const ai = new GoogleGenAI({
+    apiKey,
+    httpOptions: { timeout: GEMINI_CLIENT_TIMEOUT_MS },
+  });
 
   try {
     const contents: (string | { inlineData: { mimeType: string; data: string } })[] = [];
@@ -658,6 +779,8 @@ REGELN:
         },
         temperature: 0.0,
         seed: 42,
+        abortSignal: AbortSignal.timeout(GEMINI_CLIENT_TIMEOUT_MS),
+        httpOptions: { timeout: GEMINI_CLIENT_TIMEOUT_MS },
       },
     });
 
