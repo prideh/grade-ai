@@ -28,7 +28,7 @@ export interface CategorizedGeminiError {
 
 /**
  * Categorizes errors occurring during Gemini API calls into structured failure categories
- * and produces teacher-facing messages following Swiss German conventions (strict "ss", no "ß").
+ * and produces teacher-facing messages following Swiss German conventions (strict "ss", no Eszett).
  */
 export function categorizeGeminiError(error: unknown): CategorizedGeminiError {
   const parts: string[] = [];
