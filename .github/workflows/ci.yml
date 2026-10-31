@@ -1,4 +1,4 @@
-name: GradeAi CI/CD Pipeline
+name: pruefli CI/CD Pipeline
 
 on:
   push:
@@ -16,7 +16,8 @@ env:
 
 jobs:
   # ============================================================================
-  # STAGE 1: Fast Gate — Orthography, Lint, Type-Check & Unit Tests (~30s)
+  # STAGE 1: Fast Gate — Orthography, Lint, Type-Check & Unit Tests
+  # Runs in parallel with Stage 2 (build-and-smoke) to cut wall-clock latency
   # ============================================================================
   static-and-unit:
     name: 1. Lint, Typecheck & Unit Tests
@@ -31,7 +32,17 @@ jobs:
           node-version: '22'
           cache: 'npm'
 
+      - name: Cache node_modules & Generated Prisma Client
+        id: deps-cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            node_modules
+            lib/generated/prisma
+          key: ${{ runner.os }}-node22-deps-${{ hashFiles('package-lock.json', 'prisma/schema.prisma') }}
+
       - name: Install dependencies
+        if: steps.deps-cache.outputs.cache-hit != 'true'
         run: npm ci
 
       - name: Enforce Swiss German Orthography (No Eszett "ß")
@@ -52,10 +63,10 @@ jobs:
 
   # ============================================================================
   # STAGE 2: Production Build & Smoke Tests (Server Boot, Proxy Auth & Routes)
+  # Starts in parallel with Stage 1 (no sequential wait on static-and-unit)
   # ============================================================================
   build-and-smoke:
     name: 2. Production Build & Smoke Tests
-    needs: static-and-unit
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -83,8 +94,26 @@ jobs:
           node-version: '22'
           cache: 'npm'
 
+      - name: Cache node_modules & Generated Prisma Client
+        id: deps-cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            node_modules
+            lib/generated/prisma
+          key: ${{ runner.os }}-node22-deps-${{ hashFiles('package-lock.json', 'prisma/schema.prisma') }}
+
       - name: Install dependencies
+        if: steps.deps-cache.outputs.cache-hit != 'true'
         run: npm ci
+
+      - name: Cache Next.js Build Cache
+        uses: actions/cache@v4
+        with:
+          path: .next/cache
+          key: ${{ runner.os }}-nextjs-${{ hashFiles('package-lock.json') }}-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-nextjs-${{ hashFiles('package-lock.json') }}-
 
       - name: Push Prisma Schema to PostgreSQL
         run: npx prisma db push
@@ -96,7 +125,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: next-production-build
-          path: .next
+          path: |
+            .next
+            !.next/cache
           include-hidden-files: true
           retention-days: 1
 
@@ -151,7 +182,17 @@ jobs:
           node-version: '22'
           cache: 'npm'
 
+      - name: Cache node_modules & Generated Prisma Client
+        id: deps-cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            node_modules
+            lib/generated/prisma
+          key: ${{ runner.os }}-node22-deps-${{ hashFiles('package-lock.json', 'prisma/schema.prisma') }}
+
       - name: Install dependencies
+        if: steps.deps-cache.outputs.cache-hit != 'true'
         run: npm ci
 
       - name: Download Production Build (.next) Artifact

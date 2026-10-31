@@ -1,5 +1,5 @@
 #!/usr/bin/env sh
-# GradeAI Preflight Check Suite Entrypoint
+# prüefli (pruefli) Preflight Check Suite Entrypoint
 set -e
 DIR="$(cd "$(dirname "$0")/.." && pwd)"
 exec node "$DIR/scripts/preflight.mjs" "$@"
