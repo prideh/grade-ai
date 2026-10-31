@@ -45,29 +45,89 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
     getCachedTeacher()
   );
   const [loading, setLoading] = useState(!getCachedTeacher());
+  const [authError, setAuthError] = useState<string | null>(null);
 
-  // Proactively check auth and fetch profile
+  // Proactively check auth and fetch profile with resilience against cold-starts and network glitches
   useEffect(() => {
+    let isMounted = true;
+
     async function checkAuth() {
-      try {
-        const res = await fetch('/api/auth/me');
-        if (!res.ok) {
-          clearSessionCache();
-          router.replace('/login');
+      const maxRetries = 2;
+      let attempt = 0;
+
+      while (isMounted) {
+        try {
+          const res = await fetch('/api/auth/me');
+
+          if (res.ok) {
+            const data = await res.json();
+            if (isMounted) {
+              setTeacher(data.teacher);
+              setCachedTeacher(data.teacher);
+              setAuthError(null);
+              setLoading(false);
+            }
+            return;
+          }
+
+          if (res.status === 401) {
+            // If 401, retry once after a short delay in case of transient cookie race on fresh login
+            if (attempt < 1) {
+              attempt++;
+              await new Promise((resolve) => setTimeout(resolve, 300));
+              continue;
+            }
+
+            if (isMounted) {
+              clearSessionCache();
+              router.replace('/login');
+            }
+            return;
+          }
+
+          // Transient server error (5xx, 429, etc.)
+          if (attempt < maxRetries) {
+            attempt++;
+            await new Promise((resolve) => setTimeout(resolve, 400 * attempt));
+            continue;
+          }
+
+          // If all retries failed with 5xx
+          if (isMounted) {
+            if (getCachedTeacher()) {
+              setLoading(false);
+              return;
+            }
+            setAuthError('Die Verbindung zum Server konnte nicht hergestellt werden.');
+            setLoading(false);
+          }
+          return;
+        } catch (err) {
+          console.error('Failed to authenticate (transient network error):', err);
+          if (attempt < maxRetries) {
+            attempt++;
+            await new Promise((resolve) => setTimeout(resolve, 400 * attempt));
+            continue;
+          }
+
+          if (isMounted) {
+            if (getCachedTeacher()) {
+              setLoading(false);
+              return;
+            }
+            setAuthError('Netzwerkfehler beim Laden der Sitzung.');
+            setLoading(false);
+          }
           return;
         }
-        const data = await res.json();
-        setTeacher(data.teacher);
-        setCachedTeacher(data.teacher);
-      } catch (err) {
-        console.error('Failed to authenticate:', err);
-        clearSessionCache();
-        router.replace('/login');
-      } finally {
-        setLoading(false);
       }
     }
+
     checkAuth();
+
+    return () => {
+      isMounted = false;
+    };
   }, [router]);
 
   // Auto-dismiss any active dropdown/menu/popover when scrolling the page
@@ -304,6 +364,71 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
         <Typography variant="body2" sx={{ color: 'text.secondary', fontWeight: 600 }}>
           Sitzung wird geladen...
         </Typography>
+      </Box>
+    );
+  }
+
+  if (authError && !teacher) {
+    return (
+      <Box
+        sx={{
+          minHeight: '100vh',
+          background: '#f8fafc',
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          justifyContent: 'center',
+          p: 3,
+        }}
+      >
+        <Box
+          sx={{
+            maxWidth: 420,
+            width: '100%',
+            p: 4,
+            textAlign: 'center',
+            borderRadius: '16px',
+            backgroundColor: '#ffffff',
+            boxShadow: '0 10px 25px -5px rgba(0, 0, 0, 0.05)',
+            border: '1px solid #e2e8f0',
+          }}
+        >
+          <Typography variant="h6" sx={{ fontWeight: 800, mb: 1, color: '#0f172a' }}>
+            Verbindungsfehler
+          </Typography>
+          <Typography variant="body2" sx={{ color: 'text.secondary', mb: 3 }}>
+            {authError}
+          </Typography>
+          <Stack spacing={1.5}>
+            <Button
+              variant="contained"
+              onClick={() => {
+                setLoading(true);
+                setAuthError(null);
+                window.location.reload();
+              }}
+              sx={{
+                backgroundColor: '#1b77d1',
+                textTransform: 'none',
+                fontWeight: 700,
+                borderRadius: '8px',
+                p: '10px 16px',
+              }}
+            >
+              Erneut versuchen
+            </Button>
+            <Button
+              variant="text"
+              onClick={() => {
+                clearSessionCache();
+                router.replace('/login');
+              }}
+              sx={{ color: '#64748b', textTransform: 'none', fontWeight: 600 }}
+            >
+              Zurück zur Anmeldung
+            </Button>
+          </Stack>
+        </Box>
       </Box>
     );
   }

@@ -7,12 +7,10 @@ export async function GET() {
     const session = await getSession();
 
     if (!session) {
-      const response = NextResponse.json(
+      return NextResponse.json(
         { authenticated: false, error: 'Nicht autorisiert.' },
         { status: 401 }
       );
-      response.cookies.delete('grade_ai_session');
-      return response;
     }
 
     const teacher = await db.teacher.findUnique({
@@ -25,12 +23,10 @@ export async function GET() {
     });
 
     if (!teacher) {
-      const response = NextResponse.json(
+      return NextResponse.json(
         { authenticated: false, error: 'Benutzer existiert nicht mehr.' },
         { status: 401 }
       );
-      response.cookies.delete('grade_ai_session');
-      return response;
     }
 
     return NextResponse.json({

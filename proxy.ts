@@ -117,8 +117,10 @@ export async function proxy(request: NextRequest) {
 
   if (!user && isProtectedRoute) {
     const response = NextResponse.redirect(new URL('/login', request.url));
-    // Purge the old/invalid session cookie from the browser
-    response.cookies.delete(SESSION_COOKIE_NAME);
+    // Purge the old/invalid session cookie from the browser only if a cookie was actually present
+    if (session) {
+      response.cookies.delete(SESSION_COOKIE_NAME);
+    }
     return applySecurityHeaders(response, pathname);
   }
 

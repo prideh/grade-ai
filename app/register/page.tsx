@@ -24,6 +24,7 @@ import VisibilityOff from '@mui/icons-material/VisibilityOff';
 import EmailIcon from '@mui/icons-material/Email';
 import LockIcon from '@mui/icons-material/Lock';
 import PersonIcon from '@mui/icons-material/Person';
+import { setCachedTeacher } from '@/lib/sessionCache';
 
 export default function RegisterPage() {
   const router = useRouter();
@@ -36,13 +37,18 @@ export default function RegisterPage() {
 
   // Proactively check if already logged in
   useEffect(() => {
-    fetch('/api/auth/me')
+    const controller = new AbortController();
+    fetch('/api/auth/me', { signal: controller.signal })
       .then((res) => {
         if (res.ok) {
           router.replace('/dashboard');
         }
       })
       .catch(() => {});
+
+    return () => {
+      controller.abort();
+    };
   }, [router]);
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -73,7 +79,11 @@ export default function RegisterPage() {
         throw new Error(result.error || 'Registrierung fehlgeschlagen');
       }
 
-      router.push('/dashboard');
+      if (result.teacher) {
+        setCachedTeacher(result.teacher);
+      }
+      router.refresh();
+      router.replace('/dashboard');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Ein unerwarteter Fehler ist aufgetreten.');
       setLoading(false);
