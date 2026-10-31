@@ -12,6 +12,9 @@ export const DEFAULT_GEMINI_MODEL = 'gemini-3.8-flash';
 // Shorter client-side timeout in milliseconds to prevent 300s undici HeadersTimeoutError hangs
 export const GEMINI_CLIENT_TIMEOUT_MS = 90_000; // 90 seconds
 
+// Diagnostic probe timeout for manual health check (15 seconds)
+export const GEMINI_HEALTH_TIMEOUT_MS = 15_000; // 15 seconds
+
 export type GeminiErrorCategory =
   | 'TIMEOUT'
   | 'NETWORK'
@@ -19,6 +22,12 @@ export type GeminiErrorCategory =
   | 'UPSTREAM_SERVICE'
   | 'INVALID_RESPONSE'
   | 'UNKNOWN';
+
+export interface GeminiHealthResult {
+  ok: boolean;
+  latencyMs: number;
+  errorCategory?: GeminiErrorCategory;
+}
 
 export interface CategorizedGeminiError {
   category: GeminiErrorCategory;
@@ -139,6 +148,57 @@ export function categorizeGeminiError(error: unknown): CategorizedGeminiError {
       'Ein unerwarteter Fehler ist bei der KI-Korrektur aufgetreten. Bitte starte die Korrektur erneut.',
     technicalDetails: combined,
   };
+}
+
+/**
+ * Fast, non-billable health check for Gemini reachability and latency.
+ * Probes the model route and undici POST pipeline using countTokens with a minimal payload.
+ * Returns only ok, latencyMs, and an optional errorCategory — never key material, URLs, or model names.
+ */
+export async function checkGeminiHealth(
+  customApiKey?: string,
+  modelName: string = DEFAULT_GEMINI_MODEL,
+  timeoutMs: number = GEMINI_HEALTH_TIMEOUT_MS
+): Promise<GeminiHealthResult> {
+  const apiKey = customApiKey || process.env.GEMINI_API_KEY;
+  if (!apiKey) {
+    return {
+      ok: false,
+      latencyMs: 0,
+      errorCategory: 'UNKNOWN',
+    };
+  }
+
+  const ai = new GoogleGenAI({
+    apiKey,
+    httpOptions: { timeout: timeoutMs },
+  });
+
+  const startTime = Date.now();
+  try {
+    await ai.models.countTokens({
+      model: modelName,
+      contents: 'health-check',
+      config: {
+        abortSignal: AbortSignal.timeout(timeoutMs),
+        httpOptions: { timeout: timeoutMs },
+      },
+    });
+
+    const latencyMs = Math.max(0, Date.now() - startTime);
+    return {
+      ok: true,
+      latencyMs,
+    };
+  } catch (error) {
+    const latencyMs = Math.max(0, Date.now() - startTime);
+    const categorized = categorizeGeminiError(error);
+    return {
+      ok: false,
+      latencyMs,
+      errorCategory: categorized.category,
+    };
+  }
 }
 
 // Interface for structured grading response
