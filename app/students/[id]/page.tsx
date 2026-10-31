@@ -50,6 +50,7 @@ interface StatsData {
   averageGrade: string;
   classAverage: string;
   totalExamsCorrected: number;
+  status?: string;
   strengths: string[];
   weaknesses: string[];
   helpfulTips: string[];
@@ -292,8 +293,18 @@ export default function StudentDetailsPage() {
                     width: '44px',
                     height: '44px',
                     borderRadius: '10px',
-                    backgroundColor: '#dcfce7',
-                    color: '#16a34a',
+                    backgroundColor:
+                      !stats || stats.totalExamsCorrected === 0 || stats.averageGrade === 'N/A'
+                        ? '#f1f5f9'
+                        : parseFloat(stats.averageGrade) >= 4.0
+                          ? '#dcfce7'
+                          : '#fee2e2',
+                    color:
+                      !stats || stats.totalExamsCorrected === 0 || stats.averageGrade === 'N/A'
+                        ? '#64748b'
+                        : parseFloat(stats.averageGrade) >= 4.0
+                          ? '#16a34a'
+                          : '#dc2626',
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
@@ -310,16 +321,18 @@ export default function StudentDetailsPage() {
                     sx={{
                       fontWeight: 800,
                       color:
-                        stats &&
-                        stats.averageGrade !== 'N/A' &&
-                        parseFloat(stats.averageGrade) >= 4.0
-                          ? '#16a34a'
-                          : '#ef4444',
+                        !stats || stats.totalExamsCorrected === 0 || stats.averageGrade === 'N/A'
+                          ? '#64748b'
+                          : parseFloat(stats.averageGrade) >= 4.0
+                            ? '#16a34a'
+                            : '#ef4444',
                     }}
                   >
-                    {stats && stats.averageGrade !== 'N/A' && parseFloat(stats.averageGrade) >= 4.0
-                      ? 'Genügend'
-                      : 'Ungenügend'}
+                    {!stats || stats.totalExamsCorrected === 0 || stats.averageGrade === 'N/A'
+                      ? 'Keine Daten'
+                      : parseFloat(stats.averageGrade) >= 4.0
+                        ? 'Genügend'
+                        : 'Ungenügend'}
                   </Typography>
                 </Box>
               </CardContent>

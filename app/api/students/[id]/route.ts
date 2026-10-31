@@ -121,6 +121,12 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
         averageGrade: averageGrade > 0 ? averageGrade.toFixed(2) : 'N/A',
         classAverage: classAverage > 0 ? classAverage.toFixed(2) : 'N/A',
         totalExamsCorrected,
+        status:
+          totalExamsCorrected > 0
+            ? averageGrade >= 4.0
+              ? 'Genügend'
+              : 'Ungenügend'
+            : 'Keine Daten',
         strengths: Array.from(strengthsSet),
         weaknesses: Array.from(weaknessesSet),
         helpfulTips,
