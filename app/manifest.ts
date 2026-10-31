@@ -2,8 +2,8 @@ import type { MetadataRoute } from 'next';
 
 export default function manifest(): MetadataRoute.Manifest {
   return {
-    name: 'GradeAI - Intelligente Prüfungskorrektur',
-    short_name: 'GradeAI',
+    name: 'prüefli - Intelligente Prüfungskorrektur',
+    short_name: 'prüefli',
     description: 'Automatisierte Prüfungsbewertung mit Handschrifterkennung für Lehrpersonen.',
     start_url: '/',
     display: 'standalone',

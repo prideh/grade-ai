@@ -115,10 +115,7 @@ export default function LoginPage() {
               color: '#0f172a',
             }}
           >
-            Grade
-            <Box component="span" sx={{ color: '#1b77d1', fontWeight: 900 }}>
-              Ai
-            </Box>
+            prüefli
           </Typography>
         </Stack>
 

@@ -82,7 +82,7 @@ test.describe('Smoke Tests — Critical Availability, Security Boundaries & Orth
     const landingRes = await page.goto('/');
     expect(landingRes?.status()).toBe(200);
     const ogTitle = await page.locator('meta[property="og:title"]').getAttribute('content');
-    expect(ogTitle).toContain('GradeAI');
+    expect(ogTitle).toContain('prüefli');
     const canonical = await page.locator('link[rel="canonical"]').getAttribute('href');
     expect(canonical).toMatch(/^https?:\/\/.*grade-ai/);
 

@@ -164,10 +164,7 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
             color: '#0f172a',
           }}
         >
-          Grade
-          <Box component="span" sx={{ color: '#1b77d1', fontWeight: 850 }}>
-            Ai
-          </Box>
+          prüefli
         </Typography>
       </Box>
 
@@ -345,10 +342,7 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
               component="span"
               sx={{ fontWeight: 800, color: '#0f172a', fontSize: '1.1rem' }}
             >
-              Grade
-              <Box component="span" sx={{ color: '#1b77d1' }}>
-                Ai
-              </Box>
+              prüefli
             </Typography>
           </Stack>
           <IconButton

@@ -10,24 +10,24 @@ import ArrowForwardIcon from '@mui/icons-material/ArrowForward';
 import SchoolIcon from '@mui/icons-material/School';
 
 export const metadata: Metadata = {
-  title: 'GradeAI - Intelligente Prüfungskorrektur für Lehrpersonen',
+  title: 'prüefli - Intelligente Prüfungskorrektur für Lehrpersonen',
   description:
     'Die Schweizer Korrektur-Plattform für Schulen: Automatisierte Prüfungsbewertung mit Handschrifterkennung, Teilschritt-Bewertung und transparenter Fehleranalyse.',
   alternates: {
     canonical: '/',
   },
   openGraph: {
-    title: 'GradeAI - Intelligente Prüfungskorrektur für Lehrpersonen',
+    title: 'prüefli - Intelligente Prüfungskorrektur für Lehrpersonen',
     description:
       'Die Schweizer Korrektur-Plattform für Schulen: Automatisierte Prüfungsbewertung mit Handschrifterkennung, Teilschritt-Bewertung und transparenter Fehleranalyse.',
     url: '/',
-    siteName: 'GradeAI',
+    siteName: 'prüefli',
     images: [
       {
         url: '/og-image.png',
         width: 1200,
         height: 630,
-        alt: 'GradeAI - Intelligente Prüfungskorrektur für Lehrpersonen',
+        alt: 'prüefli - Intelligente Prüfungskorrektur für Lehrpersonen',
       },
     ],
     locale: 'de_CH',
@@ -35,7 +35,7 @@ export const metadata: Metadata = {
   },
   twitter: {
     card: 'summary_large_image',
-    title: 'GradeAI - Intelligente Prüfungskorrektur für Lehrpersonen',
+    title: 'prüefli - Intelligente Prüfungskorrektur für Lehrpersonen',
     description:
       'Die Schweizer Korrektur-Plattform für Schulen: Automatisierte Prüfungsbewertung mit Handschrifterkennung, Teilschritt-Bewertung und transparenter Fehleranalyse.',
     images: ['/og-image.png'],
@@ -96,10 +96,7 @@ export default function Home() {
               color: '#0f172a',
             }}
           >
-            Grade
-            <Box component="span" sx={{ color: '#1b77d1', fontWeight: 800 }}>
-              Ai
-            </Box>
+            prüefli
           </Typography>
         </Stack>
 
@@ -444,7 +441,7 @@ export default function Home() {
         }}
       >
         <Typography variant="body2" sx={{ color: '#666666' }}>
-          © 2026 GradeAi. Die intelligente Prüfungskorrektur für Schweizer Lehrpersonen.
+          © 2026 prüefli. Die intelligente Prüfungskorrektur für Schweizer Lehrpersonen.
         </Typography>
         <Stack direction="row" spacing={3}>
           <Link

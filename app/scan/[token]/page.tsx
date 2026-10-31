@@ -364,7 +364,7 @@ export default function MobileScanRelayPage() {
               {sessionError}
             </Alert>
             <Typography variant="body2" sx={{ color: 'text.secondary' }}>
-              Bitte öffne das GradeAI-Dashboard auf deinem Computer und klicke erneut auf{' '}
+              Bitte öffne das prüefli-Dashboard auf deinem Computer und klicke erneut auf{' '}
               <strong>&quot;Smartphone-Kamera (QR-Scan)&quot;</strong>.
             </Typography>
           </CardContent>
@@ -394,7 +394,7 @@ export default function MobileScanRelayPage() {
         <Stack direction="row" sx={{ justifyContent: 'space-between', alignItems: 'center' }}>
           <Box>
             <Typography variant="subtitle1" sx={{ fontWeight: 800, letterSpacing: '-0.01em' }}>
-              GradeAI · Smartphone-Scanner
+              prüefli · Smartphone-Scanner
             </Typography>
             <Typography variant="caption" sx={{ color: '#93c5fd', fontWeight: 600 }}>
               Verbunden mit {teacherName}

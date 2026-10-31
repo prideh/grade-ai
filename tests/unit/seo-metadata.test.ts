@@ -53,7 +53,7 @@ describe('SEO Metadata, Robots, Sitemap & Icons (Issue #17)', () => {
 
   it('app/manifest.ts liefert ein vollstaendiges Web-App-Manifest mit Icons', () => {
     const manifestData = manifest();
-    expect(manifestData.name).toContain('GradeAI');
+    expect(manifestData.name).toContain('prüefli');
     expect(manifestData.start_url).toBe('/');
     expect(manifestData.display).toBe('standalone');
     expect(manifestData.icons?.length).toBeGreaterThan(0);
@@ -72,7 +72,7 @@ describe('SEO Metadata, Robots, Sitemap & Icons (Issue #17)', () => {
 
     const og = homeMetadata.openGraph as Record<string, unknown>;
     expect(og).toBeDefined();
-    expect(og.title).toContain('GradeAI');
+    expect(og.title).toContain('prüefli');
     expect(og.type).toBe('website');
     expect(og.locale).toBe('de_CH');
     expect(Array.isArray(og.images)).toBe(true);

@@ -6,8 +6,8 @@ import './globals.css';
 export const metadata: Metadata = {
   metadataBase: new URL(getBaseUrl()),
   title: {
-    default: 'GradeAI - Intelligente Prüfungskorrektur für Lehrpersonen',
-    template: '%s | GradeAI',
+    default: 'prüefli - Intelligente Prüfungskorrektur für Lehrpersonen',
+    template: '%s | prüefli',
   },
   description:
     'Die Schweizer Korrektur-Plattform für Schulen: Automatisierte Prüfungsbewertung mit Handschrifterkennung, Teilschritt-Bewertung und transparenter Fehleranalyse.',

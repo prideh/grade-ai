@@ -1,6 +1,6 @@
-# Grade AI
+# prüefli
 
-Grade AI is an advanced K-12 grading and correction platform built for teachers. It automates and optimizes the tedious process of grading paper-based exams using modern multimodal artificial intelligence. By leveraging handwriting recognition (OCR) and deep mathematical reasoning, the application automates grading while keeping the teacher in complete control.
+prüefli is an advanced K-12 grading and correction platform built for teachers. It automates and optimizes the tedious process of grading paper-based exams using modern multimodal artificial intelligence. By leveraging handwriting recognition (OCR) and deep mathematical reasoning, the application automates grading while keeping the teacher in complete control.
 
 ---
 
@@ -15,7 +15,7 @@ Grade AI is an advanced K-12 grading and correction platform built for teachers.
 
 - Implements deep mathematical reasoning to analyze solution paths step-by-step.
 - If a student makes an initial calculation mistake (_Rechenfehler_), points are deducted only for that specific step.
-- If the student correctly applies subsequent formulas or logic using their incorrect intermediate values, Grade AI automatically identifies these as **Folgefehler** (carry-over errors).
+- If the student correctly applies subsequent formulas or logic using their incorrect intermediate values, prüefli automatically identifies these as **Folgefehler** (carry-over errors).
 - Student receives **full partial credits (_Teilpunkte_)** for subsequent steps, preventing unfair double-penalization in accordance with Swiss and European educational standards.
 
 ### 3. Automatic Rubric & Key Parsing
@@ -141,7 +141,7 @@ Launch the local Next.js development server:
 npm run dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) in your web browser to explore Grade AI.
+Open [http://localhost:3000](http://localhost:3000) in your web browser to explore prüefli.
 
 ---
 

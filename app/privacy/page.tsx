@@ -21,7 +21,7 @@ import PolicyIcon from '@mui/icons-material/Policy';
 export const metadata: Metadata = {
   title: 'Datenschutzerklärung',
   description:
-    'Informationen zum Datenschutz, zu technisch notwendigen Cookies und zur Datenverarbeitung von GradeAI.',
+    'Informationen zum Datenschutz, zu technisch notwendigen Cookies und zur Datenverarbeitung von prüefli.',
 };
 
 export default function PrivacyPage() {
@@ -96,7 +96,7 @@ export default function PrivacyPage() {
               <Typography variant="body1" sx={{ color: '#64748b', lineHeight: 1.6 }}>
                 Transparenz und Datensicherheit für Lehrpersonen. Diese Erklärung informiert Sie
                 umfassend über die Erhebung, Verarbeitung und den Schutz von Daten bei der Nutzung
-                der Korrektur-Plattform GradeAI.
+                der Korrektur-Plattform prüefli.
               </Typography>
             </Box>
 
@@ -147,7 +147,7 @@ export default function PrivacyPage() {
                   </Typography>
                 </Stack>
                 <Typography variant="body2" sx={{ color: '#334155', lineHeight: 1.7 }}>
-                  GradeAI wird über die Cloud-Plattform <strong>Render</strong> (Render Services
+                  prüefli wird über die Cloud-Plattform <strong>Render</strong> (Render Services
                   Inc.) bereitgestellt. Die Anwendung und die relationale PostgreSQL-Datenbank
                   werden in der europäischen Server-Region{' '}
                   <strong>Frankfurt am Main (Deutschland / EU)</strong> betrieben. Sämtliche
@@ -166,7 +166,7 @@ export default function PrivacyPage() {
                   </Typography>
                 </Stack>
                 <Typography variant="body2" sx={{ color: '#334155', lineHeight: 1.7, mb: 2 }}>
-                  GradeAI setzt <strong>keine</strong> Tracking-, Werbe- oder Analyse-Cookies ein.
+                  prüefli setzt <strong>keine</strong> Tracking-, Werbe- oder Analyse-Cookies ein.
                   Es existiert genau ein einziges First-Party-Cookie, welches für den Betrieb der
                   Plattform technisch zwingend erforderlich ist:
                 </Typography>
@@ -208,7 +208,7 @@ export default function PrivacyPage() {
                   </Typography>
                 </Stack>
                 <Typography variant="body2" sx={{ color: '#334155', lineHeight: 1.7 }}>
-                  Beim Laden von GradeAI werden vom Browser des Nutzers{' '}
+                  Beim Laden von prüefli werden vom Browser des Nutzers{' '}
                   <strong>keine externen Drittanbieter-Ressourcen</strong> nachgeladen. Sämtliche
                   Schriftarten werden direkt über den System-Schriften-Stack Ihres Betriebssystems
                   bezogen (keine IP-Übertragung an Google Fonts oder externe Content Delivery
@@ -227,7 +227,7 @@ export default function PrivacyPage() {
                 </Stack>
                 <Typography variant="body2" sx={{ color: '#334155', lineHeight: 1.7, mb: 1.5 }}>
                   Zur automatisierten Handschrift- und Textanalyse sowie zur Korrekturunterstützung
-                  von Prüfungsaufgaben nutzt GradeAI serverseitig die{' '}
+                  von Prüfungsaufgaben nutzt prüefli serverseitig die{' '}
                   <strong>Google Gemini API</strong>. Prüfungsmusterlösungen und eingereichte
                   Aufgabenblätter werden verschlüsselt von unserem Server an die API übermittelt, um
                   Teilschrittbewertungen, Fehlerkategorisierungen und didaktisches Feedback zu
@@ -286,7 +286,7 @@ export default function PrivacyPage() {
               sx={{ justifyContent: 'space-between', alignItems: 'center' }}
             >
               <Typography variant="caption" sx={{ color: '#94a3b8' }}>
-                Stand: Oktober 2026 • GradeAI für Schweizer Lehrpersonen
+                Stand: Oktober 2026 • prüefli für Schweizer Lehrpersonen
               </Typography>
               <Link href="/" style={{ textDecoration: 'none' }}>
                 <Button
