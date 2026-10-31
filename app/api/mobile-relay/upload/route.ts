@@ -27,6 +27,7 @@ import crypto from 'crypto';
 import { isExamApproved } from '@/lib/exam-meta';
 import { checkAiRateLimit, createRateLimitResponse } from '@/lib/rate-limit';
 import { validateRelayPages, createPayloadErrorResponse } from '@/lib/payload-limits';
+import { deduplicatePayloadsByHash } from '@/lib/relay-dedup';
 
 function parseStoredMaterial(
   rawText?: string | null
@@ -107,7 +108,7 @@ export async function POST(request: Request) {
     const effectiveTargetMode = explicitTargetMode || payload.targetMode || 'SUBMISSION';
 
     // Convert uploaded files into base64 payloads & validate MIME
-    const pagePayloads: { mimeType: string; data: string; ext: string; buffer: Buffer }[] = [];
+    const rawPagePayloads: { mimeType: string; data: string; ext: string; buffer: Buffer }[] = [];
     for (let idx = 0; idx < rawPages.length; idx++) {
       const file = rawPages[idx];
       const safeFormat = resolveSafeFileFormat(file);
@@ -119,12 +120,24 @@ export async function POST(request: Request) {
       }
       const bytes = await file.arrayBuffer();
       const buffer = Buffer.from(bytes);
-      pagePayloads.push({
+      rawPagePayloads.push({
         mimeType: safeFormat.mimeType,
         data: buffer.toString('base64'),
         ext: safeFormat.ext,
         buffer,
       });
+    }
+
+    // Deduplicate byte-identical pages while preserving original page order
+    const pagePayloads = deduplicatePayloadsByHash(rawPagePayloads, (p) =>
+      crypto.createHash('sha256').update(p.buffer).digest('hex')
+    );
+
+    if (pagePayloads.length === 0) {
+      return NextResponse.json(
+        { error: 'Bitte mindestens eine gültige Seite fotografieren.' },
+        { status: 400 }
+      );
     }
 
     // =========================================================================
@@ -1038,7 +1051,7 @@ export async function POST(request: Request) {
     return NextResponse.json({
       success: true,
       submissionId: submission.id,
-      pagesCount: rawPages.length,
+      pagesCount: pagePayloads.length,
       status: 'PENDING',
     });
   } catch (error) {

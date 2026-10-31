@@ -28,6 +28,7 @@ import DeleteIcon from '@mui/icons-material/Delete';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome';
 import AddPhotoAlternateIcon from '@mui/icons-material/AddPhotoAlternate';
+import { deduplicateRelayFiles, assembleCapturedPages } from '@/lib/relay-dedup';
 
 interface RelayStudentOption {
   id: string;
@@ -206,13 +207,14 @@ export default function MobileScanRelayPage() {
   const availableStudents = activeExamObj?.students || [];
 
   const submitPages = async (pagesToSubmit: File[]) => {
-    if (pagesToSubmit.length === 0) return;
+    const distinctPages = deduplicateRelayFiles(pagesToSubmit);
+    if (distinctPages.length === 0) return;
     setUploading(true);
     setUploadErrorMsg('');
     setUploadSuccessMsg('');
 
     try {
-      const optimizedFiles = await Promise.all(pagesToSubmit.map((f) => optimizeMobileImage(f)));
+      const optimizedFiles = await Promise.all(distinctPages.map((f) => optimizeMobileImage(f)));
       const formData = new FormData();
       formData.append('token', token);
       formData.append('targetMode', activeMode);
@@ -241,25 +243,27 @@ export default function MobileScanRelayPage() {
         capturedPages.forEach((p) => URL.revokeObjectURL(p.previewUrl));
         setCapturedPages([]);
 
+        const effectiveCount =
+          typeof data?.pagesCount === 'number' ? data.pagesCount : distinctPages.length;
+        const pageLabel = effectiveCount === 1 ? 'Seite' : 'Seiten';
+
         if (activeMode === 'RUBRIC') {
           setUploadSuccessMsg(
-            `Musterlösung (${pagesToSubmit.length} ${pagesToSubmit.length === 1 ? 'Seite' : 'Seiten'}) an Desktop übertragen!`
+            `Musterlösung (${effectiveCount} ${pageLabel}) an Desktop übertragen!`
           );
         } else if (activeMode === 'EXAM_TEMPLATE') {
           setUploadSuccessMsg(
-            `Vorlagenprüfung (${pagesToSubmit.length} ${pagesToSubmit.length === 1 ? 'Seite' : 'Seiten'}) an Desktop übertragen!`
+            `Vorlagenprüfung (${effectiveCount} ${pageLabel}) an Desktop übertragen!`
           );
         } else if (activeMode === 'APPEND_SUBMISSION') {
           setUploadSuccessMsg(
-            `${pagesToSubmit.length} ${pagesToSubmit.length === 1 ? 'Seite' : 'Seiten'} angehängt! KI aktualisiert die Korrektur.`
+            `${effectiveCount} ${pageLabel} angehängt! KI aktualisiert die Korrektur.`
           );
         } else if (activeMode === 'REPLACE_SUBMISSION') {
-          setUploadSuccessMsg(
-            `Scan ersetzt (${pagesToSubmit.length} ${pagesToSubmit.length === 1 ? 'Seite' : 'Seiten'})! KI korrigiert neu.`
-          );
+          setUploadSuccessMsg(`Scan ersetzt (${effectiveCount} ${pageLabel})! KI korrigiert neu.`);
         } else {
           setUploadSuccessMsg(
-            `Prüfung (${pagesToSubmit.length} ${pagesToSubmit.length === 1 ? 'Seite' : 'Seiten'}) gesendet! KI-Korrektur läuft.`
+            `Prüfung (${effectiveCount} ${pageLabel}) gesendet! KI-Korrektur läuft.`
           );
           // Reset manual student override back to AUTO unless locked to a specific student
           if (!lockedStudentId) {
@@ -284,18 +288,32 @@ export default function MobileScanRelayPage() {
     setUploadSuccessMsg('');
     setUploadErrorMsg('');
 
+    const distinctIncoming = deduplicateRelayFiles(filesArray);
+    if (distinctIncoming.length === 0) return;
+
     if (quickSinglePageMode) {
-      await submitPages(filesArray);
+      await submitPages(distinctIncoming);
       return;
     }
 
-    const newEntries: CapturedPage[] = filesArray.map((file) => ({
+    const newEntries: CapturedPage[] = distinctIncoming.map((file) => ({
       id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
       file,
       previewUrl: URL.createObjectURL(file),
     }));
 
-    setCapturedPages((prev) => [...prev, ...newEntries]);
+    setCapturedPages((prev) => {
+      const { pages, droppedCount } = assembleCapturedPages(prev, newEntries);
+      if (droppedCount > 0) {
+        const keptIds = new Set(pages.map((p) => p.id));
+        for (const entry of newEntries) {
+          if (!keptIds.has(entry.id)) {
+            URL.revokeObjectURL(entry.previewUrl);
+          }
+        }
+      }
+      return pages;
+    });
   };
 
   const handleRemovePage = (id: string) => {

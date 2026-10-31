@@ -25,6 +25,7 @@ import RefreshIcon from '@mui/icons-material/Refresh';
 import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome';
 import CloudUploadIcon from '@mui/icons-material/CloudUpload';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
+import { deduplicateRelayFiles } from '@/lib/relay-dedup';
 
 export type QrTargetMode =
   | 'SUBMISSION'
@@ -176,8 +177,9 @@ export default function QrScannerDialog({
   };
 
   const handlePcFilesSelected = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = e.target.files ? Array.from(e.target.files) : [];
+    const rawFiles = e.target.files ? Array.from(e.target.files) : [];
     e.target.value = '';
+    const files = deduplicateRelayFiles(rawFiles);
     if (files.length === 0 || !token) return;
 
     setPcUploading(true);
@@ -201,10 +203,11 @@ export default function QrScannerDialog({
         throw new Error(data.error || 'Upload fehlgeschlagen.');
       }
 
+      const effectiveCount = typeof data?.pagesCount === 'number' ? data.pagesCount : files.length;
       setPcUploadSuccess(
         studentName
-          ? `Arbeit für ${studentName} (${files.length} ${files.length === 1 ? 'Datei' : 'Dateien'}) hochgeladen — KI-Korrektur gestartet!`
-          : `${files.length} ${files.length === 1 ? 'Datei' : 'Dateien'} erfolgreich hochgeladen — KI-Korrektur läuft!`
+          ? `Arbeit für ${studentName} (${effectiveCount} ${effectiveCount === 1 ? 'Datei' : 'Dateien'}) hochgeladen — KI-Korrektur gestartet!`
+          : `${effectiveCount} ${effectiveCount === 1 ? 'Datei' : 'Dateien'} erfolgreich hochgeladen — KI-Korrektur läuft!`
       );
       if (onRefreshSubmissions) {
         onRefreshSubmissions();
