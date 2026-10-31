@@ -50,6 +50,7 @@ import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome';
 import ErrorIcon from '@mui/icons-material/Error';
 import InfoOutlinedIcon from '@mui/icons-material/InfoOutlined';
 import { getErrorMessage } from '@/lib/api-error';
+import { getDashboardJobTitle } from '@/lib/job-title';
 import StarIcon from '@mui/icons-material/Star';
 import StarBorderIcon from '@mui/icons-material/StarBorder';
 import QrCodeScannerIcon from '@mui/icons-material/QrCodeScanner';
@@ -904,7 +905,20 @@ export default function Dashboard() {
 
                           <Box sx={{ overflow: 'hidden', textAlign: 'left' }}>
                             <Typography variant="body2" sx={{ fontWeight: 700, color: '#1e293b' }}>
-                              {job.studentName === 'Nicht zugeordnet' ? (
+                              {job.studentName === 'Nicht zugeordnet' && isFailed ? (
+                                <Box
+                                  component="span"
+                                  sx={{
+                                    color: 'error.main',
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    gap: '4px',
+                                  }}
+                                >
+                                  {getDashboardJobTitle(job)}
+                                </Box>
+                              ) : job.studentName === 'Nicht zugeordnet' &&
+                                (isProcessing || job.status === 'PENDING') ? (
                                 <Box
                                   component="span"
                                   sx={{
@@ -914,11 +928,10 @@ export default function Dashboard() {
                                     gap: '4px',
                                   }}
                                 >
-                                  🤖 Auto-Match läuft... ({job.examTitle.split(':')[0]}) (
-                                  {job.className})
+                                  {getDashboardJobTitle(job)}
                                 </Box>
                               ) : (
-                                `${job.studentName} — ${job.examTitle} (${job.className})`
+                                getDashboardJobTitle(job)
                               )}
                             </Typography>
                             <Typography
