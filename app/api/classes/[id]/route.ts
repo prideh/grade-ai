@@ -3,6 +3,7 @@ import { db } from '@/lib/db';
 import { getSession } from '@/lib/session';
 import { serverCache, CacheTags, invalidateClassCache, invalidateLogsCache } from '@/lib/cache';
 import { deleteClassScanFiles, StorageCleanupError } from '@/lib/storage-cleanup';
+import { validateClassName } from '@/lib/payload-limits';
 
 // GET: Fetch class details, students roster, and class statistics
 export async function GET(request: Request, { params }: { params: Promise<{ id: string }> }) {
@@ -184,8 +185,9 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
     const body = await request.json();
     const { name } = body;
 
-    if (!name || typeof name !== 'string' || name.trim() === '') {
-      return NextResponse.json({ error: 'Klassenname ist erforderlich.' }, { status: 400 });
+    const validation = validateClassName(name);
+    if (!validation.valid) {
+      return NextResponse.json({ error: validation.error }, { status: validation.status || 400 });
     }
 
     // Verify class ownership
@@ -197,9 +199,10 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
       return NextResponse.json({ error: 'Klasse nicht gefunden.' }, { status: 404 });
     }
 
+    const trimmedName = (name as string).trim();
     const updatedClass = await db.class.update({
       where: { id: classId },
-      data: { name: name.trim() },
+      data: { name: trimmedName },
     });
 
     await invalidateClassCache(session.userId, classId);
@@ -210,6 +213,8 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
     return NextResponse.json({ error: 'Fehler beim Aktualisieren der Klasse.' }, { status: 500 });
   }
 }
+
+export const PATCH = PUT;
 
 // DELETE: Delete class (cleans up scan files in storage, then cascade deletes all students, exams, and submissions via Prisma)
 export async function DELETE(request: Request, { params }: { params: Promise<{ id: string }> }) {

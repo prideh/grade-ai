@@ -414,3 +414,32 @@ export function createPayloadErrorResponse(validation: ValidationResult): NextRe
     { status: validation.status || 413 }
   );
 }
+
+/**
+ * Maximale Längenbeschränkung für Klassennamen (Standard: 100 Zeichen).
+ */
+export const MAX_CLASS_NAME_LENGTH = 100;
+
+/**
+ * Validiert einen Klassennamen serverseitig auf Existenz und maximale Länge.
+ */
+export function validateClassName(name: unknown): ValidationResult {
+  if (name === null || name === undefined || typeof name !== 'string' || name.trim() === '') {
+    return {
+      valid: false,
+      error: 'Klassenname ist erforderlich.',
+      status: 400,
+    };
+  }
+
+  const trimmed = name.trim();
+  if (trimmed.length > MAX_CLASS_NAME_LENGTH) {
+    return {
+      valid: false,
+      error: `Der Klassenname ist zu lang. Maximal ${MAX_CLASS_NAME_LENGTH} Zeichen sind erlaubt.`,
+      status: 400,
+    };
+  }
+
+  return { valid: true };
+}

@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { getSession } from '@/lib/session';
 import { serverCache, CacheTags, invalidateClassCache } from '@/lib/cache';
+import { validateClassName } from '@/lib/payload-limits';
 
 export async function GET() {
   try {
@@ -74,13 +75,16 @@ export async function POST(request: Request) {
     const body = await request.json();
     const { name } = body;
 
-    if (!name || typeof name !== 'string' || name.trim() === '') {
-      return NextResponse.json({ error: 'Klassenname ist erforderlich.' }, { status: 400 });
+    const validation = validateClassName(name);
+    if (!validation.valid) {
+      return NextResponse.json({ error: validation.error }, { status: validation.status || 400 });
     }
+
+    const trimmedName = (name as string).trim();
 
     const existingClass = await db.class.findFirst({
       where: {
-        name: name.trim(),
+        name: trimmedName,
         teacherId: session.userId,
       },
     });
@@ -94,7 +98,7 @@ export async function POST(request: Request) {
 
     const schoolClass = await db.class.create({
       data: {
-        name: name.trim(),
+        name: trimmedName,
         teacherId: session.userId,
       },
     });

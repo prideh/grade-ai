@@ -122,23 +122,32 @@ export default function ClassesPage() {
   const handleOpenRename = (cls: ClassListItem) => {
     setRenameTargetClass(cls);
     setRenamedClassName(cls.name); // Prefill current class name
-    setRenameError('');
+    if (cls.name.trim().length > 100) {
+      setRenameError('Der Klassenname ist zu lang. Maximal 100 Zeichen sind erlaubt.');
+    } else {
+      setRenameError('');
+    }
     setOpenRename(true);
   };
 
   const handleRenameSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!renameTargetClass || !renamedClassName.trim()) {
+    const trimmed = renamedClassName.trim();
+    if (!renameTargetClass || !trimmed) {
       setRenameError('Bitte gib einen Klassennamen an.');
+      return;
+    }
+    if (trimmed.length > 100) {
+      setRenameError('Der Klassenname ist zu lang. Maximal 100 Zeichen sind erlaubt.');
       return;
     }
     setRenameLoading(true);
     setRenameError('');
     try {
       const res = await fetch(`/api/classes/${renameTargetClass.id}`, {
-        method: 'PATCH',
+        method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: renamedClassName.trim() }),
+        body: JSON.stringify({ name: trimmed }),
       });
       if (!res.ok) {
         const errorMsg = await getErrorMessage(res, 'Klassenname konnte nicht geändert werden.');
@@ -161,8 +170,13 @@ export default function ClassesPage() {
 
   const handleCreateClass = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newClassName.trim()) {
+    const trimmed = newClassName.trim();
+    if (!trimmed) {
       setCreateError('Bitte gib einen Klassennamen an.');
+      return;
+    }
+    if (trimmed.length > 100) {
+      setCreateError('Der Klassenname ist zu lang. Maximal 100 Zeichen sind erlaubt.');
       return;
     }
 
@@ -173,7 +187,7 @@ export default function ClassesPage() {
       const res = await fetch('/api/classes', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: newClassName }),
+        body: JSON.stringify({ name: trimmed }),
       });
 
       if (!res.ok) {
@@ -325,6 +339,8 @@ export default function ClassesPage() {
                                 color: '#0f172a',
                                 transition: 'color 0.15s ease',
                                 cursor: 'pointer',
+                                wordBreak: 'break-word',
+                                overflowWrap: 'anywhere',
                                 '&:hover': {
                                   color: '#1b77d1',
                                   textDecoration: 'underline',
@@ -525,7 +541,24 @@ export default function ClassesPage() {
                   fullWidth
                   variant="outlined"
                   value={newClassName}
-                  onChange={(e) => setNewClassName(e.target.value)}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    setNewClassName(val);
+                    if (val.trim().length > 100) {
+                      setCreateError(
+                        'Der Klassenname ist zu lang. Maximal 100 Zeichen sind erlaubt.'
+                      );
+                    } else if (createError) {
+                      setCreateError('');
+                    }
+                  }}
+                  error={!!createError || newClassName.trim().length > 100}
+                  helperText={
+                    createError ||
+                    (newClassName.trim().length > 100
+                      ? 'Der Klassenname ist zu lang. Maximal 100 Zeichen sind erlaubt.'
+                      : `${newClassName.length}/100 Zeichen`)
+                  }
                   autoFocus
                   sx={{
                     '& .MuiOutlinedInput-root': {
@@ -561,7 +594,9 @@ export default function ClassesPage() {
                 <Button
                   type="submit"
                   variant="contained"
-                  disabled={createLoading}
+                  disabled={
+                    createLoading || !newClassName.trim() || newClassName.trim().length > 100
+                  }
                   sx={{
                     textTransform: 'none',
                     fontWeight: 700,
@@ -598,7 +633,24 @@ export default function ClassesPage() {
                   fullWidth
                   variant="outlined"
                   value={renamedClassName}
-                  onChange={(e) => setRenamedClassName(e.target.value)}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    setRenamedClassName(val);
+                    if (val.trim().length > 100) {
+                      setRenameError(
+                        'Der Klassenname ist zu lang. Maximal 100 Zeichen sind erlaubt.'
+                      );
+                    } else if (renameError) {
+                      setRenameError('');
+                    }
+                  }}
+                  error={!!renameError || renamedClassName.trim().length > 100}
+                  helperText={
+                    renameError ||
+                    (renamedClassName.trim().length > 100
+                      ? 'Der Klassenname ist zu lang. Maximal 100 Zeichen sind erlaubt.'
+                      : `${renamedClassName.length}/100 Zeichen`)
+                  }
                   autoFocus
                   sx={{
                     '& .MuiOutlinedInput-root': {
@@ -637,7 +689,11 @@ export default function ClassesPage() {
                 <Button
                   type="submit"
                   variant="contained"
-                  disabled={renameLoading || !renamedClassName.trim()}
+                  disabled={
+                    renameLoading ||
+                    !renamedClassName.trim() ||
+                    renamedClassName.trim().length > 100
+                  }
                   sx={{
                     textTransform: 'none',
                     fontWeight: 700,

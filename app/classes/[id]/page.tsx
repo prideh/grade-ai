@@ -179,6 +179,9 @@ export default function ClassDetailsPage() {
   const handleOpenEditClass = () => {
     setEditClassError('');
     setEditedClassName(classData?.name || '');
+    if ((classData?.name || '').trim().length > 100) {
+      setEditClassError('Der Klassenname ist zu lang. Maximal 100 Zeichen sind erlaubt.');
+    }
     setOpenEditClass(true);
   };
 
@@ -422,7 +425,15 @@ export default function ClassDetailsPage() {
   // EDIT Class Name
   const handleEditClass = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!editedClassName.trim()) return;
+    const trimmed = editedClassName.trim();
+    if (!trimmed) {
+      setEditClassError('Klassenname ist erforderlich.');
+      return;
+    }
+    if (trimmed.length > 100) {
+      setEditClassError('Der Klassenname ist zu lang. Maximal 100 Zeichen sind erlaubt.');
+      return;
+    }
 
     setStudentActionLoading(true);
     setEditClassError('');
@@ -430,7 +441,7 @@ export default function ClassDetailsPage() {
       const res = await fetch(`/api/classes/${classId}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: editedClassName }),
+        body: JSON.stringify({ name: trimmed }),
       });
       if (!res.ok) {
         const errorMsg = await getErrorMessage(res, 'Klassenname konnte nicht geändert werden.');
@@ -507,15 +518,24 @@ export default function ClassDetailsPage() {
             sx={{
               display: 'flex',
               justifyContent: 'space-between',
-              alignItems: 'center',
+              alignItems: { xs: 'flex-start', sm: 'center' },
               flexWrap: 'wrap',
               gap: 2,
+              width: '100%',
+              minWidth: 0,
             }}
           >
-            <Box>
+            <Box sx={{ minWidth: 0, flex: '1 1 300px', maxWidth: '100%' }}>
               <Typography
                 variant="h4"
-                sx={{ fontWeight: 800, color: '#0f172a', letterSpacing: '-0.02em', mb: 0.5 }}
+                sx={{
+                  fontWeight: 800,
+                  color: '#0f172a',
+                  letterSpacing: '-0.02em',
+                  mb: 0.5,
+                  wordBreak: 'break-word',
+                  overflowWrap: 'anywhere',
+                }}
               >
                 {classData?.name}
               </Typography>
@@ -524,12 +544,26 @@ export default function ClassDetailsPage() {
               </Typography>
             </Box>
 
-            <Stack direction="row" spacing={1.5}>
+            <Stack
+              direction="row"
+              spacing={1.5}
+              sx={{
+                flexShrink: 0,
+                alignItems: 'center',
+                position: 'relative',
+                zIndex: 1,
+              }}
+            >
               <Button
                 variant="outlined"
                 startIcon={<EditIcon />}
                 onClick={handleOpenEditClass}
-                sx={{ borderRadius: '8px', textTransform: 'none', fontWeight: 650 }}
+                sx={{
+                  borderRadius: '8px',
+                  textTransform: 'none',
+                  fontWeight: 650,
+                  whiteSpace: 'nowrap',
+                }}
               >
                 Name ändern
               </Button>
@@ -541,7 +575,12 @@ export default function ClassDetailsPage() {
                   setDeleteClassError('');
                   setOpenDeleteClass(true);
                 }}
-                sx={{ borderRadius: '8px', textTransform: 'none', fontWeight: 650 }}
+                sx={{
+                  borderRadius: '8px',
+                  textTransform: 'none',
+                  fontWeight: 650,
+                  whiteSpace: 'nowrap',
+                }}
               >
                 Klasse auflösen
               </Button>
@@ -1630,7 +1669,24 @@ export default function ClassDetailsPage() {
                   fullWidth
                   variant="outlined"
                   value={editedClassName}
-                  onChange={(e) => setEditedClassName(e.target.value)}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    setEditedClassName(val);
+                    if (val.trim().length > 100) {
+                      setEditClassError(
+                        'Der Klassenname ist zu lang. Maximal 100 Zeichen sind erlaubt.'
+                      );
+                    } else if (editClassError) {
+                      setEditClassError('');
+                    }
+                  }}
+                  error={!!editClassError || editedClassName.trim().length > 100}
+                  helperText={
+                    editClassError ||
+                    (editedClassName.trim().length > 100
+                      ? 'Der Klassenname ist zu lang. Maximal 100 Zeichen sind erlaubt.'
+                      : `${editedClassName.length}/100 Zeichen`)
+                  }
                   autoFocus
                   sx={{ '& .MuiOutlinedInput-root': { borderRadius: '8px' } }}
                 />
@@ -1650,7 +1706,11 @@ export default function ClassDetailsPage() {
               <Button
                 type="submit"
                 variant="contained"
-                disabled={studentActionLoading || !editedClassName.trim()}
+                disabled={
+                  studentActionLoading ||
+                  !editedClassName.trim() ||
+                  editedClassName.trim().length > 100
+                }
                 sx={{
                   textTransform: 'none',
                   fontWeight: 700,

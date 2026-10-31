@@ -7,6 +7,8 @@ import {
   validateRubricOrTemplatePayload,
   formatMb,
   createPayloadErrorResponse,
+  MAX_CLASS_NAME_LENGTH,
+  validateClassName,
 } from '@/lib/payload-limits';
 import { POST as generatePost } from '@/app/api/exams/generate/route';
 import { POST as correctPost } from '@/app/api/correct/route';
@@ -401,6 +403,39 @@ describe('Kostenkontrolle: Grössenlimits für Unterrichtsmaterial und Scans', (
     });
   });
 
+  describe('validateClassName', () => {
+    it('akzeptiert normale Klassennamen problemlos', () => {
+      expect(validateClassName('3. Sek A').valid).toBe(true);
+      expect(validateClassName('Klasse 9c').valid).toBe(true);
+      expect(validateClassName('A'.repeat(MAX_CLASS_NAME_LENGTH)).valid).toBe(true);
+    });
+
+    it('lehnt leere oder nur aus Leerzeichen bestehende Namen ab', () => {
+      expect(validateClassName('').valid).toBe(false);
+      expect(validateClassName('   ').valid).toBe(false);
+      expect(validateClassName(null).valid).toBe(false);
+      expect(validateClassName(undefined).valid).toBe(false);
+      expect(validateClassName('').error).toBe('Klassenname ist erforderlich.');
+      expect(validateClassName('').status).toBe(400);
+    });
+
+    it('lehnt Klassennamen über dem Maximallimit von 100 Zeichen mit HTTP 400 ab', () => {
+      const longName = 'K'.repeat(101);
+      const res = validateClassName(longName);
+      expect(res.valid).toBe(false);
+      expect(res.status).toBe(400);
+      expect(res.error).toBe('Der Klassenname ist zu lang. Maximal 100 Zeichen sind erlaubt.');
+    });
+
+    it('lehnt 300-Zeichen-Klassennamen ab', () => {
+      const hugeName = 'A'.repeat(300);
+      const res = validateClassName(hugeName);
+      expect(res.valid).toBe(false);
+      expect(res.status).toBe(400);
+      expect(res.error).toBe('Der Klassenname ist zu lang. Maximal 100 Zeichen sind erlaubt.');
+    });
+  });
+
   describe('Schweizer Hochdeutsch (Kein "ß")', () => {
     it('enthält kein "ß" in den Fehlermeldungen und Hilfsfunktionen', () => {
       const testCases = [
@@ -411,6 +446,7 @@ describe('Kostenkontrolle: Grössenlimits für Unterrichtsmaterial und Scans', (
         validateRelayPages([{ size: 30 * 1024 * 1024 }]).error || '',
         validateRelayPages([{ size: 30 * 1024 * 1024 }, { size: 30 * 1024 * 1024 }]).error || '',
         validateRubricOrTemplatePayload('Y'.repeat(200_000)).error || '',
+        validateClassName('Z'.repeat(150)).error || '',
       ];
 
       for (const text of testCases) {
