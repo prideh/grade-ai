@@ -493,14 +493,18 @@ export async function POST(request: Request) {
           });
           invalidateLogsCache(payload.teacherId);
         } catch (err) {
-          const errMsg = err instanceof Error ? err.message : String(err);
+          const categorized = categorizeGeminiError(err);
           await db.submission.update({
             where: { id: existingSub.id },
-            data: { status: 'FAILED', errorMessage: errMsg },
+            data: { status: 'FAILED', errorMessage: categorized.userMessage },
           });
           await db.correctionLog.update({
             where: { id: logRecord.id },
-            data: { status: 'FAILED', errorMessage: errMsg, durationMs: Date.now() - startTime },
+            data: {
+              status: 'FAILED',
+              errorMessage: `[${categorized.category}] ${categorized.userMessage}`,
+              durationMs: Date.now() - startTime,
+            },
           });
           invalidateSubmissionCache(payload.teacherId, {
             submissionId: existingSub.id,

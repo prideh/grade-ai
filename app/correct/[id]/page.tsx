@@ -87,15 +87,18 @@ export default function CorrectWorkspace() {
   const [retryError, setRetryError] = useState<string>('');
 
   const handleRetry = async () => {
-    if (!id) return;
+    const submissionId = Array.isArray(id) ? id[0] : id;
+    if (!submissionId) return;
     setIsRetrying(true);
     setRetryError('');
     try {
-      const res = await fetch(`/api/submissions/${id}/replace`, {
+      const res = await fetch(`/api/submissions/${submissionId}/replace`, {
         method: 'POST',
       });
       if (res.ok) {
-        setData((prev) => (prev ? { ...prev, status: 'PROCESSING', errorMessage: null } : prev));
+        setData((prev) =>
+          prev ? { ...prev, status: 'PROCESSING' as const, errorMessage: null } : prev
+        );
       } else {
         const errJson = await res.json().catch(() => ({}));
         setRetryError(errJson.error || 'Fehler beim Neustart der Korrektur.');

@@ -18,7 +18,7 @@ describe('Gemini Timeout & Error Categorization (lib/gemini.ts)', () => {
     expect(result.category).toBe('TIMEOUT');
     expect(result.userMessage).toContain('Zeitüberschreitung');
     expect(result.userMessage).toContain('90 Sekunden');
-    expect(result.userMessage).not.toContain('ß');
+    expect(result.userMessage).not.toMatch(/\u00df/);
   });
 
   it('categorizes AbortError from client-side timeout signal as TIMEOUT', () => {
@@ -28,7 +28,7 @@ describe('Gemini Timeout & Error Categorization (lib/gemini.ts)', () => {
     const result = categorizeGeminiError(err);
     expect(result.category).toBe('TIMEOUT');
     expect(result.userMessage).toContain('Zeitüberschreitung');
-    expect(result.userMessage).not.toContain('ß');
+    expect(result.userMessage).not.toMatch(/\u00df/);
   });
 
   it('categorizes APIConnectionTimeoutError as TIMEOUT', () => {
@@ -38,7 +38,7 @@ describe('Gemini Timeout & Error Categorization (lib/gemini.ts)', () => {
     const result = categorizeGeminiError(err);
     expect(result.category).toBe('TIMEOUT');
     expect(result.userMessage).toContain('Zeitüberschreitung');
-    expect(result.userMessage).not.toContain('ß');
+    expect(result.userMessage).not.toMatch(/\u00df/);
   });
 
   it('categorizes rate limit (429 / quota exceeded) as RATE_LIMIT', () => {
@@ -48,7 +48,7 @@ describe('Gemini Timeout & Error Categorization (lib/gemini.ts)', () => {
     const result = categorizeGeminiError(err);
     expect(result.category).toBe('RATE_LIMIT');
     expect(result.userMessage).toContain('Anfragelimit');
-    expect(result.userMessage).not.toContain('ß');
+    expect(result.userMessage).not.toMatch(/\u00df/);
   });
 
   it('categorizes 500/503 upstream server errors as UPSTREAM_SERVICE', () => {
@@ -60,7 +60,7 @@ describe('Gemini Timeout & Error Categorization (lib/gemini.ts)', () => {
     const result = categorizeGeminiError(err);
     expect(result.category).toBe('UPSTREAM_SERVICE');
     expect(result.userMessage).toContain('überlastet');
-    expect(result.userMessage).not.toContain('ß');
+    expect(result.userMessage).not.toMatch(/\u00df/);
   });
 
   it('categorizes network disconnect (ECONNRESET / ENOTFOUND) as NETWORK', () => {
@@ -73,7 +73,7 @@ describe('Gemini Timeout & Error Categorization (lib/gemini.ts)', () => {
     const result = categorizeGeminiError(err);
     expect(result.category).toBe('NETWORK');
     expect(result.userMessage).toContain('Netzwerkverbindung');
-    expect(result.userMessage).not.toContain('ß');
+    expect(result.userMessage).not.toMatch(/\u00df/);
   });
 
   it('categorizes invalid/empty JSON response as INVALID_RESPONSE', () => {
@@ -82,7 +82,7 @@ describe('Gemini Timeout & Error Categorization (lib/gemini.ts)', () => {
     const result = categorizeGeminiError(err);
     expect(result.category).toBe('INVALID_RESPONSE');
     expect(result.userMessage).toContain('ungültig');
-    expect(result.userMessage).not.toContain('ß');
+    expect(result.userMessage).not.toMatch(/\u00df/);
   });
 
   it('categorizes generic unknown errors as UNKNOWN with Swiss German message', () => {
@@ -91,6 +91,6 @@ describe('Gemini Timeout & Error Categorization (lib/gemini.ts)', () => {
     const result = categorizeGeminiError(err);
     expect(result.category).toBe('UNKNOWN');
     expect(result.userMessage).toContain('unerwarteter Fehler');
-    expect(result.userMessage).not.toContain('ß');
+    expect(result.userMessage).not.toMatch(/\u00df/);
   });
 });
