@@ -1,6 +1,6 @@
 # prüefli
 
-prüefli is an advanced K-12 grading and correction platform built for teachers. It automates and optimizes the tedious process of grading paper-based exams using modern multimodal artificial intelligence. By leveraging handwriting recognition (OCR) and deep mathematical reasoning, the application automates grading while keeping the teacher in complete control.
+prüefli is a grading and correction platform for Swiss schools built for teachers. It automates and optimizes the tedious process of grading paper-based exams using modern multimodal artificial intelligence. By leveraging handwriting recognition (OCR) and deep mathematical reasoning, the application automates grading while keeping the teacher in complete control.
 
 ---
 
